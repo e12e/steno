@@ -120,7 +120,7 @@ def wait_for_ollama(timeout: float = 15.0) -> bool:
 
 
 @contextmanager
-def managed_ollama_server(log_fn) -> Iterator[None]:
+def managed_ollama_server(log_fn, env: dict | None = None) -> Iterator[None]:
     if fetch_ollama_models() is not None:
         log_fn("Ollama server kjører allerede.")
         yield
@@ -129,6 +129,7 @@ def managed_ollama_server(log_fn) -> Iterator[None]:
     log_fn("Starter ollama serve midlertidig...")
     proc = subprocess.Popen(
         ["ollama", "serve"],
+        env=env,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
@@ -269,18 +270,39 @@ def merge_and_build_html(json_path: Path, html_path: Path, title: str) -> str:
     {"".join(html_items)}
   </main>
   <script>
+    const STORAGE_KEY = "mote_spk_" + document.title;
     function filterTurns() {{
       const q = document.getElementById('filter').value.toLowerCase();
       document.querySelectorAll('.turn').forEach(el => {{
         el.style.display = el.innerText.toLowerCase().includes(q) ? '' : 'none';
       }});
     }}
-    function renameSpeaker(orig, newName) {{
+    function renameSpeaker(orig, newName, skipSave) {{
       const label = newName.trim() || orig;
       document.querySelectorAll(`[data-spk-label="${{orig}}"]`).forEach(el => {{
         el.textContent = label;
       }});
+      if (!skipSave) {{
+        try {{
+          const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{{}}");
+          saved[orig] = newName;
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
+        }} catch (e) {{}}
+      }}
+      filterTurns();
     }}
+    window.addEventListener('DOMContentLoaded', () => {{
+      try {{
+        const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{{}}");
+        document.querySelectorAll('.spk-edit input').forEach(inp => {{
+          const orig = inp.dataset.orig;
+          if (saved[orig]) {{
+            inp.value = saved[orig];
+            renameSpeaker(orig, saved[orig], true);
+          }}
+        }});
+      }} catch (e) {{}}
+    }});
   </script>
 </body>
 </html>"""
@@ -288,8 +310,10 @@ def merge_and_build_html(json_path: Path, html_path: Path, title: str) -> str:
     return "\n".join(llm_lines)
 
 
-def generate_notes_via_api(transcript: str, model: str, log_fn) -> str:
-    """Use Ollama HTTP /api/chat directly to avoid ANSI codes, thinking leaks, and small context windows."""
+def generate_notes_via_api(
+    transcript: str, model: str, progress_fn=None
+) -> str:
+    """Use Ollama HTTP /api/chat directly with streaming to avoid ANSI codes, thinking leaks, and UI freezes."""
     system_prompt = (
         "Du er en profesjonell norsk møtesekretær. Du skriver kun selve møtereferatet i ren Markdown. "
         "IKKE inkluder egen tankeprosess, introduksjoner eller <think>-blokker. "
@@ -318,7 +342,7 @@ def generate_notes_via_api(transcript: str, model: str, log_fn) -> str:
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
-        "stream": False,
+        "stream": True,
         "think": False,  # Tells Ollama >= 0.7 not to mix thinking tokens into content
         "options": {
             "num_ctx": 32768,      # Ensure long meetings aren't truncated
@@ -332,10 +356,26 @@ def generate_notes_via_api(transcript: str, model: str, log_fn) -> str:
         headers={"Content-Type": "application/json"},
         method="POST",
     )
+    chunks: list[str] = []
+    token_count = 0
+    est_tokens = max(400, min(1800, int(len(transcript.split()) * 0.35)))
+
     with urllib.request.urlopen(req, timeout=900) as resp:
-        body = json.loads(resp.read().decode("utf-8", errors="replace"))
-        content = body.get("message", {}).get("content", "")
-        return clean_llm_output(content)
+        for raw_line in resp:
+            if not raw_line.strip():
+                continue
+            body = json.loads(raw_line.decode("utf-8", errors="replace"))
+            piece = body.get("message", {}).get("content", "")
+            if piece:
+                chunks.append(piece)
+                token_count += 1
+                if progress_fn and token_count % 5 == 0:
+                    pct = min(99, int(84 + min(15.0, (token_count / est_tokens) * 15.0)))
+                    progress_fn(pct, f"Skriver møtereferat ({token_count} tokens)...")
+            if body.get("done"):
+                break
+
+    return clean_llm_output("".join(chunks))
 
 
 class MoteApi:
@@ -488,6 +528,7 @@ class MoteApi:
                 **os.environ,
                 "PYTHONWARNINGS": "ignore::UserWarning:pyannote.audio.core.io",
                 "PYTHONIOENCODING": "utf-8",
+                "PYTHONUNBUFFERED": "1",
                 "LC_ALL": "en_US.UTF-8",
             }
             env["PATH"] = f"{Path.home() / '.local/bin'}:/opt/homebrew/bin:/usr/local/bin:{env.get('PATH', '')}"
@@ -505,6 +546,7 @@ class MoteApi:
                     "--diarize",
                     "--compute_type", "int8",
                     "--output_format", "json",
+                    "--print_progress", "True",
                 ]
                 if hf_token.strip():
                     cmd.extend(["--hf_token", hf_token.strip()])
@@ -521,19 +563,36 @@ class MoteApi:
                     text=True,
                     encoding="utf-8",
                     errors="replace",
+                    bufsize=1,
                 )
                 assert proc.stdout is not None
+                phase = 0
+                last_pct = 0.0
                 for line in proc.stdout:
                     clean = sanitize_text(line)
                     if clean:
                         self._log(clean)
-                        if "%" in clean:
-                            match = re.search(r"(\d+)%", clean)
-                            if match:
-                                p_pct = int(match.group(1))
-                                self._set_progress(int(15 + (p_pct * 0.45)), f"Transkriberer: {p_pct}%")
+                        if "align" in clean.lower():
+                            phase = max(phase, 1)
                         elif "diariz" in clean.lower() or "pyannote" in clean.lower():
-                            self._set_progress(65, "Identifiserer talere (Pyannote)...")
+                            phase = max(phase, 2)
+                            self._set_progress(60, "Identifiserer talere (Pyannote)...")
+
+                        match = re.search(r"Progress:\s*([0-9]+(?:\.[0-9]+)?)%", clean) or re.search(r"(\d+)%", clean)
+                        if match:
+                            p_pct = float(match.group(1))
+                            if p_pct < last_pct - 20.0:
+                                phase = min(2, phase + 1)
+                            last_pct = p_pct
+                            if phase == 0:
+                                mapped = int(15 + (p_pct * 0.35))
+                                self._set_progress(mapped, f"Transkriberer tale: {p_pct:.0f}%")
+                            elif phase == 1:
+                                mapped = int(50 + (p_pct * 0.10))
+                                self._set_progress(mapped, f"Tidsjusterer ord: {p_pct:.0f}%")
+                            else:
+                                mapped = int(60 + (p_pct * 0.12))
+                                self._set_progress(mapped, f"Identifiserer talere: {p_pct:.0f}%")
 
                 if proc.wait() != 0:
                     self._log("FEIL: WhisperX feilet.")
@@ -551,7 +610,7 @@ class MoteApi:
 
             self._log(f"==> Rik HTML-transkripsjon lagret: {html_path}")
 
-            with managed_ollama_server(self._log):
+            with managed_ollama_server(self._log, env=env):
                 installed = fetch_ollama_models() or []
                 if ollama_model not in installed and f"{ollama_model}:latest" not in installed:
                     self._set_progress(76, f"Laster ned {ollama_model}...")
@@ -561,7 +620,9 @@ class MoteApi:
                 self._set_progress(84, f"Analyserer møtet via {ollama_model} (32k kontekst)...")
                 self._log(f"==> [2/2] Genererer møtereferat via Ollama REST API ({ollama_model})...")
 
-                notes_md = generate_notes_via_api(clean_transcript, ollama_model, self._log)
+                notes_md = generate_notes_via_api(
+                    clean_transcript, ollama_model, progress_fn=self._set_progress
+                )
                 notes_path.write_text(notes_md + "\n", encoding="utf-8")
 
             self._set_progress(100, "Fullført!")
