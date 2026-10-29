@@ -1,0 +1,62 @@
+[
+  {
+    "speaker": "Kari Nordmann",
+    "pause_after_ms": 500,
+    "text": "Hei alle sammen, og velkommen til statusmøte for Sikkerhetsplattform to tusen og tjueseks. Mitt navn er Kari Nordmann, og jeg er prosjektleder. La oss ta en kort runde rundt bordet så alle får sagt hvem de er."
+  },
+  {
+    "speaker": "Ola Hansen",
+    "pause_after_ms": 400,
+    "text": "Hei, jeg heter Ola Hansen, og jeg jobber som systemutvikler med ansvar for backend og API-migrering."
+  },
+  {
+    "speaker": "Ingrid Berg",
+    "pause_after_ms": 400,
+    "text": "Og jeg heter Ingrid Berg. Jeg er sikkerhetsarkitekt på prosjektet og følger opp sikkerhetsrevisjonen."
+  },
+  {
+    "speaker": "Per Johansen",
+    "pause_after_ms": 550,
+    "text": "Hei, mitt navn er Per Johansen, og jeg er økonomiansvarlig for plattformbudsjettet i fjerde kvartal."
+  },
+  {
+    "speaker": "Kari Nordmann",
+    "pause_after_ms": 300,
+    "text": "Takk skal dere ha. Første punkt på agendaen er status på API-migrering. Ola, hvordan ligger vi an der?"
+  },
+  {
+    "speaker": "Ola Hansen",
+    "pause_after_ms": 200,
+    "text": "Vi har fullført overgangen til ny OAuth2-innlogging i testmiljøet denne uken. Alle endepunkter svarer under førti millisekunder, men vi trenger to dager til på feilhåndtering."
+  },
+  {
+    "speaker": "Ingrid Berg",
+    "pause_after_ms": 250,
+    "text": "Det høres bra ut, Ola. Under sikkerhetstesten i går fant vi at tofaktorautentisering må være påkrevd for alle administratorbrukere før vi går i produksjon."
+  },
+  {
+    "speaker": "Ola Hansen",
+    "pause_after_ms": 450,
+    "text": "Den er grei, Ingrid. Jeg legger inn tvungen tofaktorautentisering i konfigurasjonen innen fredag."
+  },
+  {
+    "speaker": "Kari Nordmann",
+    "pause_after_ms": 350,
+    "text": "Flott, da vedtar vi at tofaktorautentisering er obligatorisk før lansering. Per, hvordan ser budsjettet og lisenskostnadene ut for fjerde kvartal?"
+  },
+  {
+    "speaker": "Per Johansen",
+    "pause_after_ms": 450,
+    "text": "Vi ligger femten prosent under budsjett så langt i kvartalet fordi vi samlet skyserverne i Norge. Men vi må fornye sertifikatlisensen innen femtende november, som koster førti tusen kroner."
+  },
+  {
+    "speaker": "Ingrid Berg",
+    "pause_after_ms": 350,
+    "text": "Jeg sender over oppdatert sikkerhetsrapport og kravspesifikasjon til både Kari og Per innen onsdag."
+  },
+  {
+    "speaker": "Kari Nordmann",
+    "pause_after_ms": 300,
+    "text": "Utmerket. Da oppsummerer jeg aksjonspunktene: Ola ferdigstiller OAuth2 og tofaktor innen fredag, Ingrid leverer sikkerhetsrapporten innen onsdag, og Per bestiller sertifikatlisensen før femtende november. Takk for et effektivt møte!"
+  }
+]

@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Transcribe and diarize meetings with WhisperX (Rich HTML) and summarize via Ollama REST API."""
 
+from __future__ import annotations
+
 import argparse
 from contextlib import contextmanager
 import getpass

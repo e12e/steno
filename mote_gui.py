@@ -1,35 +1,274 @@
-#!/usr/bin/env -S uv run --script
+#!/bin/sh
 # /// script
 # requires-python = ">=3.11"
 # dependencies = [
 #   "pywebview>=5.3",
 #   "markdown>=3.5",
+#   "static-ffmpeg>=2.7",
 # ]
 # ///
-"""Native macOS GUI for WhisperX + Ollama meeting transcription with Rich HTML & REST API."""
+"true" '''\'
+goto :windows_boot >/dev/null 2>&1
+export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$HOME/.local/share/mise/shims:/opt/homebrew/bin:/usr/local/bin:$PATH"
+if ! command -v uv >/dev/null 2>&1; then
+  echo "Installerer uv (frittstaaende Python-motor)..."
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+fi
+exec uv run --python 3.12 --script "$0" "$@"
+:windows_boot
+@echo off
+cls
+where uv >nul 2>nul || (
+  echo Installerer uv ^(frittstaaende Python-motor^)...
+  powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://astral.sh/uv/install.ps1 | iex"
+)
+set "PATH=%USERPROFILE%\.local\bin;%LOCALAPPDATA%\Microsoft\WinGet\Links;%PATH%"
+uv run --python 3.12 --script "%~f0" %*
+exit /b %ERRORLEVEL%
+'''
+# Cross-platform single-file GUI for WhisperX + Ollama meeting transcription.
+from __future__ import annotations
 
 from contextlib import contextmanager
 import html
 import json
 import os
 from pathlib import Path
+import platform
 import re
+import shutil
+import stat
 import subprocess
+import sys
+import tarfile
 import tempfile
 import threading
 import time
 import unicodedata
 from typing import Iterator
 import urllib.request
-import markdown
-import webview
-from webview.dom import DOMEventHandler
+import zipfile
+
+
+def _self_bootstrap_if_needed() -> None:
+    """If launched via raw 'python mote_gui.py' without uv, auto-install uv and re-exec."""
+    try:
+        import markdown  # noqa: F401
+        import static_ffmpeg  # noqa: F401
+        import webview  # noqa: F401
+        return
+    except ModuleNotFoundError:
+        pass
+
+    print("Forbereder frittstående Python-miljø via uv...")
+    search_paths = [
+        str(Path.home() / ".local" / "bin"),
+        str(Path.home() / ".cargo" / "bin"),
+        str(Path.home() / ".local" / "share" / "mise" / "shims"),
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+        os.environ.get("PATH", ""),
+    ]
+    os.environ["PATH"] = os.pathsep.join(p for p in search_paths if p)
+    uv_bin = shutil.which("uv")
+
+    if not uv_bin:
+        print("Laster ned uv...")
+        if os.name == "nt":
+            subprocess.run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-Command",
+                    "irm https://astral.sh/uv/install.ps1 | iex",
+                ],
+                check=True,
+            )
+        else:
+            subprocess.run(
+                "curl -LsSf https://astral.sh/uv/install.sh | sh",
+                shell=True,
+                check=True,
+            )
+        os.environ["PATH"] = f"{Path.home() / '.local' / 'bin'}{os.pathsep}{os.environ['PATH']}"
+        uv_bin = shutil.which("uv")
+
+    if not uv_bin:
+        raise RuntimeError("Klarte ikke å finne eller installere 'uv'.")
+
+    cmd = [uv_bin, "run", "--python", "3.12", "--script", str(Path(__file__).resolve()), *sys.argv[1:]]
+    raise SystemExit(subprocess.call(cmd))
+
+
+_self_bootstrap_if_needed()
+
+import markdown  # noqa: E402
+import static_ffmpeg  # noqa: E402
+import webview  # noqa: E402
+from webview import FileDialog  # noqa: E402
+from webview.dom import DOMEventHandler  # noqa: E402
 
 OLLAMA_BASE = "http://127.0.0.1:11434"
 OLLAMA_TAGS_URL = f"{OLLAMA_BASE}/api/tags"
 OLLAMA_CHAT_URL = f"{OLLAMA_BASE}/api/chat"
 HF_CACHE_DIR = Path.home() / ".cache" / "huggingface"
 HF_TOKEN_FILE = HF_CACHE_DIR / "token"
+MOTE_BIN_DIR = Path.home() / ".cache" / "mote" / "bin"
+
+
+def build_runtime_env() -> dict[str, str]:
+    """Build cross-platform environment dictionary with tool directories in PATH."""
+    env = {
+        **os.environ,
+        "PYTHONWARNINGS": "ignore::UserWarning:pyannote.audio.core.io",
+        "PYTHONIOENCODING": "utf-8",
+        "PYTHONUNBUFFERED": "1",
+    }
+    if os.name != "nt":
+        env.setdefault("LC_ALL", "en_US.UTF-8")
+
+    extra_dirs = [
+        str(MOTE_BIN_DIR),
+        str(Path.home() / ".local" / "share" / "uv" / "tools" / "whisperx" / "bin"),
+        str(Path.home() / ".local" / "bin"),
+        str(Path.home() / ".cargo" / "bin"),
+        str(Path.home() / ".local" / "share" / "mise" / "shims"),
+    ]
+    if sys.platform == "darwin":
+        extra_dirs.extend([
+            "/opt/homebrew/bin",
+            "/usr/local/bin",
+            "/Applications/Ollama.app/Contents/Resources",
+        ])
+    elif os.name == "nt":
+        local_app = os.environ.get("LOCALAPPDATA", "")
+        if local_app:
+            extra_dirs.append(str(Path(local_app) / "Programs" / "Ollama"))
+            extra_dirs.append(str(Path(local_app) / "Microsoft" / "WinGet" / "Links"))
+
+    current_path = env.get("PATH", "")
+    env["PATH"] = os.pathsep.join([*extra_dirs, current_path])
+    return env
+
+
+def ensure_ffmpeg(env: dict[str, str], log_fn) -> None:
+    """Ensure ffmpeg and ffprobe are available on PATH, using static-ffmpeg if missing."""
+    if shutil.which("ffmpeg", path=env.get("PATH")):
+        return
+    log_fn("==> Laster ned innebygd FFmpeg for lydbehandling...")
+    static_ffmpeg.add_paths(weak=True)
+    env["PATH"] = os.environ.get("PATH", "") + os.pathsep + env.get("PATH", "")
+
+
+def ensure_whisperx(env: dict[str, str], log_fn, progress_fn) -> str:
+    """Ensure whisperx CLI is installed; auto-install via uv tool under Python 3.12 if missing."""
+    wx = shutil.which("whisperx", path=env.get("PATH"))
+    if wx:
+        return wx
+
+    uv_bin = shutil.which("uv", path=env.get("PATH"))
+    if not uv_bin:
+        raise RuntimeError("Fant ikke 'uv' for automatisk installasjon av WhisperX.")
+
+    progress_fn(8, "Installerer WhisperX automatisk (kun første gang, tar 1–3 min)...")
+    log_fn("==> WhisperX er ikke installert ennå. Installerer automatisk via 'uv tool install --python 3.12 whisperx'...")
+    proc = subprocess.Popen(
+        [uv_bin, "tool", "install", "--python", "3.12", "whisperx"],
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    assert proc.stdout is not None
+    for line in proc.stdout:
+        clean = line.strip()
+        if clean:
+            log_fn(f"    [uv] {clean}")
+    if proc.wait() != 0:
+        raise RuntimeError("Automatisk installasjon av WhisperX feilet.")
+
+    # Query uv tool bin dir in case it differs from ~/.local/bin
+    try:
+        bin_dir = subprocess.check_output(
+            [uv_bin, "tool", "dir", "--bin"], env=env, text=True
+        ).strip()
+        if bin_dir:
+            env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
+    except Exception:
+        pass
+
+    wx = shutil.which("whisperx", path=env.get("PATH"))
+    if not wx:
+        raise RuntimeError("WhisperX ble installert, men ble ikke funnet i PATH.")
+    return wx
+
+
+def ensure_ollama_binary(env: dict[str, str], log_fn, progress_fn) -> str:
+    """Ensure ollama binary is available; download standalone binary into ~/.cache/mote/bin if missing."""
+    ollama_bin = shutil.which("ollama", path=env.get("PATH"))
+    if ollama_bin:
+        return ollama_bin
+
+    MOTE_BIN_DIR.mkdir(parents=True, exist_ok=True)
+    progress_fn(73, "Laster ned frittstående Ollama-motor (kun første gang)...")
+    log_fn("==> Fant ikke Ollama på maskinen. Laster ned frittstående Ollama-binærfil...")
+
+    if sys.platform == "darwin":
+        archive_path = MOTE_BIN_DIR / "ollama-darwin.tgz"
+        urllib.request.urlretrieve("https://ollama.com/download/ollama-darwin.tgz", archive_path)
+        with tarfile.open(archive_path, "r:gz") as tar:
+            for member in tar.getmembers():
+                if Path(member.name).name == "ollama" and member.isfile():
+                    member.name = "ollama"
+                    tar.extract(member, MOTE_BIN_DIR)
+                    break
+        archive_path.unlink(missing_ok=True)
+        target = MOTE_BIN_DIR / "ollama"
+        if target.is_file():
+            target.chmod(target.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    elif os.name == "nt":
+        # Prefer winget if available, otherwise download zip
+        winget = shutil.which("winget")
+        if winget:
+            subprocess.run(
+                [
+                    winget, "install", "--id", "Ollama.Ollama", "-e",
+                    "--silent", "--accept-package-agreements", "--accept-source-agreements",
+                ],
+                check=False,
+            )
+        ollama_bin = shutil.which("ollama", path=env.get("PATH"))
+        if not ollama_bin:
+            zip_path = MOTE_BIN_DIR / "ollama-windows-amd64.zip"
+            urllib.request.urlretrieve(
+                "https://ollama.com/download/ollama-windows-amd64.zip", zip_path
+            )
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                zf.extractall(MOTE_BIN_DIR)
+            zip_path.unlink(missing_ok=True)
+    else:
+        arch = "arm64" if platform.machine().lower() in ("aarch64", "arm64") else "amd64"
+        archive_path = MOTE_BIN_DIR / f"ollama-linux-{arch}.tgz"
+        urllib.request.urlretrieve(
+            f"https://ollama.com/download/ollama-linux-{arch}.tgz", archive_path
+        )
+        with tarfile.open(archive_path, "r:gz") as tar:
+            tar.extractall(MOTE_BIN_DIR)
+        archive_path.unlink(missing_ok=True)
+        nested = MOTE_BIN_DIR / "bin" / "ollama"
+        if nested.is_file() and not (MOTE_BIN_DIR / "ollama").exists():
+            shutil.move(str(nested), str(MOTE_BIN_DIR / "ollama"))
+
+    env["PATH"] = f"{MOTE_BIN_DIR}{os.pathsep}{env.get('PATH', '')}"
+    ollama_bin = shutil.which("ollama", path=env.get("PATH"))
+    if not ollama_bin:
+        raise RuntimeError("Klarte ikke å installere Ollama automatisk. Installer fra https://ollama.com")
+    return ollama_bin
 
 
 def is_diarization_cached() -> bool:
@@ -55,7 +294,8 @@ def save_hf_token(token: str) -> None:
     if token:
         HF_CACHE_DIR.mkdir(parents=True, exist_ok=True)
         HF_TOKEN_FILE.write_text(token, encoding="utf-8")
-        HF_TOKEN_FILE.chmod(0o600)
+        if os.name != "nt":
+            HF_TOKEN_FILE.chmod(0o600)
 
 
 def unique_filename(directory: Path, stem: str, suffix: str) -> str:
@@ -118,15 +358,19 @@ def wait_for_ollama(timeout: float = 15.0) -> bool:
 
 
 @contextmanager
-def managed_ollama_server(log_fn, env: dict | None = None) -> Iterator[None]:
+def managed_ollama_server(
+    log_fn, progress_fn, env: dict[str, str]
+) -> Iterator[str]:
     if fetch_ollama_models() is not None:
         log_fn("Ollama server kjører allerede.")
-        yield
+        ollama_bin = shutil.which("ollama", path=env.get("PATH")) or "ollama"
+        yield ollama_bin
         return
 
+    ollama_bin = ensure_ollama_binary(env, log_fn, progress_fn)
     log_fn("Starter ollama serve midlertidig...")
     proc = subprocess.Popen(
-        ["ollama", "serve"],
+        [ollama_bin, "serve"],
         env=env,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -134,7 +378,7 @@ def managed_ollama_server(log_fn, env: dict | None = None) -> Iterator[None]:
     try:
         if not wait_for_ollama():
             raise RuntimeError("Klarte ikke å starte ollama serve.")
-        yield
+        yield ollama_bin
     finally:
         if proc.poll() is None:
             log_fn(f"Stopper midlertidig ollama serve (PID {proc.pid})...")
@@ -158,7 +402,6 @@ def extract_turns_from_whisperx(json_path: Path) -> list[dict]:
         seg_speaker = seg.get("speaker") or last_speaker
         words = seg.get("words") or []
 
-        # If word-level diarization is present, split whenever a word changes speaker
         if words and any(w.get("speaker") for w in words):
             for w in words:
                 w_text = sanitize_text(str(w.get("word", "")))
@@ -182,7 +425,6 @@ def extract_turns_from_whisperx(json_path: Path) -> list[dict]:
                 {"speaker": seg_speaker, "start": start, "end": end, "text": text}
             )
 
-    # Merge consecutive items from the SAME speaker if gap is under 2.0 seconds
     merged: list[dict] = []
     for item in atomic_items:
         spk = item["speaker"]
@@ -209,15 +451,12 @@ def infer_speaker_names_via_api(
     if not unique_speakers:
         return {}
 
-    # Provide the first ~120 turns plus any turn containing introduction keywords
     intro_keywords = ("heter", "jeg er", "mitt navn", "fra ", "representerer", "leder", "velkommen")
     sample_lines: list[str] = []
-    seen_indices: set[int] = set()
 
     for idx, t in enumerate(turns):
         low = t["text"].lower()
         if idx < 100 or any(k in low for k in intro_keywords):
-            seen_indices.add(idx)
             t_str = f"{format_seconds(t['start'])}–{format_seconds(t['end'])}"
             sample_lines.append(f"[{t_str}] {t['speaker']}: {t['text']}")
 
@@ -584,9 +823,9 @@ def generate_notes_via_api(
             if piece:
                 chunks.append(piece)
                 token_count += 1
-                if progress_fn and token_count % 5 == 0:
+                if progress_fn and (token_count == 1 or token_count % 4 == 0):
                     pct = min(98, int(84 + min(14.0, (token_count / est_tokens) * 14.0)))
-                    progress_fn(pct, f"Skriver møtereferat ({token_count} tokens)...")
+                    progress_fn(pct, f"[4/4] Skriver møtereferat ({token_count} tokens)...")
             if body.get("done"):
                 break
 
@@ -621,7 +860,7 @@ class MoteApi:
             return None
         file_types = ("Audio Files (*.wav;*.m4a;*.mp3;*.ogg;*.opus;*.flac)", "All files (*.*)")
         result = self.window.create_file_dialog(
-            webview.OPEN_DIALOG, allow_multiple=False, file_types=file_types
+            FileDialog.OPEN, allow_multiple=False, file_types=file_types
         )
         if result and len(result) > 0:
             p = Path(result[0])
@@ -631,7 +870,7 @@ class MoteApi:
     def pick_output_dir(self, current_audio_path: str) -> dict | None:
         if not self.window:
             return None
-        result = self.window.create_file_dialog(webview.FOLDER_DIALOG)
+        result = self.window.create_file_dialog(FileDialog.FOLDER)
         if result and len(result) > 0:
             folder = str(result[0])
             if current_audio_path:
@@ -648,12 +887,18 @@ class MoteApi:
             if name:
                 candidate = out_dir / Path(name).name
                 if candidate.exists():
-                    conflicts.append(str(candidate))
+                    conflicts.append(candidate.name)
         return conflicts
 
     def reveal_in_finder(self, folder_path: str) -> None:
-        if folder_path and Path(folder_path).is_dir():
+        if not folder_path or not Path(folder_path).is_dir():
+            return
+        if sys.platform == "darwin":
             subprocess.Popen(["open", folder_path])
+        elif os.name == "nt":
+            os.startfile(folder_path)  # type: ignore[attr-defined]
+        else:
+            subprocess.Popen(["xdg-open", folder_path])
 
     def start_job(
         self,
@@ -751,21 +996,16 @@ class MoteApi:
                 self._set_progress(0, "Mangler HF-token")
                 return
 
-            env = {
-                **os.environ,
-                "PYTHONWARNINGS": "ignore::UserWarning:pyannote.audio.core.io",
-                "PYTHONIOENCODING": "utf-8",
-                "PYTHONUNBUFFERED": "1",
-                "LC_ALL": "en_US.UTF-8",
-            }
-            env["PATH"] = f"{Path.home() / '.local/bin'}:/opt/homebrew/bin:/usr/local/bin:{env.get('PATH', '')}"
+            env = build_runtime_env()
+            ensure_ffmpeg(env, self._log)
+            whisperx_bin = ensure_whisperx(env, self._log, self._set_progress)
 
-            self._set_progress(15, f"Kjører WhisperX ({whisper_model})...")
-            self._log(f"==> [1/3] Kjører WhisperX ({whisper_model}) på {audio_path.name}...")
+            self._set_progress(12, f"[1/4] Laster inn {whisper_model}...")
+            self._log(f"==> [1/4] Kjører WhisperX ({whisper_model}) på {audio_path.name}...")
 
             with tempfile.TemporaryDirectory(prefix="mote_wx_") as tmp_dir:
                 cmd = [
-                    "whisperx",
+                    whisperx_bin,
                     str(audio_path),
                     "--output_dir", tmp_dir,
                     "--model", whisper_model,
@@ -795,31 +1035,75 @@ class MoteApi:
                 assert proc.stdout is not None
                 phase = 0
                 last_pct = 0.0
-                for line in proc.stdout:
-                    clean = sanitize_text(line)
-                    if clean:
-                        self._log(clean)
-                        if "align" in clean.lower():
-                            phase = max(phase, 1)
-                        elif "diariz" in clean.lower() or "pyannote" in clean.lower():
-                            phase = max(phase, 2)
-                            self._set_progress(60, "Identifiserer talere (Pyannote)...")
+                diarization_start: float | None = None
+                stop_heartbeat = threading.Event()
 
-                        match = re.search(r"Progress:\s*([0-9]+(?:\.[0-9]+)?)%", clean) or re.search(r"(\d+)%", clean)
+                def _diarization_heartbeat() -> None:
+                    while not stop_heartbeat.wait(1.0):
+                        if phase == 2 and diarization_start is not None:
+                            elapsed = int(time.time() - diarization_start)
+                            mm, ss = divmod(elapsed, 60)
+                            # Kryp sakte fra 60% opp mot 72% mens Pyannote jobber stille på CPU
+                            creep = min(12, elapsed // 15)
+                            self._set_progress(
+                                60 + creep,
+                                f"[3/4] Identifiserer talere med Pyannote ({mm:02d}:{ss:02d})...",
+                            )
+
+                hb_thread = threading.Thread(target=_diarization_heartbeat, daemon=True)
+                hb_thread.start()
+
+                try:
+                    for line in proc.stdout:
+                        clean = sanitize_text(line)
+                        if not clean:
+                            continue
+                        self._log(clean)
+                        low = clean.lower()
+
+                        if "performing alignment" in low:
+                            phase = 1
+                            last_pct = 0.0
+                            self._set_progress(50, "[2/4] Tidsjusterer ord (Alignment): 0%")
+                            continue
+                        if "performing diarization" in low or "assigning speaker" in low:
+                            if phase < 2:
+                                phase = 2
+                                diarization_start = time.time()
+                                self._log(
+                                    "Pyannote analyserer stemmer i bakgrunnen (tar vanligvis 2–6 min uten logg-utskrift)..."
+                                )
+                            last_pct = 0.0
+                            self._set_progress(60, "[3/4] Identifiserer talere med Pyannote (00:00)...")
+                            continue
+
+                        match = re.search(r"Progress:\s*([0-9]+(?:\.[0-9]+)?)%", clean)
                         if match:
                             p_pct = float(match.group(1))
-                            if p_pct < last_pct - 20.0:
+                            if p_pct < last_pct - 30.0 and last_pct > 50.0:
                                 phase = min(2, phase + 1)
                             last_pct = p_pct
                             if phase == 0:
                                 mapped = int(15 + (p_pct * 0.35))
-                                self._set_progress(mapped, f"Transkriberer tale: {p_pct:.0f}%")
+                                self._set_progress(mapped, f"[1/4] Transkriberer tale: {p_pct:.0f}%")
                             elif phase == 1:
                                 mapped = int(50 + (p_pct * 0.10))
-                                self._set_progress(mapped, f"Tidsjusterer ord: {p_pct:.0f}%")
+                                self._set_progress(mapped, f"[2/4] Tidsjusterer ord (Alignment): {p_pct:.0f}%")
+                                if p_pct >= 99.9:
+                                    phase = 2
+                                    diarization_start = time.time()
+                                    self._log(
+                                        "Ord-tidsjustering ferdig. Starter Pyannote taler-identifisering "
+                                        "(jobber stille på CPU i 2–6 minutter)..."
+                                    )
+                                    self._set_progress(
+                                        60, "[3/4] Identifiserer talere med Pyannote (00:00)..."
+                                    )
                             else:
-                                mapped = int(60 + (p_pct * 0.10))
-                                self._set_progress(mapped, f"Identifiserer talere: {p_pct:.0f}%")
+                                mapped = int(60 + (p_pct * 0.12))
+                                self._set_progress(mapped, f"[3/4] Identifiserer talere (Diarization): {p_pct:.0f}%")
+                finally:
+                    stop_heartbeat.set()
 
                 if proc.wait() != 0:
                     self._log("FEIL: WhisperX feilet.")
@@ -832,17 +1116,17 @@ class MoteApi:
                     self._set_progress(0, "JSON mangler")
                     return
 
-                self._set_progress(72, "Ekstraherer ord-baserte talerskifter...")
+                self._set_progress(73, "[3/4] Ekstraherer ord-baserte talerskifter...")
                 turns = extract_turns_from_whisperx(raw_json)
 
-            with managed_ollama_server(self._log, env=env):
+            with managed_ollama_server(self._log, self._set_progress, env=env) as ollama_bin:
                 installed = fetch_ollama_models() or []
                 if ollama_model not in installed and f"{ollama_model}:latest" not in installed:
-                    self._set_progress(75, f"Laster ned {ollama_model}...")
+                    self._set_progress(75, f"[4/4] Laster ned {ollama_model}...")
                     self._log(f"==> Laster ned '{ollama_model}'...")
-                    subprocess.run(["ollama", "pull", ollama_model], env=env, check=True)
+                    subprocess.run([ollama_bin, "pull", ollama_model], env=env, check=True)
 
-                self._set_progress(78, "Gjenkjenner deltakernavn fra introduksjoner...")
+                self._set_progress(78, "[4/4] Gjenkjenner deltakernavn fra introduksjoner...")
                 self._log("==> [2/3] Analyserer introduksjoner for å knytte taler-ID til navn...")
                 speaker_map = infer_speaker_names_via_api(
                     turns, ollama_model, speaker_names_hint, self._log
@@ -856,7 +1140,7 @@ class MoteApi:
                 )
                 self._log(f"==> Rik HTML-transkripsjon lagret: {html_path}")
 
-                self._set_progress(84, f"Genererer møtereferat via {ollama_model} (32k kontekst)...")
+                self._set_progress(84, f"[4/4] Analyserer transkripsjon med {ollama_model}...")
                 self._log(f"==> [3/3] Genererer møtereferat via Ollama REST API ({ollama_model})...")
 
                 notes_md = generate_notes_via_api(
@@ -892,7 +1176,7 @@ HTML = """<!DOCTYPE html>
 <style>
   :root {
     color-scheme: light dark;
-    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
   }
   body {
     margin: 0; padding: 14px;
@@ -941,7 +1225,7 @@ HTML = """<!DOCTYPE html>
 
   #log {
     flex: 1; background: rgba(128,128,128,0.1); border-radius: 8px;
-    padding: 9px; font-family: "SF Mono", Menlo, monospace; font-size: 11px;
+    padding: 9px; font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 11px;
     overflow-y: auto; white-space: pre-wrap; user-select: text;
     border: 1px solid rgba(128,128,128,0.25);
   }
@@ -961,7 +1245,7 @@ HTML = """<!DOCTYPE html>
     <label>Mappe:</label>
     <input type="text" id="out_dir" placeholder="Velg mappe..." oninput="validateNames()">
     <button onclick="browseFolder()">Velg...</button>
-    <button onclick="openFinder()" title="Vis i Finder">Åpne</button>
+    <button onclick="openFinder()" title="Vis i filutforsker">Åpne</button>
   </div>
 
   <div class="row">
@@ -1127,9 +1411,9 @@ HTML = """<!DOCTYPE html>
     }
 
     const conflicts = await pywebview.api.check_conflicts(outDir, htmlName, notesName, notesHtmlName);
-    const hasHtmlConflict = conflicts.some(p => p.endsWith("/" + htmlName));
-    const hasNotesConflict = conflicts.some(p => p.endsWith("/" + notesName));
-    const hasNotesHtmlConflict = conflicts.some(p => p.endsWith("/" + notesHtmlName));
+    const hasHtmlConflict = conflicts.includes(htmlName);
+    const hasNotesConflict = conflicts.includes(notesName);
+    const hasNotesHtmlConflict = conflicts.includes(notesHtmlName);
 
     htmlInput.classList.toggle('conflict', hasHtmlConflict);
     notesInput.classList.toggle('conflict', hasNotesConflict);
