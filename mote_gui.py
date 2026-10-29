@@ -3,6 +3,7 @@
 # requires-python = ">=3.11"
 # dependencies = [
 #   "pywebview>=5.3",
+#   "markdown>=3.5",
 # ]
 # ///
 """Native macOS GUI for WhisperX + Ollama meeting transcription with Rich HTML & REST API."""
@@ -20,6 +21,7 @@ import time
 import unicodedata
 from typing import Iterator
 import urllib.request
+import markdown
 import webview
 from webview.dom import DOMEventHandler
 
@@ -77,9 +79,7 @@ def format_seconds(seconds: float) -> str:
 def sanitize_text(text: str) -> str:
     """Normalize Unicode (NFC), strip ANSI codes, replacement chars, and control bytes."""
     text = unicodedata.normalize("NFC", text)
-    # Remove ANSI escape sequences
     text = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", text)
-    # Remove replacement char U+FFFD and control characters except newline/tab
     text = text.replace("\ufffd", "")
     text = re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]", "", text)
     return text.strip()
@@ -88,11 +88,9 @@ def sanitize_text(text: str) -> str:
 def clean_llm_output(raw_output: str) -> str:
     """Strip reasoning/thinking blocks from Gemma 4, DeepSeek, Qwen, etc."""
     cleaned = sanitize_text(raw_output)
-    # Strip <think>...</think>, <thought>...</thought>, <|thought|>...<|end_thought|>
     cleaned = re.sub(r"<think>[\s\S]*?</think>", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"<thought>[\s\S]*?</thought>", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"<\|thought\|>[\s\S]*?(?:<\|/thought\|>|<\|end_thought\|>)", "", cleaned, flags=re.IGNORECASE)
-    # If an unclosed <think> tag exists at the top before the first markdown heading
     if "<think>" in cleaned.lower() and "# " in cleaned:
         idx = cleaned.find("# ")
         cleaned = cleaned[idx:]
@@ -147,49 +145,160 @@ def managed_ollama_server(log_fn, env: dict | None = None) -> Iterator[None]:
                 proc.kill()
 
 
-def merge_and_build_html(json_path: Path, html_path: Path, title: str) -> str:
-    """Merge consecutive speaker segments, build rich HTML, and return clean LLM transcript."""
+def extract_turns_from_whisperx(json_path: Path) -> list[dict]:
+    """Extract word-level speaker turns so speaker handoffs mid-segment are not lost."""
     raw_bytes = json_path.read_bytes()
     data = json.loads(raw_bytes.decode("utf-8", errors="replace"))
     raw_segments = data.get("segments", [])
 
-    # 1. Consolidate consecutive segments by the same speaker
-    merged: list[dict] = []
-    last_known_speaker = "SPEAKER_00"
+    atomic_items: list[dict] = []
+    last_speaker = "SPEAKER_00"
 
     for seg in raw_segments:
-        text = sanitize_text(seg.get("text", ""))
-        if not text:
-            continue
-        start = float(seg.get("start", 0.0))
-        end = float(seg.get("end", start))
-        speaker = seg.get("speaker") or last_known_speaker
-        last_known_speaker = speaker
+        seg_speaker = seg.get("speaker") or last_speaker
+        words = seg.get("words") or []
 
-        # Merge if same speaker and gap is under 4 seconds
-        if merged and merged[-1]["speaker"] == speaker and (start - merged[-1]["end"]) < 4.0:
-            merged[-1]["end"] = end
+        # If word-level diarization is present, split whenever a word changes speaker
+        if words and any(w.get("speaker") for w in words):
+            for w in words:
+                w_text = sanitize_text(str(w.get("word", "")))
+                if not w_text:
+                    continue
+                w_spk = w.get("speaker") or seg_speaker or last_speaker
+                last_speaker = w_spk
+                w_start = float(w.get("start", seg.get("start", 0.0)))
+                w_end = float(w.get("end", w_start))
+                atomic_items.append(
+                    {"speaker": w_spk, "start": w_start, "end": w_end, "text": w_text}
+                )
+        else:
+            text = sanitize_text(seg.get("text", ""))
+            if not text:
+                continue
+            start = float(seg.get("start", 0.0))
+            end = float(seg.get("end", start))
+            last_speaker = seg_speaker
+            atomic_items.append(
+                {"speaker": seg_speaker, "start": start, "end": end, "text": text}
+            )
+
+    # Merge consecutive items from the SAME speaker if gap is under 2.0 seconds
+    merged: list[dict] = []
+    for item in atomic_items:
+        spk = item["speaker"]
+        start = item["start"]
+        end = item["end"]
+        text = item["text"]
+        if merged and merged[-1]["speaker"] == spk and (start - merged[-1]["end"]) < 2.0:
+            merged[-1]["end"] = max(merged[-1]["end"], end)
             merged[-1]["text"] += " " + text
         else:
-            merged.append({"speaker": speaker, "start": start, "end": end, "text": text})
+            merged.append({"speaker": spk, "start": start, "end": end, "text": text})
 
+    return merged
+
+
+def infer_speaker_names_via_api(
+    turns: list[dict],
+    model: str,
+    known_names_hint: str,
+    log_fn,
+) -> dict[str, str]:
+    """Use Ollama to detect self-introductions and map SPEAKER_XX -> Real Name."""
+    unique_speakers = sorted({t["speaker"] for t in turns})
+    if not unique_speakers:
+        return {}
+
+    # Provide the first ~120 turns plus any turn containing introduction keywords
+    intro_keywords = ("heter", "jeg er", "mitt navn", "fra ", "representerer", "leder", "velkommen")
+    sample_lines: list[str] = []
+    seen_indices: set[int] = set()
+
+    for idx, t in enumerate(turns):
+        low = t["text"].lower()
+        if idx < 100 or any(k in low for k in intro_keywords):
+            seen_indices.add(idx)
+            t_str = f"{format_seconds(t['start'])}–{format_seconds(t['end'])}"
+            sample_lines.append(f"[{t_str}] {t['speaker']}: {t['text']}")
+
+    hint_block = (
+        f"Kjente deltakernavn oppgitt av bruker: {known_names_hint.strip()}\n"
+        if known_names_hint.strip()
+        else "Ingen forhåndsoppgitte navn (finn navn ut fra transkripsjonen hvis folk presenterer seg).\n"
+    )
+
+    prompt = (
+        "Analyser utdraget fra møtetranskripsjonen under og finn ut hvem de ulike taler-IDene "
+        f"({', '.join(unique_speakers)}) er, basert på at deltakerne presenterer seg (f.eks. «Jeg heter...», "
+        "«Mitt navn er...») eller tiltaler hverandre ved navn.\n\n"
+        f"{hint_block}\n"
+        "Regler:\n"
+        "1. Returner KUN et gyldig JSON-objekt som knytter taler-ID til navn (og gjerne rolle i parentes hvis nevnt).\n"
+        "2. Hvis du IKKE finner navnet til en taler-ID med høy sikkerhet, behold original ID eller skriv f.eks. "
+        '{"SPEAKER_00": "SPEAKER_00"}. Ikke gjett tilfeldige navn.\n'
+        '3. Eksempel på format: {"SPEAKER_00": "Ola Nordmann", "SPEAKER_01": "Kari Hansen"}\n\n'
+        "Utdrag fra transkripsjon:\n" + "\n".join(sample_lines[:180])
+    )
+
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "stream": False,
+        "think": False,
+        "format": "json",
+        "options": {"num_ctx": 16384, "temperature": 0.0},
+    }
+
+    try:
+        req = urllib.request.Request(
+            OLLAMA_CHAT_URL,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            body = json.loads(resp.read().decode("utf-8", errors="replace"))
+            content = clean_llm_output(body.get("message", {}).get("content", "{}"))
+            parsed = json.loads(content)
+            if isinstance(parsed, dict):
+                mapping: dict[str, str] = {}
+                for spk in unique_speakers:
+                    val = str(parsed.get(spk, spk)).strip()
+                    if val and val != spk:
+                        mapping[spk] = f"{val} ({spk})" if spk not in val else val
+                    else:
+                        mapping[spk] = spk
+                return mapping
+    except Exception as exc:
+        log_fn(f"Merk: Automatisk navnegjenkjenning hoppet over ({exc}).")
+    return {spk: spk for spk in unique_speakers}
+
+
+def build_transcript_html_and_text(
+    turns: list[dict],
+    speaker_map: dict[str, str],
+    html_path: Path,
+    title: str,
+) -> str:
+    """Build rich searchable HTML transcript and return plain-text transcript for LLM."""
     colors = ["#007AFF", "#34C759", "#FF9500", "#AF52DE", "#FF2D55", "#5856D6", "#00C7BE"]
     speaker_color_map: dict[str, str] = {}
     llm_lines: list[str] = []
     html_items: list[str] = []
 
-    for item in merged:
-        spk = item["speaker"]
-        if spk not in speaker_color_map:
-            speaker_color_map[spk] = colors[len(speaker_color_map) % len(colors)]
-        color = speaker_color_map[spk]
+    for item in turns:
+        orig_spk = item["speaker"]
+        display_spk = speaker_map.get(orig_spk, orig_spk)
+        if orig_spk not in speaker_color_map:
+            speaker_color_map[orig_spk] = colors[len(speaker_color_map) % len(colors)]
+        color = speaker_color_map[orig_spk]
         t_str = f"{format_seconds(item['start'])} – {format_seconds(item['end'])}"
 
-        llm_lines.append(f"[{t_str}] {spk}: {item['text']}")
+        llm_lines.append(f"[{t_str}] {display_spk}: {item['text']}")
         html_items.append(
-            f'<div class="turn" data-speaker="{html.escape(spk)}">'
+            f'<div class="turn" data-speaker="{html.escape(orig_spk)}">'
             f'  <div class="meta">'
-            f'    <span class="badge" style="background:{color}" data-spk-label="{html.escape(spk)}">{html.escape(spk)}</span>'
+            f'    <span class="badge" style="background:{color}" data-spk-label="{html.escape(orig_spk)}">{html.escape(display_spk)}</span>'
             f'    <span class="timestamp">{t_str}</span>'
             f'  </div>'
             f'  <div class="text">{html.escape(item["text"])}</div>'
@@ -199,8 +308,8 @@ def merge_and_build_html(json_path: Path, html_path: Path, title: str) -> str:
     speaker_inputs = "".join(
         f'<div class="spk-edit">'
         f'  <span class="dot" style="background:{col}"></span>'
-        f'  <input type="text" value="{html.escape(spk)}" data-orig="{html.escape(spk)}" '
-        f'         oninput="renameSpeaker(this.dataset.orig, this.value)" title="Endre navn i visningen">'
+        f'  <input type="text" value="{html.escape(speaker_map.get(spk, spk))}" data-orig="{html.escape(spk)}" '
+        f'         oninput="renameSpeaker(this.dataset.orig, this.value)" title="Endre navn i visningen ({html.escape(spk)})">'
         f'</div>'
         for spk, col in speaker_color_map.items()
     )
@@ -243,7 +352,7 @@ def merge_and_build_html(json_path: Path, html_path: Path, title: str) -> str:
     .dot {{ width: 10px; height: 10px; border-radius: 50%; display: inline-block; }}
     .spk-edit input {{
       padding: 4px 8px; border-radius: 6px; border: 1px solid var(--border);
-      background: var(--bg); color: var(--text); font-size: 12px; width: 115px; font-weight: 600;
+      background: var(--bg); color: var(--text); font-size: 12px; width: 155px; font-weight: 600;
     }}
     .turn {{
       background: var(--card); border: 1px solid var(--border);
@@ -257,12 +366,12 @@ def merge_and_build_html(json_path: Path, html_path: Path, title: str) -> str:
 </head>
 <body>
   <header>
-    <h1>{html.escape(title)}</h1>
+    <h1>{html.escape(title)} – Transkripsjon</h1>
     <div class="controls">
       <input type="text" id="filter" placeholder="Søk i tekst, tidspunkt eller taler..." oninput="filterTurns()">
     </div>
     <div class="speakers-bar">
-      <span style="color:var(--sub)">Gi talere navn:</span>
+      <span style="color:var(--sub)">Talere (kan redigeres):</span>
       {speaker_inputs}
     </div>
   </header>
@@ -310,29 +419,135 @@ def merge_and_build_html(json_path: Path, html_path: Path, title: str) -> str:
     return "\n".join(llm_lines)
 
 
+def build_notes_html(notes_md: str, notes_html_path: Path, title: str) -> None:
+    """Render Markdown meeting notes into a styled, print-ready HTML document."""
+    rendered_body = markdown.markdown(
+        notes_md,
+        extensions=["tables", "fenced_code", "sane_lists", "nl2br"],
+    )
+    html_doc = f"""<!DOCTYPE html>
+<html lang="no">
+<head>
+  <meta charset="utf-8">
+  <title>{html.escape(title)} – Møtereferat</title>
+  <style>
+    :root {{
+      --bg: #f5f6f8; --card: #ffffff; --text: #1d1d1f; --sub: #6e6e73;
+      --border: #e5e5ea; --accent: #007AFF; --th-bg: #f0f2f5;
+    }}
+    @media (prefers-color-scheme: dark) {{
+      :root {{
+        --bg: #121212; --card: #1c1c1e; --text: #f5f5f7; --sub: #98989d;
+        --border: #2c2c2e; --accent: #0a84ff; --th-bg: #262629;
+      }}
+    }}
+    @media print {{
+      :root {{
+        --bg: #ffffff; --card: #ffffff; --text: #000000; --sub: #555555;
+        --border: #cccccc; --th-bg: #f0f0f0;
+      }}
+      body {{ margin: 0; padding: 0; }}
+      .no-print {{ display: none !important; }}
+      article {{ border: none !important; box-shadow: none !important; padding: 0 !important; }}
+    }}
+    body {{
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+      background: var(--bg); color: var(--text);
+      max-width: 820px; margin: 32px auto; padding: 0 20px 60px; line-height: 1.65;
+    }}
+    .toolbar {{
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 14px; font-size: 13px; color: var(--sub);
+    }}
+    .toolbar button {{
+      padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border);
+      background: var(--card); color: var(--text); cursor: pointer; font-size: 12.5px;
+      font-weight: 500;
+    }}
+    .toolbar button:hover {{ border-color: var(--accent); }}
+    article {{
+      background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+      padding: 36px 44px; box-shadow: 0 4px 16px rgba(0,0,0,0.05);
+    }}
+    h1 {{
+      font-size: 1.75rem; margin: 0 0 18px 0; padding-bottom: 12px;
+      border-bottom: 2px solid var(--border); letter-spacing: -0.02em;
+    }}
+    h2 {{
+      font-size: 1.25rem; margin: 28px 0 10px 0; color: var(--accent);
+      padding-bottom: 6px; border-bottom: 1px solid var(--border);
+    }}
+    h3 {{ font-size: 1.05rem; margin: 20px 0 6px 0; }}
+    p {{ margin: 0 0 12px 0; }}
+    ul, ol {{ margin: 0 0 14px 0; padding-left: 22px; }}
+    li {{ margin-bottom: 6px; }}
+    table {{
+      width: 100%; border-collapse: collapse; margin: 14px 0 20px 0; font-size: 14px;
+    }}
+    th, td {{
+      text-align: left; padding: 10px 12px; border: 1px solid var(--border);
+    }}
+    th {{ background: var(--th-bg); font-weight: 600; }}
+    blockquote {{
+      margin: 12px 0; padding: 10px 16px; border-left: 4px solid var(--accent);
+      background: var(--bg); border-radius: 0 8px 8px 0; color: var(--sub);
+    }}
+    code {{
+      font-family: ui-monospace, "SF Mono", monospace; font-size: 0.9em;
+      background: var(--bg); padding: 2px 5px; border-radius: 4px;
+    }}
+  </style>
+</head>
+<body>
+  <div class="toolbar no-print">
+    <span>{html.escape(title)}</span>
+    <button onclick="window.print()">Skriv ut / Lagre som PDF</button>
+  </div>
+  <article>
+    {rendered_body}
+  </article>
+</body>
+</html>"""
+    notes_html_path.write_text(html_doc, encoding="utf-8")
+
+
 def generate_notes_via_api(
-    transcript: str, model: str, progress_fn=None
+    transcript: str,
+    model: str,
+    speaker_map: dict[str, str],
+    known_names_hint: str,
+    progress_fn=None,
 ) -> str:
     """Use Ollama HTTP /api/chat directly with streaming to avoid ANSI codes, thinking leaks, and UI freezes."""
+    detected_list = ", ".join(sorted(set(speaker_map.values())))
+    hint_line = (
+        f"Bruker har oppgitt følgende deltakere i møtet: {known_names_hint.strip()}.\n"
+        if known_names_hint.strip()
+        else ""
+    )
+
     system_prompt = (
         "Du er en profesjonell norsk møtesekretær. Du skriver kun selve møtereferatet i ren Markdown. "
         "IKKE inkluder egen tankeprosess, introduksjoner eller <think>-blokker. "
-        "Bruk korrekt norsk (bokmål) og organiser innholdet tematisk, ikke bare kronologisk."
+        "Bruk korrekt norsk (bokmål) og organiser innholdet tematisk, ikke bare kronologisk. "
+        "Hvis deltakere presenterer seg med navn i transkripsjonen, bruk alltid deres faktiske navn i referatet."
     )
     user_prompt = (
-        "Lag et grundig og strukturert møtereferat basert på den tidsstemplede transkripsjonen under.\n\n"
+        "Lag et grundig og strukturert møtereferat basert på den tidsstemplede transkripsjonen under.\n"
+        f"Identifiserte talere i transkripsjonen: {detected_list}\n"
+        f"{hint_line}\n"
         "Bruk denne strukturen:\n"
         "# Møtereferat\n\n"
         "## 1. Kort oppsummering\n"
         "(Hva handlet møtet om, og hva var hovedkonklusjonen?)\n\n"
-        "## 2. Deltakere / Talere\n"
-        "(Kort beskrivelse av rollene/bidragene til hver taler-ID basert på konteksten)\n\n"
+        "## 2. Deltakere og roller\n"
+        "(Liste over deltakerne med navn — fang opp navn der folk presenterer seg — samt deres rolle og hovedbidrag)\n\n"
         "## 3. Hovedtemaer diskutert\n"
-        "(Sortert etter tema med underoverskrifter, hovedargumenter og tidsstempler der det er relevant)\n\n"
+        "(Sortert etter tema med underoverskrifter, hvem som fremmet hvilke synspunkter, og tidsstempler der det er relevant)\n\n"
         "## 4. Beslutninger\n"
         "(Konkrete vedtak eller enigheter)\n\n"
         "## 5. Aksjonspunkter\n"
-        "(Tabell eller sjekkliste med Hvem / Oppgave / Frist)\n\n"
+        "(Markdown-tabell med kolonnene: Ansvarlig | Oppgave | Frist / Status)\n\n"
         f"--- TRANSKRIPSJON START ---\n{transcript}\n--- TRANSKRIPSJON SLUTT ---"
     )
 
@@ -343,10 +558,10 @@ def generate_notes_via_api(
             {"role": "user", "content": user_prompt},
         ],
         "stream": True,
-        "think": False,  # Tells Ollama >= 0.7 not to mix thinking tokens into content
+        "think": False,
         "options": {
-            "num_ctx": 32768,      # Ensure long meetings aren't truncated
-            "temperature": 0.2,    # Factual, structured summary
+            "num_ctx": 32768,
+            "temperature": 0.2,
         },
     }
 
@@ -370,7 +585,7 @@ def generate_notes_via_api(
                 chunks.append(piece)
                 token_count += 1
                 if progress_fn and token_count % 5 == 0:
-                    pct = min(99, int(84 + min(15.0, (token_count / est_tokens) * 15.0)))
+                    pct = min(98, int(84 + min(14.0, (token_count / est_tokens) * 14.0)))
                     progress_fn(pct, f"Skriver møtereferat ({token_count} tokens)...")
             if body.get("done"):
                 break
@@ -398,6 +613,7 @@ class MoteApi:
             "out_dir": str(out_dir),
             "html_name": unique_filename(out_dir, f"{stem}_transkripsjon", ".html"),
             "notes_name": unique_filename(out_dir, f"{stem}_referat", ".md"),
+            "notes_html_name": unique_filename(out_dir, f"{stem}_referat", ".html"),
         }
 
     def pick_audio_file(self) -> dict | None:
@@ -423,10 +639,12 @@ class MoteApi:
             return {"out_dir": folder}
         return None
 
-    def check_conflicts(self, out_dir_str: str, html_name: str, notes_name: str) -> list[str]:
+    def check_conflicts(
+        self, out_dir_str: str, html_name: str, notes_name: str, notes_html_name: str
+    ) -> list[str]:
         out_dir = Path(out_dir_str).resolve()
         conflicts = []
-        for name in (html_name.strip(), notes_name.strip()):
+        for name in (html_name.strip(), notes_name.strip(), notes_html_name.strip()):
             if name:
                 candidate = out_dir / Path(name).name
                 if candidate.exists():
@@ -443,12 +661,14 @@ class MoteApi:
         out_dir: str,
         html_name: str,
         notes_name: str,
+        notes_html_name: str,
         whisper_model: str,
         ollama_model: str,
         language: str,
         hf_token: str,
         min_speakers: str,
         max_speakers: str,
+        speaker_names_hint: str,
     ) -> None:
         threading.Thread(
             target=self._worker,
@@ -457,12 +677,14 @@ class MoteApi:
                 out_dir,
                 html_name,
                 notes_name,
+                notes_html_name,
                 whisper_model,
                 ollama_model,
                 language,
                 hf_token,
                 min_speakers,
                 max_speakers,
+                speaker_names_hint,
             ),
             daemon=True,
         ).start()
@@ -487,12 +709,14 @@ class MoteApi:
         out_dir_str: str,
         html_name_str: str,
         notes_name_str: str,
+        notes_html_name_str: str,
         whisper_model: str,
         ollama_model: str,
         language: str,
         hf_token: str,
         min_speakers_str: str,
         max_speakers_str: str,
+        speaker_names_hint: str,
     ) -> None:
         self._set_running(True)
         self._set_progress(5, "Forbereder miljø og filer...")
@@ -508,10 +732,13 @@ class MoteApi:
 
             html_name = Path(html_name_str.strip()).name
             notes_name = Path(notes_name_str.strip()).name
+            notes_html_name = Path(notes_html_name_str.strip()).name
+
             html_path = out_dir / html_name
             notes_path = out_dir / notes_name
+            notes_html_path = out_dir / notes_html_name
 
-            for target in (html_path, notes_path):
+            for target in (html_path, notes_path, notes_html_path):
                 if target.exists():
                     self._log(f"AVBRUTT: Filen finnes allerede:\n  {target}")
                     self._set_progress(0, "Avbrutt pga filkonflikt")
@@ -534,7 +761,7 @@ class MoteApi:
             env["PATH"] = f"{Path.home() / '.local/bin'}:/opt/homebrew/bin:/usr/local/bin:{env.get('PATH', '')}"
 
             self._set_progress(15, f"Kjører WhisperX ({whisper_model})...")
-            self._log(f"==> [1/2] Kjører WhisperX ({whisper_model}) på {audio_path.name}...")
+            self._log(f"==> [1/3] Kjører WhisperX ({whisper_model}) på {audio_path.name}...")
 
             with tempfile.TemporaryDirectory(prefix="mote_wx_") as tmp_dir:
                 cmd = [
@@ -591,7 +818,7 @@ class MoteApi:
                                 mapped = int(50 + (p_pct * 0.10))
                                 self._set_progress(mapped, f"Tidsjusterer ord: {p_pct:.0f}%")
                             else:
-                                mapped = int(60 + (p_pct * 0.12))
+                                mapped = int(60 + (p_pct * 0.10))
                                 self._set_progress(mapped, f"Identifiserer talere: {p_pct:.0f}%")
 
                 if proc.wait() != 0:
@@ -605,28 +832,52 @@ class MoteApi:
                     self._set_progress(0, "JSON mangler")
                     return
 
-                self._set_progress(72, "Slår sammen taler-segmenter og bygger HTML...")
-                clean_transcript = merge_and_build_html(raw_json, html_path, audio_path.stem)
-
-            self._log(f"==> Rik HTML-transkripsjon lagret: {html_path}")
+                self._set_progress(72, "Ekstraherer ord-baserte talerskifter...")
+                turns = extract_turns_from_whisperx(raw_json)
 
             with managed_ollama_server(self._log, env=env):
                 installed = fetch_ollama_models() or []
                 if ollama_model not in installed and f"{ollama_model}:latest" not in installed:
-                    self._set_progress(76, f"Laster ned {ollama_model}...")
+                    self._set_progress(75, f"Laster ned {ollama_model}...")
                     self._log(f"==> Laster ned '{ollama_model}'...")
                     subprocess.run(["ollama", "pull", ollama_model], env=env, check=True)
 
-                self._set_progress(84, f"Analyserer møtet via {ollama_model} (32k kontekst)...")
-                self._log(f"==> [2/2] Genererer møtereferat via Ollama REST API ({ollama_model})...")
+                self._set_progress(78, "Gjenkjenner deltakernavn fra introduksjoner...")
+                self._log("==> [2/3] Analyserer introduksjoner for å knytte taler-ID til navn...")
+                speaker_map = infer_speaker_names_via_api(
+                    turns, ollama_model, speaker_names_hint, self._log
+                )
+                for spk_id, resolved_name in speaker_map.items():
+                    if resolved_name != spk_id:
+                        self._log(f"    Gjenkjent {spk_id} -> {resolved_name}")
+
+                clean_transcript = build_transcript_html_and_text(
+                    turns, speaker_map, html_path, audio_path.stem
+                )
+                self._log(f"==> Rik HTML-transkripsjon lagret: {html_path}")
+
+                self._set_progress(84, f"Genererer møtereferat via {ollama_model} (32k kontekst)...")
+                self._log(f"==> [3/3] Genererer møtereferat via Ollama REST API ({ollama_model})...")
 
                 notes_md = generate_notes_via_api(
-                    clean_transcript, ollama_model, progress_fn=self._set_progress
+                    clean_transcript,
+                    ollama_model,
+                    speaker_map,
+                    speaker_names_hint,
+                    progress_fn=self._set_progress,
                 )
                 notes_path.write_text(notes_md + "\n", encoding="utf-8")
 
+                self._set_progress(99, "Bygger HTML-møtereferat...")
+                build_notes_html(notes_md, notes_html_path, audio_path.stem)
+
             self._set_progress(100, "Fullført!")
-            self._log(f"==> FERDIG!\n    HTML-transkripsjon: {html_path}\n    Møtereferat       : {notes_path}")
+            self._log(
+                f"==> FERDIG!\n"
+                f"    HTML-transkripsjon: {html_path}\n"
+                f"    Møtereferat (MD)  : {notes_path}\n"
+                f"    Møtereferat (HTML): {notes_html_path}"
+            )
         except Exception as exc:
             self._log(f"FEIL: {exc}")
             self._set_progress(0, f"Feilet: {exc}")
@@ -647,11 +898,11 @@ HTML = """<!DOCTYPE html>
     margin: 0; padding: 14px;
     background: Canvas; color: CanvasText;
     font-size: 13px; user-select: none;
-    display: flex; flex-direction: column; gap: 8px; height: calc(100vh - 28px);
+    display: flex; flex-direction: column; gap: 7px; height: calc(100vh - 28px);
   }
   #dropzone {
     border: 2px dashed GrayText; border-radius: 10px;
-    padding: 10px 14px; display: flex; align-items: center; justify-content: space-between;
+    padding: 9px 14px; display: flex; align-items: center; justify-content: space-between;
     gap: 12px; transition: all 0.15s ease;
   }
   #dropzone.dragover { border-color: #0a84ff; background: rgba(10, 132, 255, 0.1); }
@@ -662,7 +913,7 @@ HTML = """<!DOCTYPE html>
     overflow: hidden; text-overflow: ellipsis; font-size: 11.5px;
   }
   .row { display: flex; gap: 8px; align-items: center; }
-  .row label { width: 110px; flex-shrink: 0; font-weight: 500; font-size: 12.5px; }
+  .row label { width: 115px; flex-shrink: 0; font-weight: 500; font-size: 12.5px; }
   input[type="text"], input[type="password"], input[type="number"], select {
     flex: 1; padding: 5px 8px; border-radius: 6px;
     border: 1px solid rgba(128,128,128,0.4); background: Field; color: FieldText;
@@ -720,8 +971,9 @@ HTML = """<!DOCTYPE html>
   </div>
 
   <div class="row">
-    <label>Referat:</label>
+    <label>Referat (MD/HTML):</label>
     <input type="text" id="notes_name" placeholder="mote_referat.md" oninput="validateNames()">
+    <input type="text" id="notes_html_name" placeholder="mote_referat.html" oninput="validateNames()">
   </div>
 
   <div class="row">
@@ -743,9 +995,17 @@ HTML = """<!DOCTYPE html>
 
   <div class="row">
     <label>Antall talere:</label>
-    <input type="number" id="min_speakers" placeholder="Min (f.eks 2)" min="1" max="20" style="max-width: 110px;">
-    <input type="number" id="max_speakers" placeholder="Maks (f.eks 4)" min="1" max="20" style="max-width: 110px;">
-    <span style="color: GrayText; font-size: 11px;">(Tips: Sett f.eks. Min=2, Maks=2 for 2 personer)</span>
+    <input type="number" id="min_speakers" placeholder="Min (f.eks 4)" min="1" max="20" style="max-width: 95px;">
+    <input type="number" id="max_speakers" placeholder="Maks (f.eks 4)" min="1" max="20" style="max-width: 95px;">
+    <button onclick="setExactSpeakers(2)" title="Lås til nøyaktig 2 talere">2</button>
+    <button onclick="setExactSpeakers(3)" title="Lås til nøyaktig 3 talere">3</button>
+    <button onclick="setExactSpeakers(4)" title="Lås til nøyaktig 4 talere">4</button>
+    <button onclick="setExactSpeakers(5)" title="Lås til nøyaktig 5 talere">5</button>
+  </div>
+
+  <div class="row">
+    <label>Deltakernavn:</label>
+    <input type="text" id="speaker_names_hint" placeholder="Valgfritt: f.eks. Ola, Kari, Per, Anne (hjelper AI å koble stemme til navn)">
   </div>
 
   <div class="row">
@@ -788,12 +1048,18 @@ HTML = """<!DOCTYPE html>
   dz.addEventListener('dragleave', () => dz.classList.remove('dragover'));
   dz.addEventListener('drop', (e) => { e.preventDefault(); dz.classList.remove('dragover'); });
 
+  function setExactSpeakers(n) {
+    document.getElementById('min_speakers').value = n;
+    document.getElementById('max_speakers').value = n;
+  }
+
   async function applySelection(info) {
     currentAudioPath = info.audio_path;
     document.getElementById('selected-file').textContent = info.audio_path;
     if (info.out_dir) document.getElementById('out_dir').value = info.out_dir;
     if (info.html_name) document.getElementById('html_name').value = info.html_name;
     if (info.notes_name) document.getElementById('notes_name').value = info.notes_name;
+    if (info.notes_html_name) document.getElementById('notes_html_name').value = info.notes_html_name;
     await validateNames();
   }
 
@@ -816,6 +1082,7 @@ HTML = """<!DOCTYPE html>
       document.getElementById('out_dir').value = res.out_dir;
       if (res.html_name) document.getElementById('html_name').value = res.html_name;
       if (res.notes_name) document.getElementById('notes_name').value = res.notes_name;
+      if (res.notes_html_name) document.getElementById('notes_html_name').value = res.notes_html_name;
       await validateNames();
     }
   }
@@ -828,6 +1095,7 @@ HTML = """<!DOCTYPE html>
     );
     document.getElementById('html_name').value = info.html_name;
     document.getElementById('notes_name').value = info.notes_name;
+    document.getElementById('notes_html_name').value = info.notes_html_name;
     await validateNames();
   }
 
@@ -835,31 +1103,37 @@ HTML = """<!DOCTYPE html>
     const outDir = document.getElementById('out_dir').value;
     const htmlInput = document.getElementById('html_name');
     const notesInput = document.getElementById('notes_name');
+    const notesHtmlInput = document.getElementById('notes_html_name');
     const msg = document.getElementById('conflict-msg');
     const btn = document.getElementById('run_btn');
 
     const htmlName = htmlInput.value.trim();
     const notesName = notesInput.value.trim();
+    const notesHtmlName = notesHtmlInput.value.trim();
 
-    if (!currentAudioPath || !htmlName || !notesName) {
+    if (!currentAudioPath || !htmlName || !notesName || !notesHtmlName) {
       btn.disabled = true;
       return;
     }
 
-    if (htmlName === notesName) {
-      msg.textContent = "Filene må ha ulike navn.";
+    const uniqueSet = new Set([htmlName, notesName, notesHtmlName]);
+    if (uniqueSet.size < 3) {
+      msg.textContent = "Alle tre utdatafiler må ha ulike filnavn.";
       htmlInput.classList.add('conflict');
       notesInput.classList.add('conflict');
+      notesHtmlInput.classList.add('conflict');
       btn.disabled = true;
       return;
     }
 
-    const conflicts = await pywebview.api.check_conflicts(outDir, htmlName, notesName);
+    const conflicts = await pywebview.api.check_conflicts(outDir, htmlName, notesName, notesHtmlName);
     const hasHtmlConflict = conflicts.some(p => p.endsWith("/" + htmlName));
     const hasNotesConflict = conflicts.some(p => p.endsWith("/" + notesName));
+    const hasNotesHtmlConflict = conflicts.some(p => p.endsWith("/" + notesHtmlName));
 
     htmlInput.classList.toggle('conflict', hasHtmlConflict);
     notesInput.classList.toggle('conflict', hasNotesConflict);
+    notesHtmlInput.classList.toggle('conflict', hasNotesHtmlConflict);
 
     if (conflicts.length > 0) {
       msg.textContent = "Filen finnes allerede! Klikk «Ledig navn».";
@@ -905,12 +1179,14 @@ HTML = """<!DOCTYPE html>
       document.getElementById('out_dir').value,
       document.getElementById('html_name').value,
       document.getElementById('notes_name').value,
+      document.getElementById('notes_html_name').value,
       document.getElementById('whisper_model').value,
       document.getElementById('ollama_model').value,
       document.getElementById('language').value,
       document.getElementById('hf_token').value,
       document.getElementById('min_speakers').value,
-      document.getElementById('max_speakers').value
+      document.getElementById('max_speakers').value,
+      document.getElementById('speaker_names_hint').value
     );
   }
 </script>
@@ -936,8 +1212,8 @@ def main() -> None:
         "Møtereferat (WhisperX + Ollama)",
         html=HTML,
         js_api=api,
-        width=660,
-        height=650,
+        width=680,
+        height=690,
     )
     api.window = window
     webview.start(bind_drag_and_drop, window)
