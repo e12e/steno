@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+<meta charset="utf-8">
+<style>
+  :root {
+    color-scheme: light dark;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+  }
+  body {
+    margin: 0; padding: 10px 14px;
+    background: Canvas; color: CanvasText;
+    font-size: 12.5px; user-select: none;
+    display: flex; flex-direction: column; gap: 5px; height: calc(100vh - 20px);
+  }
+  .top-cards {
+    display: flex; gap: 8px; align-items: stretch;
+  }
+  #dropzone {
+    flex: 1.25; border: 2px dashed GrayText; border-radius: 10px;
+    padding: 7px 12px; display: flex; align-items: center; justify-content: space-between;
+    gap: 10px; transition: all 0.15s ease;
+  }
+  #dropzone.dragover { border-color: #0a84ff; background: rgba(10, 132, 255, 0.1); }
+  .dz-text { flex: 1; overflow: hidden; }
+  .dz-text strong { font-size: 12px; display: block; margin-bottom: 2px; }
+  #selected-file {
+    color: GrayText; display: block; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; font-size: 11px;
+  }
+  .rec-card {
+    flex: 0.95; border: 1px solid rgba(128,128,128,0.35); border-radius: 10px;
+    padding: 7px 12px; display: flex; flex-direction: column; justify-content: center; gap: 4px;
+    background: rgba(128,128,128,0.06);
+  }
+  .rec-controls { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+  #rec_btn.recording { background: #ff453a; color: white; border-color: #ff453a; font-weight: 600; }
+  #rec_timer { font-family: "SF Mono", Menlo, monospace; font-weight: 600; font-size: 12px; color: #ff453a; }
+  .live-badge {
+    font-size: 10.5px; padding: 2px 7px; border-radius: 999px;
+    border: 1px solid rgba(128,128,128,0.35); color: GrayText;
+    background: rgba(128,128,128,0.08); white-space: nowrap;
+  }
+  .live-badge.godt { border-color: rgba(48, 209, 88, 0.7); background: rgba(48, 209, 88, 0.16); color: CanvasText; font-weight: 600; }
+  .live-badge.lavt { border-color: rgba(255, 159, 10, 0.75); background: rgba(255, 159, 10, 0.16); color: CanvasText; font-weight: 600; }
+  .live-badge.hoyt { border-color: rgba(255, 69, 58, 0.8); background: rgba(255, 69, 58, 0.18); color: #ff453a; font-weight: 600; }
+  #live_check_panel {
+    display: none; background: rgba(48, 209, 88, 0.07); border: 1px solid rgba(48, 209, 88, 0.45);
+    border-radius: 8px; padding: 6px 10px; font-size: 11px; line-height: 1.4;
+    max-height: 68px; overflow-y: auto; font-family: "SF Mono", Menlo, Consolas, monospace;
+    white-space: pre-wrap; user-select: text;
+  }
+
+  #prompt_banner {
+    display: none; background: rgba(10, 132, 255, 0.1); border: 1px solid #0a84ff;
+    border-radius: 8px; padding: 7px 12px; font-size: 11.5px; line-height: 1.4;
+  }
+  #prompt_banner strong { color: #0a84ff; }
+
+  .row { display: flex; gap: 6px; align-items: center; }
+  .row label { width: 115px; flex-shrink: 0; font-weight: 500; font-size: 12px; }
+  input[type="text"], input[type="password"], input[type="number"], select, textarea {
+    flex: 1; padding: 4px 8px; border-radius: 6px;
+    border: 1px solid rgba(128,128,128,0.4); background: Field; color: FieldText;
+    font-size: 12px; font-family: inherit;
+  }
+  textarea { resize: vertical; min-height: 42px; max-height: 100px; }
+  input.conflict { border-color: #ff9f0a; background: rgba(255, 159, 10, 0.08); }
+  button {
+    padding: 4px 10px; border-radius: 6px; border: 1px solid rgba(128,128,128,0.4);
+    background: ButtonFace; color: ButtonText; cursor: pointer; font-size: 12px;
+    white-space: nowrap;
+  }
+  button.primary {
+    background: #0a84ff; color: white; border: none; font-weight: 600; padding: 6px 14px;
+  }
+  button.danger {
+    background: rgba(255, 69, 58, 0.14); color: #ff453a; border-color: rgba(255, 69, 58, 0.45); font-weight: 600;
+  }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  #conflict-msg { color: GrayText; font-size: 11px; min-height: 14px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .ckpt-bar {
+    display: flex; gap: 5px; align-items: center; flex-wrap: wrap;
+  }
+  .ckpt-pill {
+    font-size: 10.5px; padding: 2px 8px; border-radius: 999px;
+    border: 1px solid rgba(128,128,128,0.35); color: GrayText;
+    background: rgba(128,128,128,0.07); cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .ckpt-pill.done {
+    border-color: rgba(48, 209, 88, 0.6);
+    background: rgba(48, 209, 88, 0.14);
+    color: CanvasText;
+    font-weight: 600;
+  }
+  .ckpt-pill:hover { border-color: #0a84ff; }
+
+  .progress-section { display: flex; flex-direction: column; gap: 2px; }
+  .progress-header { display: flex; justify-content: space-between; font-size: 11px; color: GrayText; }
+  .progress-bg {
+    width: 100%; height: 7px; background: rgba(128,128,128,0.25);
+    border-radius: 4px; overflow: hidden;
+  }
+  .progress-fill { height: 100%; width: 0%; background: #0a84ff; border-radius: 4px; transition: width 0.3s ease; }
+
+  #log {
+    flex: 1; background: rgba(128,128,128,0.1); border-radius: 8px;
+    padding: 8px; font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 11px;
+    overflow-y: auto; white-space: pre-wrap; user-select: text;
+    border: 1px solid rgba(128,128,128,0.25); min-height: 80px;
+  }
+</style>
+</head>
+<body>
+
+  <div class="top-cards">
+    <div id="dropzone">
+      <div class="dz-text">
+        <strong>Slipp lydfil (.m4a, .wav, .opus, .mp3) eller transkripsjon (.html, .json, .txt, .srt)</strong>
+        <span id="selected-file">Ingen lyd- eller transkripsjonsfil valgt ennå</span>
+      </div>
+      <button onclick="browseAudio()">Velg fil...</button>
+    </div>
+
+    <div class="rec-card">
+      <div class="rec-controls">
+        <button id="rec_btn" onclick="toggleRecording()">Spill inn møte</button>
+        <span id="rec_timer">00:00</span>
+        <span id="live_level_badge" class="live-badge" title="Sanntids lydnivå (dBFS) fra mikrofon">Lyd: klar</span>
+        <button onclick="speakGuide()" title="Les opp møtestart-instruks høyt">Tale-instruks</button>
+      </div>
+      <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+        <label style="font-size: 11px; color: GrayText; display: flex; align-items: center; gap: 4px;">
+          <input type="checkbox" id="auto_speak_guide" checked>
+          Les opp navnerunde-guide
+        </label>
+        <label style="font-size: 11px; color: GrayText; display: flex; align-items: center; gap: 4px;" title="Transkriberer grove 5-sekunders utsnitt fortløpende under opptak for å bekrefte at alle rundt bordet høres tydelig">
+          <input type="checkbox" id="live_transcribe_chk" checked>
+          Grov sanntids-transkripsjon (lydsjekk)
+        </label>
+      </div>
+    </div>
+  </div>
+
+  <div id="prompt_banner">
+    <strong>Møtestart-guide for god talergjenkjenning og lydsjekk:</strong><br>
+    1. <b>Møteleder:</b> Si kort hva møtet gjelder og dagens dato.<br>
+    2. <b>Navnerunde rundt bordet:</b> Hver deltaker sier eget navn og tittel/rolle i én hel setning. Følg med i <b>Grov sanntids-lydsjekk</b> under for å se at alle rundt bordet fanges opp med <i>Godt lydnivå</i> (slå av macOS «Stemmeisolasjon» hvis noen faller ut).
+  </div>
+
+  <div id="live_check_panel"></div>
+
+  <div class="row">
+    <label>Møtetittel & Dato:</label>
+    <input type="text" id="meeting_title" placeholder="F.eks. Prosjektmøte – 2026-10-29">
+    <button onclick="loadAgendaFile()" title="Last inn agenda, lysbilder (.pptx, .pdf, .odp) eller notater (.docx, .md, .txt)">+ Agenda / Lysbilder...</button>
+  </div>
+
+  <div class="row">
+    <label>Tilstede (Navn/tittel):</label>
+    <input type="text" id="speaker_names_hint" placeholder="F.eks. Ola Nordmann (Møteleder), Kari Hansen (Arkitekt), Per Olsen, Anne Berg" oninput="autoCountSpeakersFromHint()">
+  </div>
+
+  <div class="row" style="align-items: flex-start;">
+    <label style="padding-top: 4px;">Agenda / Lysbilder:</label>
+    <textarea id="agenda_text" placeholder="Valgfritt: Lim inn agenda/stikkord, eller klikk «+ Agenda / Lysbilder...» for å hente tekst fra PowerPoint (.pptx), PDF (.pdf), Word (.docx) eller Markdown (.md)..."></textarea>
+  </div>
+
+  <div class="row">
+    <label>Talere & Modus:</label>
+    <input type="number" id="min_speakers" placeholder="Min" min="1" max="20" style="max-width: 54px;">
+    <input type="number" id="max_speakers" placeholder="Maks" min="1" max="20" style="max-width: 54px;">
+    <button onclick="setExactSpeakers(1)" title="1 taler – Foredrag / Presentasjon">1</button>
+    <button onclick="setExactSpeakers(2)" title="2 talere">2</button>
+    <button onclick="setExactSpeakers(3)" title="3 talere">3</button>
+    <button onclick="setExactSpeakers(4)" title="4 talere">4</button>
+    <button onclick="setExactSpeakers(5)" title="5 talere">5</button>
+    <select id="note_mode" onchange="onModeChanged()" title="Velg eller overstyr modus før du genererer transkripsjon og notater">
+      <option value="auto" selected>Modus: Auto (Foredrag ved 1 taler, ellers Møte)</option>
+      <option value="mote">Modus: Møtereferat (flere deltakere & aksjonspunkter)</option>
+      <option value="foredrag">Modus: Foredrag / Presentasjon (faglige hovedpoenger)</option>
+    </select>
+  </div>
+
+  <div class="row">
+    <label>Lagre i mappe:</label>
+    <input type="text" id="out_dir" placeholder="Velg mappe..." oninput="validateNames()">
+    <button onclick="browseFolder()">Velg...</button>
+    <button onclick="openFinder()" title="Vis i filutforsker">Åpne</button>
+  </div>
+
+  <div class="row">
+    <label>Utdatafiler:</label>
+    <input type="text" id="html_name" placeholder="transkripsjon.html" oninput="validateNames()" title="HTML Transkripsjon">
+    <input type="text" id="notes_name" placeholder="referat.md" oninput="validateNames()" title="Markdown Referat">
+    <input type="text" id="notes_html_name" placeholder="referat.html" oninput="validateNames()" title="HTML Referat">
+    <button onclick="autoIncrementNames()" title="Foreslå nye ledige filnavn hvis du ikke vil overskrive">Ledig navn</button>
+  </div>
+
+  <div class="row">
+    <label>Modeller & Språk:</label>
+    <select id="whisper_model">
+      <option value="NbAiLab/nb-whisper-large" selected>NB-Whisper Large (Anbefalt Norsk)</option>
+      <option value="large-v3-turbo">Whisper: large-v3-turbo</option>
+      <option value="large-v3">Whisper: large-v3</option>
+      <option value="NbAiLab/nb-whisper-medium">NB-Whisper Medium (Raskere)</option>
+    </select>
+    <input type="text" id="ollama_model" value="gemma4:e4b" placeholder="Ollama-modell" style="max-width: 115px;">
+    <select id="language" style="max-width: 58px;">
+      <option value="no" selected>NO</option>
+      <option value="en">EN</option>
+      <option value="sv">SV</option>
+      <option value="da">DA</option>
+    </select>
+    <input type="password" id="hf_token" placeholder="HF Token (hf_...)" style="max-width: 120px;">
+  </div>
+
+  <div class="row">
+    <label>Sjekkpunkt & Steg:</label>
+    <div class="ckpt-bar" id="ckpt_bar">
+      <span class="ckpt-pill" id="ckpt_s1" onclick="selectTaskMode('only_1_asr')" title="Klikk for å kjøre kun Steg 1 (Whisper ASR)">1. ASR</span>
+      <span class="ckpt-pill" id="ckpt_s2" onclick="selectTaskMode('only_2_align')" title="Klikk for å kjøre kun Steg 2 (Alignment)">2. Align</span>
+      <span class="ckpt-pill" id="ckpt_s3" onclick="selectTaskMode('from_3_diarize')" title="Klikk for å kjøre fra Steg 3 (Pyannote -> Referat)">3. Pyannote</span>
+      <span class="ckpt-pill" id="ckpt_s4" onclick="selectTaskMode('from_4_names')" title="Klikk for å kjøre fra Steg 4 (Navn & HTML -> Referat)">4. Navn & HTML</span>
+      <span class="ckpt-pill" id="ckpt_s5" onclick="selectTaskMode('only_5_notes')" title="Klikk for å kjøre kun Steg 5 (Generer Referat/Notat på nytt)">5. Referat/Notat</span>
+    </div>
+    <select id="task_mode" onchange="validateNames()" title="Velg om du vil fortsette fra siste sjekkpunkt, kjøre alt på nytt, eller kjøre enkeltoppgaver">
+      <option value="auto_resume" selected>Fortsett fra sjekkpunkt (hopp over ferdige steg)</option>
+      <option value="full_fresh">Kjør alt på nytt (Steg 1–5)</option>
+      <option value="from_3_diarize">Fra Steg 3 -> 5 (Pyannote + Navn + Referat)</option>
+      <option value="from_4_names">Fra Steg 4 -> 5 (Navn & HTML + Referat)</option>
+      <option value="only_5_notes">Kun Steg 5: Generer Referat / Notater på nytt</option>
+      <option value="only_4_names">Kun Steg 4: Taler-navn & HTML-transkripsjon</option>
+      <option value="only_3_diarize">Kun Steg 3: Taler-ID (Pyannote)</option>
+      <option value="only_2_align">Kun Steg 2: Ord-tidsjustering (Alignment)</option>
+      <option value="only_1_asr">Kun Steg 1: Rå-transkripsjon (ASR)</option>
+    </select>
+  </div>
+
+  <div class="row">
+    <span id="conflict-msg"></span>
+    <button id="check_audio_btn" onclick="runQuickAudioCheck()" disabled title="Kjør grov sanntidstranskripsjon og lydnivåsjekk (dBFS) på de første 20 sekundene av valgt lydfil">Lydsjekk (20s)</button>
+    <button onclick="copyLog()" title="Kopier hele loggen til utklippstavlen">Kopier logg</button>
+    <button onclick="saveLog()" title="Lagre loggen til en .txt-fil">Lagre logg...</button>
+    <button class="danger" id="stop_btn" onclick="stopJob()" disabled title="Stopp/pause pågående steg (fullførte steg er lagret i sjekkpunkt)">Stopp / Pause</button>
+    <button class="primary" id="run_btn" onclick="runPipeline()" disabled>Start / Fortsett</button>
+  </div>
+
+  <div class="progress-section">
+    <div class="progress-header">
+      <span id="progress_label">Klar</span>
+      <span id="progress_val">0%</span>
+    </div>
+    <div class="progress-bg">
+      <div id="progress_bar" class="progress-fill"></div>
+    </div>
+  </div>
+
+  <div id="log">Klar. Start et opptak, eller velg en lydfil (.wav/.m4a/.opus/.mp3) eller en eksisterende transkripsjonsfil (.html/.json/.txt/.srt).</div>
+
+<script>
+  let currentAudioPath = "";
+  let isJobRunning = false;
+  let isRecording = false;
+  let recStartTime = 0;
+  let recTimerInterval = null;
+
+  window.addEventListener('pywebviewready', async () => {
+    const defs = await pywebview.api.get_defaults();
+    if (defs.hf_token) document.getElementById('hf_token').value = defs.hf_token;
+    if (defs.diarization_cached && !defs.hf_token) {
+      document.getElementById('hf_token').placeholder = "HF bufret lokalt";
+    }
+    document.getElementById('out_dir').value = defs.default_out_dir;
+    if (defs.default_meeting_title) {
+      document.getElementById('meeting_title').value = defs.default_meeting_title;
+    }
+  });
+
+  const dz = document.getElementById('dropzone');
+  dz.addEventListener('dragover', (e) => { e.preventDefault(); dz.classList.add('dragover'); });
+  dz.addEventListener('dragleave', () => dz.classList.remove('dragover'));
+  dz.addEventListener('drop', (e) => { e.preventDefault(); dz.classList.remove('dragover'); });
+
+  function selectTaskMode(mode) {
+    const sel = document.getElementById('task_mode');
+    if (sel) {
+      sel.value = mode;
+      validateNames();
+    }
+  }
+
+  function setExactSpeakers(n) {
+    document.getElementById('min_speakers').value = n;
+    document.getElementById('max_speakers').value = n;
+  }
+
+  function onModeChanged() {
+    const mode = document.getElementById('note_mode').value;
+    if (mode === 'foredrag' && !document.getElementById('min_speakers').value && !document.getElementById('max_speakers').value) {
+      document.getElementById('min_speakers').value = 1;
+      document.getElementById('max_speakers').value = 1;
+    }
+  }
+
+  function autoCountSpeakersFromHint() {
+    const raw = document.getElementById('speaker_names_hint').value.trim();
+    if (!raw) return;
+    const parts = raw.split(/[,;\\n]+/).map(s => s.trim()).filter(Boolean);
+    if (parts.length >= 1 && parts.length <= 20) {
+      document.getElementById('min_speakers').value = parts.length;
+      document.getElementById('max_speakers').value = parts.length;
+    }
+  }
+
+  function speakGuide() {
+    document.getElementById('prompt_banner').style.display = 'block';
+    pywebview.api.speak_intro_prompt();
+  }
+
+  function updateLiveLevel(lvl) {
+    const badge = document.getElementById('live_level_badge');
+    if (!badge || !lvl) return;
+    badge.className = 'live-badge ' + (lvl.status || '');
+    const stMap = { godt: 'Godt', lavt: 'Lavt!', stille: 'Stille', hoyt: 'Høyt/Klipp!' };
+    const stTxt = stMap[lvl.status] || lvl.status;
+    badge.textContent = `Lyd: ${lvl.rms_dbfs} dBFS (${stTxt})`;
+    badge.title = lvl.label || '';
+  }
+
+  function appendLiveChunk(line, lvl) {
+    const panel = document.getElementById('live_check_panel');
+    if (!panel) return;
+    panel.style.display = 'block';
+    if (lvl) updateLiveLevel(lvl);
+    panel.textContent = (panel.textContent ? panel.textContent + "\n" : "") + line;
+    panel.scrollTop = panel.scrollHeight;
+  }
+
+  async function runQuickAudioCheck() {
+    if (!currentAudioPath) return;
+    const panel = document.getElementById('live_check_panel');
+    if (panel) {
+      panel.style.display = 'block';
+      panel.textContent = "Starter grov sanntids-lydsjekk (første 20 sekunder)...";
+    }
+    await pywebview.api.run_quick_audio_check(
+      currentAudioPath,
+      document.getElementById('whisper_model').value,
+      document.getElementById('language').value,
+      document.getElementById('meeting_title').value,
+      document.getElementById('speaker_names_hint').value,
+      document.getElementById('agenda_text').value
+    );
+  }
+
+  async function toggleRecording() {
+    const btn = document.getElementById('rec_btn');
+    const outDir = document.getElementById('out_dir').value;
+    if (!isRecording) {
+      const autoSpeak = document.getElementById('auto_speak_guide').checked;
+      const liveTranscribe = document.getElementById('live_transcribe_chk').checked;
+      document.getElementById('prompt_banner').style.display = 'block';
+      const panel = document.getElementById('live_check_panel');
+      if (panel && liveTranscribe) {
+        panel.style.display = 'block';
+        panel.textContent = "Lytter på mikrofon (oppdaterer lydnivå hvert sekund og grov transkripsjon hvert 5. sekund)...";
+      }
+      const res = await pywebview.api.start_recording(
+        outDir,
+        autoSpeak,
+        liveTranscribe,
+        document.getElementById('whisper_model').value,
+        document.getElementById('language').value,
+        document.getElementById('meeting_title').value,
+        document.getElementById('speaker_names_hint').value,
+        document.getElementById('agenda_text').value
+      );
+      if (!res || !res.ok) {
+        appendLog("FEIL ved opptaksstart: " + (res ? res.error : "Ukjent feil"));
+        return;
+      }
+      isRecording = true;
+      btn.textContent = "Stopp opptak";
+      btn.classList.add('recording');
+      recStartTime = Date.now();
+      recTimerInterval = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - recStartTime) / 1000);
+        const mins = String(Math.floor(elapsed / 60)).padStart(2, '0');
+        const secs = String(elapsed % 60).padStart(2, '0');
+        document.getElementById('rec_timer').textContent = mins + ":" + secs;
+      }, 500);
+    } else {
+      clearInterval(recTimerInterval);
+      isRecording = false;
+      btn.textContent = "Spill inn møte";
+      btn.classList.remove('recording');
+      const info = await pywebview.api.stop_recording(outDir);
+      if (info) {
+        await applySelection(info);
+      }
+    }
+  }
+
+  async function loadAgendaFile() {
+    const content = await pywebview.api.pick_agenda_file();
+    if (content) {
+      const box = document.getElementById('agenda_text');
+      box.value = box.value.trim() ? (box.value.trim() + "\\n\\n" + content) : content;
+    }
+  }
+
+  async function refreshCheckpointBar() {
+    if (!currentAudioPath) return;
+    const outDir = document.getElementById('out_dir').value;
+    const htmlName = document.getElementById('html_name').value;
+    const notesName = document.getElementById('notes_name').value;
+    const st = await pywebview.api.get_checkpoint_status(outDir, currentAudioPath, htmlName, notesName);
+    const map = [
+      ['ckpt_s1', st.s1_asr, '1. ASR'],
+      ['ckpt_s2', st.s2_align, '2. Align'],
+      ['ckpt_s3', st.s3_diarize, '3. Pyannote'],
+      ['ckpt_s4', st.s4_names, '4. Navn & HTML'],
+      ['ckpt_s5', st.s5_notes, '5. Referat/Notat'],
+    ];
+    for (const [id, done, label] of map) {
+      const el = document.getElementById(id);
+      if (el) {
+        el.classList.toggle('done', !!done);
+        el.textContent = (done ? "✓ " : "") + label;
+      }
+    }
+  }
+
+  async function applySelection(info) {
+    currentAudioPath = info.audio_path;
+    document.getElementById('selected-file').textContent = info.audio_path + (info.is_transcript_input ? " (Transkripsjon)" : "");
+    if (info.out_dir) document.getElementById('out_dir').value = info.out_dir;
+    if (info.html_name) document.getElementById('html_name').value = info.html_name;
+    if (info.notes_name) document.getElementById('notes_name').value = info.notes_name;
+    if (info.notes_html_name) document.getElementById('notes_html_name').value = info.notes_html_name;
+    if (info.is_transcript_input) {
+      document.getElementById('task_mode').value = 'auto_resume';
+    }
+    await refreshCheckpointBar();
+    await validateNames();
+  }
+
+  async function handleDroppedAudio(fullPath) {
+    const low = fullPath.toLowerCase();
+    if (low.endsWith('.pptx') || low.endsWith('.pdf') || low.endsWith('.odp') || low.endsWith('.docx') || low.endsWith('.odt')) {
+      const ctx = await pywebview.api.load_context_file_path(fullPath);
+      if (ctx) {
+        const box = document.getElementById('agenda_text');
+        box.value = box.value.trim() ? (box.value.trim() + "\\n\\n" + ctx) : ctx;
+      }
+      return;
+    }
+    const info = await pywebview.api.suggest_output_names(
+      fullPath,
+      document.getElementById('out_dir').value
+    );
+    await applySelection(info);
+  }
+
+  async function browseAudio() {
+    const info = await pywebview.api.pick_audio_file();
+    if (info) await applySelection(info);
+  }
+
+  async function browseFolder() {
+    const res = await pywebview.api.pick_output_dir(currentAudioPath);
+    if (res) {
+      document.getElementById('out_dir').value = res.out_dir;
+      if (res.html_name) document.getElementById('html_name').value = res.html_name;
+      if (res.notes_name) document.getElementById('notes_name').value = res.notes_name;
+      if (res.notes_html_name) document.getElementById('notes_html_name').value = res.notes_html_name;
+      await refreshCheckpointBar();
+      await validateNames();
+    }
+  }
+
+  async function autoIncrementNames() {
+    if (!currentAudioPath) return;
+    const info = await pywebview.api.suggest_output_names(
+      currentAudioPath,
+      document.getElementById('out_dir').value
+    );
+    document.getElementById('html_name').value = info.html_name;
+    document.getElementById('notes_name').value = info.notes_name;
+    document.getElementById('notes_html_name').value = info.notes_html_name;
+    await refreshCheckpointBar();
+    await validateNames();
+  }
+
+  async function validateNames() {
+    const outDir = document.getElementById('out_dir').value;
+    const htmlInput = document.getElementById('html_name');
+    const notesInput = document.getElementById('notes_name');
+    const notesHtmlInput = document.getElementById('notes_html_name');
+    const msg = document.getElementById('conflict-msg');
+    const btn = document.getElementById('run_btn');
+    const checkBtn = document.getElementById('check_audio_btn');
+    if (checkBtn) checkBtn.disabled = !currentAudioPath || isJobRunning;
+
+    const htmlName = htmlInput.value.trim();
+    const notesName = notesInput.value.trim();
+    const notesHtmlName = notesHtmlInput.value.trim();
+
+    if (!currentAudioPath || !htmlName || !notesName || !notesHtmlName) {
+      btn.disabled = true;
+      return;
+    }
+
+    const uniqueSet = new Set([htmlName, notesName, notesHtmlName]);
+    if (uniqueSet.size < 3) {
+      msg.textContent = "Alle tre utdatafiler må ha ulike filnavn.";
+      htmlInput.classList.add('conflict');
+      notesInput.classList.add('conflict');
+      notesHtmlInput.classList.add('conflict');
+      btn.disabled = true;
+      return;
+    }
+
+    const conflicts = await pywebview.api.check_conflicts(outDir, htmlName, notesName, notesHtmlName);
+    htmlInput.classList.toggle('conflict', conflicts.includes(htmlName));
+    notesInput.classList.toggle('conflict', conflicts.includes(notesName));
+    notesHtmlInput.classList.toggle('conflict', conflicts.includes(notesHtmlName));
+
+    if (conflicts.length > 0) {
+      msg.textContent = "Merk: Eksisterende utdatafil oppdateres ved kjøring (eller klikk «Ledig navn»).";
+    } else {
+      msg.textContent = "";
+    }
+    btn.disabled = isJobRunning;
+    await refreshCheckpointBar();
+  }
+
+  function openFinder() {
+    pywebview.api.reveal_in_finder(document.getElementById('out_dir').value);
+  }
+
+  async function copyLog() {
+    const text = document.getElementById('log').textContent;
+    try {
+      await navigator.clipboard.writeText(text);
+      appendLog("==> Logg kopiert til utklippstavlen.");
+    } catch (e) {
+      appendLog("Merk: Kunne ikke kopiere automatisk – marker teksten i loggen med Cmd+A / Ctrl+A.");
+    }
+  }
+
+  async function saveLog() {
+    const text = document.getElementById('log').textContent;
+    const outDir = document.getElementById('out_dir').value;
+    await pywebview.api.save_log_dialog(text, outDir, currentAudioPath);
+  }
+
+  async function stopJob() {
+    if (!isJobRunning) return;
+    await pywebview.api.stop_job();
+  }
+
+  function appendLog(line) {
+    const log = document.getElementById('log');
+    log.textContent += "\\n" + line;
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function updateProgress(percent, label) {
+    const clamped = Math.max(0, Math.min(100, percent));
+    document.getElementById('progress_bar').style.width = clamped + "%";
+    document.getElementById('progress_val').textContent = clamped + "%";
+    if (label) document.getElementById('progress_label').textContent = label;
+  }
+
+  function setRunning(running) {
+    isJobRunning = running;
+    const btn = document.getElementById('run_btn');
+    const stopBtn = document.getElementById('stop_btn');
+    btn.textContent = running ? "Arbeider..." : "Start / Fortsett";
+    stopBtn.disabled = !running;
+    validateNames();
+  }
+
+  async function runPipeline() {
+    await validateNames();
+    if (document.getElementById('run_btn').disabled) return;
+
+    const taskMode = document.getElementById('task_mode').value;
+    updateProgress(0, "Starter jobb...");
+    document.getElementById('log').textContent = "Starter jobb (" + taskMode + ")...";
+    pywebview.api.start_job(
+      currentAudioPath,
+      document.getElementById('out_dir').value,
+      document.getElementById('html_name').value,
+      document.getElementById('notes_name').value,
+      document.getElementById('notes_html_name').value,
+      document.getElementById('whisper_model').value,
+      document.getElementById('ollama_model').value,
+      document.getElementById('language').value,
+      document.getElementById('hf_token').value,
+      document.getElementById('min_speakers').value,
+      document.getElementById('max_speakers').value,
+      document.getElementById('speaker_names_hint').value,
+      document.getElementById('meeting_title').value,
+      document.getElementById('agenda_text').value,
+      document.getElementById('note_mode').value,
+      taskMode
+    );
+  }
+</script>
+</body>
+</html>

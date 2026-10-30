@@ -23,11 +23,13 @@ def run_step(title: str, cmd: list[str]) -> None:
 
 def main() -> int:
     os.chdir(BASE_DIR)
+    src_str = str(BASE_DIR / "src")
+    os.environ["PYTHONPATH"] = f"{src_str}:{os.environ.get('PYTHONPATH', '')}"
 
     # 1. Doctests, Unit tests, Linting (ruff), and Static Types (mypy)
     run_step(
-        "1/5: Doctests (mote_core.py & transcribe.py)",
-        [sys.executable, "-m", "doctest", "mote_core.py", "transcribe.py"],
+        "1/5: Doctests (src/mote/core.py & src/mote/cli.py)",
+        [sys.executable, "-m", "doctest", "src/mote/core.py", "src/mote/cli.py"],
     )
     run_step(
         "2/5: Enhetstester, sanntidsmonitor og sjekkpunkt-/konteksttester",
@@ -39,17 +41,16 @@ def main() -> int:
             "uvx",
             "ruff",
             "check",
-            "mote_core.py",
+            "src/",
+            "scripts/",
+            "tests/",
             "transcribe.py",
             "mote_app.py",
-            "mote_gui.py",
-            "debug_synthetic_test.py",
-            "tests/",
         ],
     )
     run_step(
         "4/5: Statisk typesjekk med Mypy",
-        ["uvx", "mypy", "mote_core.py", "transcribe.py", "tests/test_cli_and_pipeline.py"],
+        ["uvx", "mypy", "src/mote/core.py", "src/mote/cli.py", "transcribe.py", "tests/test_cli_and_pipeline.py"],
     )
 
     # 2. Verify coarse real-time transcription & audio level check (--live-check) on synthetic meeting

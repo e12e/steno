@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{escaped_title} – Møtereferat</title>
+  <style>
+    :root {{
+      --bg: #f8fafc;
+      --card-bg: #ffffff;
+      --card-border: #e2e8f0;
+      --text-main: #0f172a;
+      --text-muted: #64748b;
+      --accent: #2563eb;
+      --accent-soft: rgba(37, 99, 235, 0.08);
+      --header-bg: rgba(255, 255, 255, 0.90);
+      --code-bg: #f1f5f9;
+      --table-stripe: rgba(241, 245, 249, 0.6);
+      --shadow-sm: 0 1px 3px rgba(0,0,0,0.05);
+      --shadow-lg: 0 10px 25px -5px rgba(0,0,0,0.06), 0 8px 10px -6px rgba(0,0,0,0.04);
+    }}
+    [data-theme="dark"] {{
+      --bg: #0b0f19;
+      --card-bg: #151d2e;
+      --card-border: #233047;
+      --text-main: #f1f5f9;
+      --text-muted: #94a3b8;
+      --accent: #38bdf8;
+      --accent-soft: rgba(56, 189, 248, 0.12);
+      --header-bg: rgba(21, 29, 46, 0.92);
+      --code-bg: #1e293b;
+      --table-stripe: rgba(30, 41, 59, 0.4);
+      --shadow-sm: 0 1px 3px rgba(0,0,0,0.3);
+      --shadow-lg: 0 12px 30px rgba(0,0,0,0.45);
+    }}
+    @media (prefers-color-scheme: dark) {{
+      :root:not([data-theme="light"]) {{
+        --bg: #0b0f19;
+        --card-bg: #151d2e;
+        --card-border: #233047;
+        --text-main: #f1f5f9;
+        --text-muted: #94a3b8;
+        --accent: #38bdf8;
+        --accent-soft: rgba(56, 189, 248, 0.12);
+        --header-bg: rgba(21, 29, 46, 0.92);
+        --code-bg: #1e293b;
+        --table-stripe: rgba(30, 41, 59, 0.4);
+        --shadow-sm: 0 1px 3px rgba(0,0,0,0.3);
+        --shadow-lg: 0 12px 30px rgba(0,0,0,0.45);
+      }}
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text-main);
+      max-width: 880px;
+      margin: 0 auto;
+      padding: 24px 16px 80px;
+      line-height: 1.68;
+      -webkit-font-smoothing: antialiased;
+      transition: background-color 0.2s ease, color 0.2s ease;
+    }}
+    .toolbar {{
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 18px;
+      padding: 10px 16px;
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      box-shadow: var(--shadow-sm);
+    }}
+    .toolbar-title {{
+      font-size: 13.5px;
+      font-weight: 600;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }}
+    .toolbar-actions {{
+      display: flex;
+      gap: 8px;
+    }}
+    .toolbar button {{
+      padding: 6px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--card-border);
+      background: var(--card-bg);
+      color: var(--text-main);
+      cursor: pointer;
+      font-size: 12.5px;
+      font-weight: 500;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s ease;
+    }}
+    .toolbar button:hover {{
+      border-color: var(--accent);
+      color: var(--accent);
+    }}
+    article {{
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      padding: 42px 48px;
+      box-shadow: var(--shadow-lg);
+    }}
+    h1 {{
+      font-size: 1.75rem;
+      font-weight: 700;
+      margin-top: 0;
+      margin-bottom: 18px;
+      letter-spacing: -0.02em;
+      border-bottom: 2px solid var(--card-border);
+      padding-bottom: 12px;
+    }}
+    h2 {{
+      font-size: 1.25rem;
+      font-weight: 600;
+      color: var(--accent);
+      margin-top: 1.8em;
+      margin-bottom: 10px;
+      letter-spacing: -0.01em;
+    }}
+    h3 {{
+      font-size: 1.05rem;
+      font-weight: 600;
+      margin-top: 1.4em;
+      margin-bottom: 8px;
+    }}
+    p {{
+      margin: 0.8em 0;
+    }}
+    table {{
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+      margin: 20px 0;
+      font-size: 13.5px;
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      overflow: hidden;
+    }}
+    th, td {{
+      padding: 10px 14px;
+      text-align: left;
+      vertical-align: top;
+    }}
+    th {{
+      background: var(--accent-soft);
+      font-weight: 600;
+      border-bottom: 1px solid var(--card-border);
+    }}
+    td {{
+      border-bottom: 1px solid var(--card-border);
+    }}
+    tr:last-child td {{
+      border-bottom: none;
+    }}
+    tr:nth-child(even) td {{
+      background: var(--table-stripe);
+    }}
+    ul, ol {{
+      padding-left: 24px;
+      margin: 0.8em 0;
+    }}
+    li {{
+      margin-bottom: 6px;
+    }}
+    blockquote {{
+      margin: 18px 0;
+      padding: 12px 20px;
+      border-left: 4px solid var(--accent);
+      background: var(--accent-soft);
+      border-radius: 0 10px 10px 0;
+      color: var(--text-main);
+    }}
+    blockquote p {{
+      margin: 0;
+    }}
+    code {{
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      font-size: 13px;
+      background: var(--code-bg);
+      padding: 2px 6px;
+      border-radius: 6px;
+      border: 1px solid var(--card-border);
+    }}
+    pre {{
+      background: var(--code-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      padding: 14px 18px;
+      overflow-x: auto;
+      font-size: 13px;
+    }}
+    pre code {{
+      background: none;
+      padding: 0;
+      border: none;
+    }}
+    hr {{
+      border: none;
+      border-top: 1px solid var(--card-border);
+      margin: 28px 0;
+    }}
+    @media print {{
+      body {{ background: #fff !important; color: #000 !important; margin: 0 !important; padding: 0 !important; max-width: 100% !important; }}
+      .no-print {{ display: none !important; }}
+      article {{ border: none !important; box-shadow: none !important; padding: 0 !important; }}
+      h1, h2, h3, table, blockquote {{ break-inside: avoid; }}
+      h2 {{ color: #000 !important; }}
+    }}
+  </style>
+</head>
+<body>
+  <div class="toolbar no-print">
+    <div class="toolbar-title">
+      <span>📄 {escaped_title}</span>
+    </div>
+    <div class="toolbar-actions">
+      <button onclick="copyMarkdown()" id="copy-md-btn" title="Kopier referatet som Markdown-tekst">
+        📋 Kopier Markdown
+      </button>
+      <button onclick="toggleTheme()" title="Bytt mellom lyst og mørkt tema">
+        🌓 Tema
+      </button>
+      <button onclick="window.print()" title="Skriv ut eller lagre PDF">
+        🖨️ Skriv ut / PDF
+      </button>
+    </div>
+  </div>
+
+  <article>
+    {rendered_body}
+  </article>
+
+  <textarea id="raw-markdown" style="display:none">{escaped_notes_md}</textarea>
+
+  <script>
+    const THEME_KEY = "mote_theme_pref";
+
+    function copyMarkdown() {{
+      const md = document.getElementById('raw-markdown').value;
+      navigator.clipboard.writeText(md).then(() => {{
+        const btn = document.getElementById('copy-md-btn');
+        const old = btn.textContent;
+        btn.textContent = "✓ Kopiert!";
+        setTimeout(() => {{ btn.textContent = old; }}, 1500);
+      }});
+    }}
+
+    function toggleTheme() {{
+      const cur = document.documentElement.getAttribute('data-theme');
+      const next = cur === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      try {{ localStorage.setItem(THEME_KEY, next); }} catch (e) {{}}
+    }}
+
+    window.addEventListener('DOMContentLoaded', () => {{
+      try {{
+        const savedTheme = localStorage.getItem(THEME_KEY);
+        if (savedTheme) {{
+          document.documentElement.setAttribute('data-theme', savedTheme);
+        }}
+      }} catch (e) {{}}
+    }});
+  </script>
+</body>
+</html>
