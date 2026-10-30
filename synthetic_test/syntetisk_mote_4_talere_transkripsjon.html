@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+  <meta charset="utf-8">
+  <title>Statusmøte Sikkerhetsplattform 2026 – Transkripsjon</title>
+  <style>
+    :root {
+      --bg: #f5f6f8; --card: #ffffff; --text: #1d1d1f; --sub: #6e6e73; --border: #e5e5ea;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #121212; --card: #1c1c1e; --text: #f5f5f7; --sub: #98989d; --border: #2c2c2e;
+      }
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+      background: var(--bg); color: var(--text);
+      max-width: 860px; margin: 28px auto; padding: 0 20px 60px; line-height: 1.55;
+    }
+    header {
+      background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+      padding: 16px 20px; margin-bottom: 18px; position: sticky; top: 10px; z-index: 10;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+    }
+    h1 { font-size: 1.25rem; margin: 0 0 12px 0; }
+    .controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+    #filter {
+      flex: 1; min-width: 200px; padding: 8px 12px; border: 1px solid var(--border);
+      border-radius: 8px; background: var(--bg); color: var(--text); font-size: 13.5px;
+    }
+    .speakers-bar {
+      display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; padding-top: 10px;
+      border-top: 1px solid var(--border); font-size: 12px; align-items: center;
+    }
+    .spk-edit { display: flex; align-items: center; gap: 5px; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+    .spk-edit input {
+      padding: 4px 8px; border-radius: 6px; border: 1px solid var(--border);
+      background: var(--bg); color: var(--text); font-size: 12px; width: 175px; font-weight: 600;
+    }
+    .turn {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 10px; padding: 12px 16px; margin-bottom: 10px;
+    }
+    .meta { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; font-size: 12px; }
+    .badge { color: #fff; font-weight: 600; padding: 2px 9px; border-radius: 12px; }
+    .timestamp { color: var(--sub); font-family: ui-monospace, "SF Mono", monospace; }
+    .text { font-size: 14.5px; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Statusmøte Sikkerhetsplattform 2026</h1>
+    <div class="controls">
+      <input type="text" id="filter" placeholder="Søk i tekst, tidspunkt eller taler..." oninput="filterTurns()">
+    </div>
+    <div class="speakers-bar">
+      <span style="color:var(--sub)">Deltakere (kan redigeres):</span>
+      <div class="spk-edit">  <span class="dot" style="background:#007AFF"></span>  <input type="text" value="Kari Nordmann, Prosjektleder (SPEAKER_02)" data-orig="SPEAKER_02"          oninput="renameSpeaker(this.dataset.orig, this.value)" title="Endre navn i visningen"></div><div class="spk-edit">  <span class="dot" style="background:#34C759"></span>  <input type="text" value="Ola Hansen, Systemutvikler (SPEAKER_01)" data-orig="SPEAKER_01"          oninput="renameSpeaker(this.dataset.orig, this.value)" title="Endre navn i visningen"></div><div class="spk-edit">  <span class="dot" style="background:#FF9500"></span>  <input type="text" value="Per Johansen, Økonomiansvarlig (SPEAKER_03)" data-orig="SPEAKER_03"          oninput="renameSpeaker(this.dataset.orig, this.value)" title="Endre navn i visningen"></div><div class="spk-edit">  <span class="dot" style="background:#AF52DE"></span>  <input type="text" value="Ingrid Berg, Sikkerhetsarkitekt (SPEAKER_00)" data-orig="SPEAKER_00"          oninput="renameSpeaker(this.dataset.orig, this.value)" title="Endre navn i visningen"></div>
+    </div>
+  </header>
+  <main id="container">
+    <div class="turn" data-speaker="SPEAKER_02">  <div class="meta">    <span class="badge" style="background:#007AFF" data-spk-label="SPEAKER_02">Kari Nordmann, Prosjektleder (SPEAKER_02)</span>    <span class="timestamp">00:00 – 00:13</span>  </div>  <div class="text">Hei alle sammen, og velkommen til statusmøte for Sikkerhetsplattform 2026. Mitt navnavn er Karin Nordmann, og jeg er prosjektleder. La oss ta en kort runde rundt bordet så alle får sagt hvem vi er.</div></div><div class="turn" data-speaker="SPEAKER_01">  <div class="meta">    <span class="badge" style="background:#34C759" data-spk-label="SPEAKER_01">Ola Hansen, Systemutvikler (SPEAKER_01)</span>    <span class="timestamp">00:13 – 00:20</span>  </div>  <div class="text">Hei, jeg heter Ola Hansen, og jeg jobber som systemutvikler med ansvar for bakken og API-migrering.</div></div><div class="turn" data-speaker="SPEAKER_03">  <div class="meta">    <span class="badge" style="background:#FF9500" data-spk-label="SPEAKER_03">Per Johansen, Økonomiansvarlig (SPEAKER_03)</span>    <span class="timestamp">00:21 – 00:25</span>  </div>  <div class="text">Hei, mitt navnavn er Per Johansen, og jeg er økonomiansvarlig for plattformbudsjettet i fjerde kvartal.</div></div><div class="turn" data-speaker="SPEAKER_02">  <div class="meta">    <span class="badge" style="background:#007AFF" data-spk-label="SPEAKER_02">Kari Nordmann, Prosjektleder (SPEAKER_02)</span>    <span class="timestamp">00:34 – 00:41</span>  </div>  <div class="text">Takk skal dere ha. Første punkt på agendaen har status på APImmigrering. Ola, hvordan ligger vi an der?</div></div><div class="turn" data-speaker="SPEAKER_01">  <div class="meta">    <span class="badge" style="background:#34C759" data-spk-label="SPEAKER_01">Ola Hansen, Systemutvikler (SPEAKER_01)</span>    <span class="timestamp">00:41 – 00:53</span>  </div>  <div class="text">Vi har fullført overgangen til ny AuoAut2-innlogging i testmiljøet denne uken. Alle ende punkter svarer svarer under 40 millisekunder, men vi trenger to dager til på feilhåndtering.</div></div><div class="turn" data-speaker="SPEAKER_03">  <div class="meta">    <span class="badge" style="background:#FF9500" data-spk-label="SPEAKER_03">Per Johansen, Økonomiansvarlig (SPEAKER_03)</span>    <span class="timestamp">00:53 – 01:04</span>  </div>  <div class="text">Det høres bra ut, Ola, under sikkerhetstesten i går fant vi at tofaktorautentisering må være påkrevd for alle administratorbrukbrukere før vi går i produksproduksjon.</div></div><div class="turn" data-speaker="SPEAKER_01">  <div class="meta">    <span class="badge" style="background:#34C759" data-spk-label="SPEAKER_01">Ola Hansen, Systemutvikler (SPEAKER_01)</span>    <span class="timestamp">01:04 – 01:10</span>  </div>  <div class="text">Den er grei. Ingrid, jeg legger inn tvungen tofaktorautentisering i konfigurasjonen innen fredag.</div></div><div class="turn" data-speaker="SPEAKER_02">  <div class="meta">    <span class="badge" style="background:#007AFF" data-spk-label="SPEAKER_02">Kari Nordmann, Prosjektleder (SPEAKER_02)</span>    <span class="timestamp">01:11 – 01:21</span>  </div>  <div class="text">Flott, da vedtar vi at o-faktor-autentisering er obligatorisk før lansering. Hør, hvordan ser budsjettet og lisenskostnadene ut for fjerde kvartal?</div></div><div class="turn" data-speaker="SPEAKER_00">  <div class="meta">    <span class="badge" style="background:#AF52DE" data-spk-label="SPEAKER_00">Ingrid Berg, Sikkerhetsarkitekt (SPEAKER_00)</span>    <span class="timestamp">01:21 – 01:33</span>  </div>  <div class="text">Vi ligger 15 % under budsjett så langt til kvartalet fordi vi samlet skysservenner i Norge, men vi må fornye sertifikatlisensen innen 15. november, som koster 40 000 kroner.</div></div><div class="turn" data-speaker="SPEAKER_03">  <div class="meta">    <span class="badge" style="background:#FF9500" data-spk-label="SPEAKER_03">Per Johansen, Økonomiansvarlig (SPEAKER_03)</span>    <span class="timestamp">01:33 – 01:39</span>  </div>  <div class="text">Jeg sender over oppdatert sikkerhetsrapport og kravspesifikasjoner til både Kari og Per innen</div></div><div class="turn" data-speaker="SPEAKER_02">  <div class="meta">    <span class="badge" style="background:#007AFF" data-spk-label="SPEAKER_02">Kari Nordmann, Prosjektleder (SPEAKER_02)</span>    <span class="timestamp">01:39 – 01:57</span>  </div>  <div class="text">onsdag. Utmerket. Da oppsummerer jeg aksjonspunktene. Ola ferdigstiller Ola ferdigstiller OAU2 og to faktor innen fredag, Ingrid leverer sikkerhetsrapporten innen onsdag, og Per bestiller sertifikatlisensen før 15.11.11.119. Takk for et effektivt møte.</div></div>
+  </main>
+  <script>
+    const STORAGE_KEY = "mote_spk_" + document.title;
+    function filterTurns() {
+      const q = document.getElementById('filter').value.toLowerCase();
+      document.querySelectorAll('.turn').forEach(el => {
+        el.style.display = el.innerText.toLowerCase().includes(q) ? '' : 'none';
+      });
+    }
+    function renameSpeaker(orig, newName, skipSave) {
+      const label = newName.trim() || orig;
+      document.querySelectorAll(`[data-spk-label="${orig}"]`).forEach(el => {
+        el.textContent = label;
+      });
+      if (!skipSave) {
+        try {
+          const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+          saved[orig] = newName;
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
+        } catch (e) {}
+      }
+      filterTurns();
+    }
+    window.addEventListener('DOMContentLoaded', () => {
+      try {
+        const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+        document.querySelectorAll('.spk-edit input').forEach(inp => {
+          const orig = inp.dataset.orig;
+          if (saved[orig]) {
+            inp.value = saved[orig];
+            renameSpeaker(orig, saved[orig], true);
+          }
+        });
+      } catch (e) {}
+    });
+  </script>
+</body>
+</html>

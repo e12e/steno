@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-from pathlib import Path
 import re
 import shutil
 import subprocess
@@ -14,6 +13,7 @@ import sys
 import tempfile
 import time
 import urllib.request
+from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
 TEST_DIR = BASE_DIR / "synthetic_test"
@@ -331,7 +331,13 @@ def synthesize_meeting_wav(script: list[dict], out_wav: Path, ffmpeg_bin: str) -
                 "-ac",
                 "1",
                 "-c:a",
-                "pcm_s16le",
+                "libopus",
+                "-b:a",
+                "24k",
+                "-vbr",
+                "on",
+                "-application",
+                "voip",
                 str(out_wav),
             ],
             stdout=subprocess.DEVNULL,
@@ -345,93 +351,64 @@ def run_debug_pipeline(
     out_dir: Path,
     whisper_model: str,
     ollama_model: str,
+    task_mode: str = "auto_resume",
 ) -> dict:
-    """Import mote_app.py (mocking webview if needed) and run Backend._worker with debug instrumentation."""
-    import types
-
-    # Provide lightweight stub for webview if running in system python without pywebview
-    if "webview" not in sys.modules:
-        wv_mod = types.ModuleType("webview")
-        wv_mod.FileDialog = types.SimpleNamespace(OPEN=10, FOLDER=20, SAVE=30)
-        wv_dom = types.ModuleType("webview.dom")
-        wv_dom.DOMEventHandler = object
-        sys.modules["webview"] = wv_mod
-        sys.modules["webview.dom"] = wv_dom
-
-    if "static_ffmpeg" not in sys.modules:
-        sf_mod = types.ModuleType("static_ffmpeg")
-        sf_mod.add_paths = lambda weak=True: None
-        sys.modules["static_ffmpeg"] = sf_mod
-
-    if "markdown" not in sys.modules:
-        try:
-            import markdown  # noqa: F401
-        except ModuleNotFoundError:
-            md_mod = types.ModuleType("markdown")
-            md_mod.markdown = lambda text, extensions=None: (
-                "<div class='md-fallback'><pre>"
-                + text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                + "</pre></div>"
-            )
-            sys.modules["markdown"] = md_mod
-
+    """Run mote_core.run_pipeline with debug instrumentation."""
     sys.path.insert(0, str(BASE_DIR))
-    import mote_app
+    import mote_core
 
     html_name = "syntetisk_mote_4_talere_transkripsjon.html"
     notes_name = "syntetisk_mote_4_talere_referat.md"
     notes_html_name = "syntetisk_mote_4_talere_referat.html"
 
-    for fname in (html_name, notes_name, notes_html_name):
-        fpath = out_dir / fname
-        if fpath.exists():
-            fpath.unlink()
+    if task_mode == "full_fresh":
+        for fname in (html_name, notes_name, notes_html_name):
+            fpath = out_dir / fname
+            if fpath.exists():
+                fpath.unlink()
 
     progress_history: list[tuple[float, int, str]] = []
     log_history: list[tuple[float, str]] = []
     t0 = time.time()
 
-    class DebugBackend(mote_app.MoteApi):
-        def _log(self, msg: str) -> None:
-            elapsed = time.time() - t0
-            log_history.append((elapsed, msg))
-            print(f"[{elapsed:6.1f}s] [LOG] {msg}", flush=True)
+    def _log(msg: str) -> None:
+        elapsed = time.time() - t0
+        log_history.append((elapsed, msg))
+        print(f"[{elapsed:6.1f}s] [LOG] {msg}", flush=True)
 
-        def _set_progress(self, percent: int, label: str) -> None:
-            elapsed = time.time() - t0
-            # Avoid spamming identical consecutive heartbeat lines more than every 5s in stdout
-            if progress_history:
-                _, prev_pct, prev_lbl = progress_history[-1]
-                if prev_pct == percent and prev_lbl == label:
-                    return
-            progress_history.append((elapsed, percent, label))
-            print(f"[{elapsed:6.1f}s] [PROGRESS {percent:3d}%] {label}", flush=True)
+    def _set_progress(percent: int, label: str) -> None:
+        elapsed = time.time() - t0
+        if progress_history:
+            _, prev_pct, prev_lbl = progress_history[-1]
+            if prev_pct == percent and prev_lbl == label:
+                return
+        progress_history.append((elapsed, percent, label))
+        print(f"[{elapsed:6.1f}s] [PROGRESS {percent:3d}%] {label}", flush=True)
 
-        def _set_running(self, running: bool) -> None:
-            elapsed = time.time() - t0
-            print(f"[{elapsed:6.1f}s] [STATE] running={running}", flush=True)
-
-    backend = DebugBackend()
-    hf_token = mote_app.get_initial_hf_token()
+    hf_token = mote_core.get_initial_hf_token()
 
     print("\n" + "=" * 76)
-    print("STARTER DEBUG-KJØRING AV MOTE_APP PIPELINE PÅ SYNTETISK OPPTAK")
+    print(f"STARTER CLI/PIPELINE E2E-KJØRING PÅ SYNTETISK OPPTAK (task={task_mode})")
     print("=" * 76)
-    backend._worker(
-        audio_path_str=str(wav_path),
-        out_dir_str=str(out_dir),
-        html_name_str=html_name,
-        notes_name_str=notes_name,
-        notes_html_name_str=notes_html_name,
+    mote_core.run_pipeline(
+        input_path=wav_path,
+        out_dir=out_dir,
+        html_name=html_name,
+        notes_name=notes_name,
+        notes_html_name=notes_html_name,
         whisper_model=whisper_model,
         ollama_model=ollama_model,
         language="no",
         hf_token=hf_token,
-        min_speakers_str="4",
-        max_speakers_str="4",
+        min_speakers=4,
+        max_speakers=4,
         speaker_names_hint=SPEAKER_HINT,
         meeting_title=MEETING_TITLE,
         agenda_text=AGENDA_MD,
+        note_mode="mote",
+        task_mode=task_mode,
+        log_fn=_log,
+        progress_fn=_set_progress,
     )
 
     return {
@@ -453,6 +430,7 @@ def evaluate_results(result: dict, script: list[dict]) -> int:
     notes_path: Path = result["notes_path"]
     notes_html_path: Path = result["notes_html_path"]
     progress_history = result["progress_history"]
+    log_history = result["log_history"]
 
     all_ok = True
     for label, path in [
@@ -467,15 +445,21 @@ def evaluate_results(result: dict, script: list[dict]) -> int:
         if not exists:
             all_ok = False
 
-    # Check progress stage transitions
+    ckpt_dir = html_path.parent / ".mote_checkpoints" / "syntetisk_mote_4_talere"
     stages_seen = {
-        "stage_1_asr": any("[1/4]" in lbl for _, _, lbl in progress_history),
-        "stage_2_align": any("[2/4]" in lbl for _, _, lbl in progress_history),
-        "stage_3_diarize": any("[3/4]" in lbl for _, _, lbl in progress_history),
-        "stage_4_llm": any("[4/4]" in lbl for _, _, lbl in progress_history),
+        "stage_1_asr": any("[Steg 1/5]" in lbl or "[1/4]" in lbl for _, _, lbl in progress_history)
+        or (ckpt_dir / "1_asr.json").is_file(),
+        "stage_2_align": any("[Steg 2/5]" in lbl or "[2/4]" in lbl for _, _, lbl in progress_history)
+        or (ckpt_dir / "2_align.json").is_file(),
+        "stage_3_diarize": any("[Steg 3/5]" in lbl or "[3/4]" in lbl for _, _, lbl in progress_history)
+        or (ckpt_dir / "3_diarize.json").is_file(),
+        "stage_4_names": any("[Steg 4/5]" in lbl for _, _, lbl in progress_history)
+        or (ckpt_dir / "4_speakers.json").is_file()
+        or any("4_speakers.json" in msg for _, msg in log_history),
+        "stage_5_notes": any("[Steg 5/5]" in lbl or "[4/4]" in lbl for _, _, lbl in progress_history),
         "completed_100": any(pct == 100 for _, pct, _ in progress_history),
     }
-    print("\nFremdriftssteg observert i statuslinjen:")
+    print("\nFremdriftssteg / sjekkpunkter verifisert:")
     for k, seen in stages_seen.items():
         print(f"  * {k:18s}: {'JA' if seen else 'NEI'}")
 
@@ -501,9 +485,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Syntetisk 4-talers møtetest og debug-kjøring.")
     parser.add_argument(
         "--step",
-        choices=["generate", "run", "all"],
+        choices=["generate", "run", "map-names", "check", "all"],
         default="all",
-        help="Hvilket steg som skal kjøres (generate=kun lyd/manus, run=kjør pipeline, all=begge)",
+        help="Hvilket steg som skal kjøres (generate=kun lyd/manus, run=kjør pipeline, map-names=oppdater talernavn i HTML, check=syntakssjekk, all=begge)",
     )
     parser.add_argument(
         "--whisper-model",
@@ -523,7 +507,7 @@ def main() -> int:
     args = parser.parse_args()
 
     TEST_DIR.mkdir(parents=True, exist_ok=True)
-    wav_path = TEST_DIR / "syntetisk_mote_4_talere.wav"
+    wav_path = TEST_DIR / "syntetisk_mote_4_talere.opus"
     script_json_path = TEST_DIR / "fasit_transkripsjon.json"
     agenda_path = TEST_DIR / "fasit_agenda.md"
 
@@ -563,6 +547,69 @@ def main() -> int:
         )
     else:
         script = json.loads(script_json_path.read_text(encoding="utf-8"))
+
+    if args.step == "check":
+        import py_compile
+        for fname in ("mote_gui.py", "mote_app.py", "debug_synthetic_test.py"):
+            py_compile.compile(str(BASE_DIR / fname), doraise=True)
+            print(f"[CHECK] Syntaks OK: {fname}")
+        return 0
+
+    if args.step == "map-names":
+        import html
+        import types
+
+        if "webview" not in sys.modules:
+            wv_mod = types.ModuleType("webview")
+            wv_mod.FileDialog = types.SimpleNamespace(OPEN=10, FOLDER=20, SAVE=30)
+            wv_dom = types.ModuleType("webview.dom")
+            wv_dom.DOMEventHandler = object
+            sys.modules["webview"] = wv_mod
+            sys.modules["webview.dom"] = wv_dom
+        if "static_ffmpeg" not in sys.modules:
+            sf_mod = types.ModuleType("static_ffmpeg")
+            sf_mod.add_paths = lambda weak=True: None
+            sys.modules["static_ffmpeg"] = sf_mod
+        if "markdown" not in sys.modules:
+            md_mod = types.ModuleType("markdown")
+            md_mod.markdown = lambda text, extensions=None: text
+            sys.modules["markdown"] = md_mod
+
+        sys.path.insert(0, str(BASE_DIR))
+        import mote_app
+
+        html_path = TEST_DIR / "syntetisk_mote_4_talere_transkripsjon.html"
+        raw = html_path.read_text(encoding="utf-8")
+        turns = []
+        for m in re.finditer(
+            r'data-speaker="(SPEAKER_\d+)".*?timestamp">(\d+):(\d+)\s*–\s*(\d+):(\d+)</span>.*?<div class="text">(.*?)</div>',
+            raw,
+            re.DOTALL,
+        ):
+            spk, m1, s1, m2, s2, txt = m.groups()
+            turns.append(
+                {
+                    "speaker": spk,
+                    "start": int(m1) * 60 + int(s1),
+                    "end": int(m2) * 60 + int(s2),
+                    "text": html.unescape(txt),
+                }
+            )
+        spk_map = mote_app.infer_speaker_names_via_api(
+            turns,
+            args.ollama_model,
+            SPEAKER_HINT,
+            MEETING_TITLE,
+            AGENDA_MD,
+            print,
+        )
+        print("Mapped speakers:", spk_map)
+        if any(k != v for k, v in spk_map.items()):
+            mote_app.build_transcript_html_and_text(
+                turns, spk_map, html_path, MEETING_TITLE
+            )
+            print("Updated HTML transcript with speaker names:", html_path)
+        return 0
 
     if args.step in ("run", "all"):
         res = run_debug_pipeline(

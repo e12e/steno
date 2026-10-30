@@ -30,11 +30,9 @@ exit /b %ERRORLEVEL%
 # Cross-platform single-file GUI for WhisperX + Ollama meeting transcription.
 from __future__ import annotations
 
-from contextlib import contextmanager
 import html
 import json
 import os
-from pathlib import Path
 import platform
 import re
 import shutil
@@ -46,9 +44,11 @@ import tempfile
 import threading
 import time
 import unicodedata
-from typing import Iterator
 import urllib.request
 import zipfile
+from collections.abc import Iterator
+from contextlib import contextmanager
+from pathlib import Path
 
 
 def _self_bootstrap_if_needed() -> None:
@@ -105,7 +105,6 @@ def _self_bootstrap_if_needed() -> None:
 
 _self_bootstrap_if_needed()
 
-import markdown  # noqa: E402
 import static_ffmpeg  # noqa: E402
 import webview  # noqa: E402
 from webview import FileDialog  # noqa: E402
@@ -445,6 +444,7 @@ def infer_speaker_names_via_api(
     model: str,
     known_names_hint: str,
     log_fn,
+    agenda_text: str = "",
 ) -> dict[str, str]:
     """Use Ollama to detect self-introductions and map SPEAKER_XX -> Real Name."""
     unique_speakers = sorted({t["speaker"] for t in turns})
@@ -465,6 +465,8 @@ def infer_speaker_names_via_api(
         if known_names_hint.strip()
         else "Ingen forhåndsoppgitte navn (finn navn ut fra transkripsjonen hvis folk presenterer seg).\n"
     )
+    if agenda_text.strip():
+        hint_block += f"Agenda / lysbilder / kontekst:\n{agenda_text.strip()[:1200]}\n"
 
     prompt = (
         "Analyser utdraget fra møtetranskripsjonen under og finn ut hvem de ulike taler-IDene "
@@ -484,7 +486,6 @@ def infer_speaker_names_via_api(
         "messages": [{"role": "user", "content": prompt}],
         "stream": False,
         "think": False,
-        "format": "json",
         "options": {"num_ctx": 16384, "temperature": 0.0},
     }
 
@@ -498,6 +499,9 @@ def infer_speaker_names_via_api(
         with urllib.request.urlopen(req, timeout=120) as resp:
             body = json.loads(resp.read().decode("utf-8", errors="replace"))
             content = clean_llm_output(body.get("message", {}).get("content", "{}"))
+            m_json = re.search(r"\{.*\}", content, flags=re.DOTALL)
+            if m_json:
+                content = m_json.group(0)
             parsed = json.loads(content)
             if isinstance(parsed, dict):
                 mapping: dict[str, str] = {}
@@ -513,241 +517,7 @@ def infer_speaker_names_via_api(
     return {spk: spk for spk in unique_speakers}
 
 
-def build_transcript_html_and_text(
-    turns: list[dict],
-    speaker_map: dict[str, str],
-    html_path: Path,
-    title: str,
-) -> str:
-    """Build rich searchable HTML transcript and return plain-text transcript for LLM."""
-    colors = ["#007AFF", "#34C759", "#FF9500", "#AF52DE", "#FF2D55", "#5856D6", "#00C7BE"]
-    speaker_color_map: dict[str, str] = {}
-    llm_lines: list[str] = []
-    html_items: list[str] = []
-
-    for item in turns:
-        orig_spk = item["speaker"]
-        display_spk = speaker_map.get(orig_spk, orig_spk)
-        if orig_spk not in speaker_color_map:
-            speaker_color_map[orig_spk] = colors[len(speaker_color_map) % len(colors)]
-        color = speaker_color_map[orig_spk]
-        t_str = f"{format_seconds(item['start'])} – {format_seconds(item['end'])}"
-
-        llm_lines.append(f"[{t_str}] {display_spk}: {item['text']}")
-        html_items.append(
-            f'<div class="turn" data-speaker="{html.escape(orig_spk)}">'
-            f'  <div class="meta">'
-            f'    <span class="badge" style="background:{color}" data-spk-label="{html.escape(orig_spk)}">{html.escape(display_spk)}</span>'
-            f'    <span class="timestamp">{t_str}</span>'
-            f'  </div>'
-            f'  <div class="text">{html.escape(item["text"])}</div>'
-            f'</div>'
-        )
-
-    speaker_inputs = "".join(
-        f'<div class="spk-edit">'
-        f'  <span class="dot" style="background:{col}"></span>'
-        f'  <input type="text" value="{html.escape(speaker_map.get(spk, spk))}" data-orig="{html.escape(spk)}" '
-        f'         oninput="renameSpeaker(this.dataset.orig, this.value)" title="Endre navn i visningen ({html.escape(spk)})">'
-        f'</div>'
-        for spk, col in speaker_color_map.items()
-    )
-
-    html_doc = f"""<!DOCTYPE html>
-<html lang="no">
-<head>
-  <meta charset="utf-8">
-  <title>{html.escape(title)} – Transkripsjon</title>
-  <style>
-    :root {{
-      --bg: #f5f6f8; --card: #ffffff; --text: #1d1d1f; --sub: #6e6e73; --border: #e5e5ea;
-    }}
-    @media (prefers-color-scheme: dark) {{
-      :root {{
-        --bg: #121212; --card: #1c1c1e; --text: #f5f5f7; --sub: #98989d; --border: #2c2c2e;
-      }}
-    }}
-    body {{
-      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
-      background: var(--bg); color: var(--text);
-      max-width: 860px; margin: 28px auto; padding: 0 20px 60px; line-height: 1.55;
-    }}
-    header {{
-      background: var(--card); border: 1px solid var(--border); border-radius: 12px;
-      padding: 16px 20px; margin-bottom: 18px; position: sticky; top: 10px; z-index: 10;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.06);
-    }}
-    h1 {{ font-size: 1.25rem; margin: 0 0 12px 0; }}
-    .controls {{ display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }}
-    #filter {{
-      flex: 1; min-width: 200px; padding: 8px 12px; border: 1px solid var(--border);
-      border-radius: 8px; background: var(--bg); color: var(--text); font-size: 13.5px;
-    }}
-    .speakers-bar {{
-      display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; padding-top: 10px;
-      border-top: 1px solid var(--border); font-size: 12px; align-items: center;
-    }}
-    .spk-edit {{ display: flex; align-items: center; gap: 5px; }}
-    .dot {{ width: 10px; height: 10px; border-radius: 50%; display: inline-block; }}
-    .spk-edit input {{
-      padding: 4px 8px; border-radius: 6px; border: 1px solid var(--border);
-      background: var(--bg); color: var(--text); font-size: 12px; width: 155px; font-weight: 600;
-    }}
-    .turn {{
-      background: var(--card); border: 1px solid var(--border);
-      border-radius: 10px; padding: 12px 16px; margin-bottom: 10px;
-    }}
-    .meta {{ display: flex; align-items: center; gap: 10px; margin-bottom: 6px; font-size: 12px; }}
-    .badge {{ color: #fff; font-weight: 600; padding: 2px 9px; border-radius: 12px; }}
-    .timestamp {{ color: var(--sub); font-family: ui-monospace, "SF Mono", monospace; }}
-    .text {{ font-size: 14.5px; white-space: pre-wrap; }}
-  </style>
-</head>
-<body>
-  <header>
-    <h1>{html.escape(title)} – Transkripsjon</h1>
-    <div class="controls">
-      <input type="text" id="filter" placeholder="Søk i tekst, tidspunkt eller taler..." oninput="filterTurns()">
-    </div>
-    <div class="speakers-bar">
-      <span style="color:var(--sub)">Talere (kan redigeres):</span>
-      {speaker_inputs}
-    </div>
-  </header>
-  <main id="container">
-    {"".join(html_items)}
-  </main>
-  <script>
-    const STORAGE_KEY = "mote_spk_" + document.title;
-    function filterTurns() {{
-      const q = document.getElementById('filter').value.toLowerCase();
-      document.querySelectorAll('.turn').forEach(el => {{
-        el.style.display = el.innerText.toLowerCase().includes(q) ? '' : 'none';
-      }});
-    }}
-    function renameSpeaker(orig, newName, skipSave) {{
-      const label = newName.trim() || orig;
-      document.querySelectorAll(`[data-spk-label="${{orig}}"]`).forEach(el => {{
-        el.textContent = label;
-      }});
-      if (!skipSave) {{
-        try {{
-          const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{{}}");
-          saved[orig] = newName;
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
-        }} catch (e) {{}}
-      }}
-      filterTurns();
-    }}
-    window.addEventListener('DOMContentLoaded', () => {{
-      try {{
-        const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{{}}");
-        document.querySelectorAll('.spk-edit input').forEach(inp => {{
-          const orig = inp.dataset.orig;
-          if (saved[orig]) {{
-            inp.value = saved[orig];
-            renameSpeaker(orig, saved[orig], true);
-          }}
-        }});
-      }} catch (e) {{}}
-    }});
-  </script>
-</body>
-</html>"""
-    html_path.write_text(html_doc, encoding="utf-8")
-    return "\n".join(llm_lines)
-
-
-def build_notes_html(notes_md: str, notes_html_path: Path, title: str) -> None:
-    """Render Markdown meeting notes into a styled, print-ready HTML document."""
-    rendered_body = markdown.markdown(
-        notes_md,
-        extensions=["tables", "fenced_code", "sane_lists", "nl2br"],
-    )
-    html_doc = f"""<!DOCTYPE html>
-<html lang="no">
-<head>
-  <meta charset="utf-8">
-  <title>{html.escape(title)} – Møtereferat</title>
-  <style>
-    :root {{
-      --bg: #f5f6f8; --card: #ffffff; --text: #1d1d1f; --sub: #6e6e73;
-      --border: #e5e5ea; --accent: #007AFF; --th-bg: #f0f2f5;
-    }}
-    @media (prefers-color-scheme: dark) {{
-      :root {{
-        --bg: #121212; --card: #1c1c1e; --text: #f5f5f7; --sub: #98989d;
-        --border: #2c2c2e; --accent: #0a84ff; --th-bg: #262629;
-      }}
-    }}
-    @media print {{
-      :root {{
-        --bg: #ffffff; --card: #ffffff; --text: #000000; --sub: #555555;
-        --border: #cccccc; --th-bg: #f0f0f0;
-      }}
-      body {{ margin: 0; padding: 0; }}
-      .no-print {{ display: none !important; }}
-      article {{ border: none !important; box-shadow: none !important; padding: 0 !important; }}
-    }}
-    body {{
-      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
-      background: var(--bg); color: var(--text);
-      max-width: 820px; margin: 32px auto; padding: 0 20px 60px; line-height: 1.65;
-    }}
-    .toolbar {{
-      display: flex; justify-content: space-between; align-items: center;
-      margin-bottom: 14px; font-size: 13px; color: var(--sub);
-    }}
-    .toolbar button {{
-      padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border);
-      background: var(--card); color: var(--text); cursor: pointer; font-size: 12.5px;
-      font-weight: 500;
-    }}
-    .toolbar button:hover {{ border-color: var(--accent); }}
-    article {{
-      background: var(--card); border: 1px solid var(--border); border-radius: 14px;
-      padding: 36px 44px; box-shadow: 0 4px 16px rgba(0,0,0,0.05);
-    }}
-    h1 {{
-      font-size: 1.75rem; margin: 0 0 18px 0; padding-bottom: 12px;
-      border-bottom: 2px solid var(--border); letter-spacing: -0.02em;
-    }}
-    h2 {{
-      font-size: 1.25rem; margin: 28px 0 10px 0; color: var(--accent);
-      padding-bottom: 6px; border-bottom: 1px solid var(--border);
-    }}
-    h3 {{ font-size: 1.05rem; margin: 20px 0 6px 0; }}
-    p {{ margin: 0 0 12px 0; }}
-    ul, ol {{ margin: 0 0 14px 0; padding-left: 22px; }}
-    li {{ margin-bottom: 6px; }}
-    table {{
-      width: 100%; border-collapse: collapse; margin: 14px 0 20px 0; font-size: 14px;
-    }}
-    th, td {{
-      text-align: left; padding: 10px 12px; border: 1px solid var(--border);
-    }}
-    th {{ background: var(--th-bg); font-weight: 600; }}
-    blockquote {{
-      margin: 12px 0; padding: 10px 16px; border-left: 4px solid var(--accent);
-      background: var(--bg); border-radius: 0 8px 8px 0; color: var(--sub);
-    }}
-    code {{
-      font-family: ui-monospace, "SF Mono", monospace; font-size: 0.9em;
-      background: var(--bg); padding: 2px 5px; border-radius: 4px;
-    }}
-  </style>
-</head>
-<body>
-  <div class="toolbar no-print">
-    <span>{html.escape(title)}</span>
-    <button onclick="window.print()">Skriv ut / Lagre som PDF</button>
-  </div>
-  <article>
-    {rendered_body}
-  </article>
-</body>
-</html>"""
-    notes_html_path.write_text(html_doc, encoding="utf-8")
+from mote_core import build_notes_html, build_transcript_html_and_text  # noqa: E402
 
 
 def generate_notes_via_api(
@@ -756,39 +526,72 @@ def generate_notes_via_api(
     speaker_map: dict[str, str],
     known_names_hint: str,
     progress_fn=None,
+    note_mode: str = "mote",
+    agenda_text: str = "",
 ) -> str:
     """Use Ollama HTTP /api/chat directly with streaming to avoid ANSI codes, thinking leaks, and UI freezes."""
     detected_list = ", ".join(sorted(set(speaker_map.values())))
     hint_line = (
-        f"Bruker har oppgitt følgende deltakere i møtet: {known_names_hint.strip()}.\n"
+        f"Bruker har oppgitt følgende personer/roller: {known_names_hint.strip()}.\n"
         if known_names_hint.strip()
         else ""
     )
+    agenda_block = (
+        f"\nAgenda / lysbilder / ekstra kontekst:\n{agenda_text.strip()}\n"
+        if agenda_text.strip()
+        else ""
+    )
 
-    system_prompt = (
-        "Du er en profesjonell norsk møtesekretær. Du skriver kun selve møtereferatet i ren Markdown. "
-        "IKKE inkluder egen tankeprosess, introduksjoner eller <think>-blokker. "
-        "Bruk korrekt norsk (bokmål) og organiser innholdet tematisk, ikke bare kronologisk. "
-        "Hvis deltakere presenterer seg med navn i transkripsjonen, bruk alltid deres faktiske navn i referatet."
-    )
-    user_prompt = (
-        "Lag et grundig og strukturert møtereferat basert på den tidsstemplede transkripsjonen under.\n"
-        f"Identifiserte talere i transkripsjonen: {detected_list}\n"
-        f"{hint_line}\n"
-        "Bruk denne strukturen:\n"
-        "# Møtereferat\n\n"
-        "## 1. Kort oppsummering\n"
-        "(Hva handlet møtet om, og hva var hovedkonklusjonen?)\n\n"
-        "## 2. Deltakere og roller\n"
-        "(Liste over deltakerne med navn — fang opp navn der folk presenterer seg — samt deres rolle og hovedbidrag)\n\n"
-        "## 3. Hovedtemaer diskutert\n"
-        "(Sortert etter tema med underoverskrifter, hvem som fremmet hvilke synspunkter, og tidsstempler der det er relevant)\n\n"
-        "## 4. Beslutninger\n"
-        "(Konkrete vedtak eller enigheter)\n\n"
-        "## 5. Aksjonspunkter\n"
-        "(Markdown-tabell med kolonnene: Ansvarlig | Oppgave | Frist / Status)\n\n"
-        f"--- TRANSKRIPSJON START ---\n{transcript}\n--- TRANSKRIPSJON SLUTT ---"
-    )
+    if note_mode == "foredrag":
+        system_prompt = (
+            "Du er en dyktig norsk fagredaktør og notatskriver. Du skriver kun selve oppsummeringen i ren Markdown. "
+            "IKKE inkluder egen tankeprosess, introduksjoner eller <think>-blokker. "
+            "Opptaket er et foredrag, en presentasjon eller en monolog (ikke et møte med vedtak og aksjonstabell). "
+            "Bruk korrekt norsk (bokmål) og trekk ut de viktigste innsiktene, hovedpoengene, faglige sammenhengene og konkrete læringspunktene."
+        )
+        user_prompt = (
+            "Lag et grundig og strukturert faglig sammendrag av foredraget/presentasjonen basert på den tidsstemplede transkripsjonen under.\n"
+            f"Identifiserte stemmer i opptaket: {detected_list}\n"
+            f"{hint_line}{agenda_block}\n"
+            "Bruk denne strukturen:\n"
+            "# Foredragsnotater og hovedpoenger\n\n"
+            "## 1. Oversikt og hovedbudskap\n"
+            "(Foredragsholder hvis kjent, tema og kjernebudskapet oppsummert kort)\n\n"
+            "## 2. Sentrale innsikter og hovedpoenger (Key Takeaways)\n"
+            "(Kulepunktliste med de viktigste konklusjonene, innsiktene og lærdommene fra presentasjonen)\n\n"
+            "## 3. Tematisk gjennomgang\n"
+            "(Strukturert etter hovedtemaene i foredraget med underoverskrifter, sentrale argumenter, eksempler, tall/fakta og tidsstempler)\n\n"
+            "## 4. Viktige begreper, modeller eller verktøy\n"
+            "(Korte forklaringer av sentrale fagbegreper, metoder, teknologier eller referanser som ble trukket frem)\n\n"
+            "## 5. Anbefalinger og videre refleksjon\n"
+            "(Konkrete råd til tilhørerne, åpne spørsmål eller forslag til videre oppfølging nevnt i foredraget — uten kunstig møte-aksjonstabell)\n\n"
+            f"--- TRANSKRIPSJON START ---\n{transcript}\n--- TRANSKRIPSJON SLUTT ---"
+        )
+    else:
+        system_prompt = (
+            "Du er en profesjonell norsk møtesekretær. Du skriver kun selve møtereferatet i ren Markdown. "
+            "IKKE inkluder egen tankeprosess, introduksjoner eller <think>-blokker. "
+            "Bruk korrekt norsk (bokmål) og organiser innholdet tematisk, ikke bare kronologisk. "
+            "Hvis deltakere presenterer seg med navn i transkripsjonen, bruk alltid deres faktiske navn i referatet."
+        )
+        user_prompt = (
+            "Lag et grundig og strukturert møtereferat basert på den tidsstemplede transkripsjonen under.\n"
+            f"Identifiserte talere i transkripsjonen: {detected_list}\n"
+            f"{hint_line}{agenda_block}\n"
+            "Bruk denne strukturen:\n"
+            "# Møtereferat\n\n"
+            "## 1. Kort oppsummering\n"
+            "(Hva handlet møtet om, og hva var hovedkonklusjonen?)\n\n"
+            "## 2. Deltakere og roller\n"
+            "(Liste over deltakerne med navn — fang opp navn der folk presenterer seg — samt deres rolle og hovedbidrag)\n\n"
+            "## 3. Hovedtemaer diskutert\n"
+            "(Sortert etter tema med underoverskrifter, hvem som fremmet hvilke synspunkter, og tidsstempler der det er relevant)\n\n"
+            "## 4. Beslutninger\n"
+            "(Konkrete vedtak eller enigheter)\n\n"
+            "## 5. Aksjonspunkter\n"
+            "(Markdown-tabell med kolonnene: Ansvarlig | Oppgave | Frist / Status)\n\n"
+            f"--- TRANSKRIPSJON START ---\n{transcript}\n--- TRANSKRIPSJON SLUTT ---"
+        )
 
     payload = {
         "model": model,
@@ -825,46 +628,615 @@ def generate_notes_via_api(
                 token_count += 1
                 if progress_fn and (token_count == 1 or token_count % 4 == 0):
                     pct = min(98, int(84 + min(14.0, (token_count / est_tokens) * 14.0)))
-                    progress_fn(pct, f"[4/4] Skriver møtereferat ({token_count} tokens)...")
+                    progress_fn(pct, f"[Steg 5/5] Skriver notater/referat ({token_count} tokens)...")
             if body.get("done"):
                 break
 
     return clean_llm_output("".join(chunks))
 
 
+def resolve_moved_audio_path(audio_path: Path, base_dir: Path) -> Path:
+    """Locate audio file if moved into data/ or relocated with the project folder (handles NFD/NFC)."""
+    if audio_path.is_file():
+        return audio_path
+    target_nfc = unicodedata.normalize("NFC", audio_path.name)
+    search_dirs = [
+        audio_path.parent,
+        audio_path.parent / "data",
+        base_dir,
+        base_dir / "data",
+    ]
+    for d in search_dirs:
+        if not d.is_dir():
+            continue
+        direct = d / audio_path.name
+        if direct.is_file():
+            return direct.resolve()
+        for child in d.iterdir():
+            if child.is_file() and unicodedata.normalize("NFC", child.name) == target_nfc:
+                return child.resolve()
+    return audio_path
+
+
+def stage_audio_input(audio_path: Path, tmp_dir: Path) -> Path:
+    """Create a hardlink (or copy) in tmp_dir so moving/renaming files mid-run never breaks WhisperX/Pyannote."""
+    ext = audio_path.suffix or ".wav"
+    staged = tmp_dir / f"input_audio{ext}"
+    try:
+        os.link(audio_path, staged)
+    except OSError:
+        shutil.copy2(audio_path, staged)
+    return staged
+
+
+TRANSCRIPT_EXTS = {".html", ".htm", ".json", ".txt", ".md", ".srt", ".vtt"}
+
+
+def is_transcript_file(path: Path) -> bool:
+    return path.suffix.lower() in TRANSCRIPT_EXTS
+
+
+def clean_base_stem(path: Path) -> str:
+    stem = path.stem
+    for suffix in ("_transkripsjon", "_referat", "_notater"):
+        if stem.endswith(suffix) and len(stem) > len(suffix):
+            return stem[: -len(suffix)]
+    return stem
+
+
+def get_checkpoint_dir(out_dir: Path, input_path: Path) -> Path:
+    return out_dir / ".mote_checkpoints" / clean_base_stem(input_path)
+
+
+def parse_time_str(ts: str) -> float:
+    parts = [p.strip() for p in ts.replace(",", ".").split(":")]
+    try:
+        if len(parts) == 3:
+            return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
+        if len(parts) == 2:
+            return int(parts[0]) * 60 + float(parts[1])
+        return float(parts[0])
+    except ValueError:
+        return 0.0
+
+
+def load_turns_from_transcript_file(path: Path) -> tuple[list[dict], dict[str, str]]:
+    """Parse an existing transcript file (.html, .json, .txt, .md, .srt, .vtt) into (turns, speaker_map)."""
+    ext = path.suffix.lower()
+    raw = path.read_text(encoding="utf-8", errors="replace")
+
+    if ext == ".json":
+        data = json.loads(raw)
+        if isinstance(data, dict) and "turns" in data and isinstance(data["turns"], list):
+            smap = data.get("speaker_map", {})
+            return data["turns"], (smap if isinstance(smap, dict) else {})
+        turns = extract_turns_from_whisperx(path)
+        smap = {t["speaker"]: t["speaker"] for t in turns}
+        return turns, smap
+
+    if ext in (".html", ".htm"):
+        turns: list[dict] = []
+        speaker_map: dict[str, str] = {}
+        pattern = re.compile(
+            r'<div\s+class="turn"\s+data-speaker="([^"]*)"[^>]*>.*?'
+            r'<span\s+class="badge"[^>]*>(.*?)</span>\s*'
+            r'<span\s+class="timestamp">(.*?)</span>.*?'
+            r'<div\s+class="text">(.*?)</div>',
+            flags=re.DOTALL,
+        )
+        for m in pattern.finditer(raw):
+            orig_spk = html.unescape(m.group(1)).strip() or "SPEAKER_00"
+            disp_spk = html.unescape(re.sub(r"<[^>]+>", "", m.group(2))).strip() or orig_spk
+            ts_range = html.unescape(m.group(3)).strip()
+            text_val = html.unescape(re.sub(r"<[^>]+>", "", m.group(4))).strip()
+            t_parts = re.split(r"[\-–—]+", ts_range)
+            start_s = parse_time_str(t_parts[0]) if t_parts else 0.0
+            end_s = parse_time_str(t_parts[1]) if len(t_parts) > 1 else start_s
+            speaker_map[orig_spk] = disp_spk
+            if text_val:
+                turns.append({"speaker": orig_spk, "start": start_s, "end": end_s, "text": text_val})
+        if turns:
+            return turns, speaker_map
+        raw = html.unescape(re.sub(r"<[^>]+>", "\n", raw))
+
+    if ext in (".srt", ".vtt"):
+        turns = []
+        blocks = re.split(r"\n\s*\n", raw.strip())
+        for b in blocks:
+            b_lines = [ln.strip() for ln in b.splitlines() if ln.strip() and ln.strip() != "WEBVTT"]
+            if not b_lines:
+                continue
+            ts_idx = -1
+            for i, ln in enumerate(b_lines):
+                if "-->" in ln:
+                    ts_idx = i
+                    break
+            if ts_idx >= 0 and ts_idx + 1 < len(b_lines):
+                ts_parts = b_lines[ts_idx].split("-->")
+                start_s = parse_time_str(ts_parts[0])
+                end_s = parse_time_str(ts_parts[1].split()[0]) if len(ts_parts) > 1 else start_s
+                body_text = " ".join(b_lines[ts_idx + 1 :]).strip()
+                spk = "SPEAKER_00"
+                m_spk = re.match(r"^(?:\[([^\]]+)\]|([^:]{2,35}):)\s*(.+)$", body_text)
+                if m_spk:
+                    spk = (m_spk.group(1) or m_spk.group(2)).strip()
+                    body_text = m_spk.group(3).strip()
+                if body_text:
+                    turns.append({"speaker": spk, "start": start_s, "end": end_s, "text": body_text})
+        if turns:
+            return turns, {t["speaker"]: t["speaker"] for t in turns}
+
+    turns = []
+    speaker_map = {}
+    line_re = re.compile(
+        r"^\[(\d{1,2}:\d{2}(?::\d{2})?)\s*[\-–—]+\s*(\d{1,2}:\d{2}(?::\d{2})?)\]\s*([^:]{1,60}):\s*(.+)$"
+    )
+    simple_re = re.compile(r"^([A-ZÆØÅa-zæøå0-9_\-\s\(\),]{2,45}):\s+(.+)$")
+    cur_time = 0.0
+    for ln in raw.splitlines():
+        s = ln.strip()
+        if not s:
+            continue
+        m1 = line_re.match(s)
+        if m1:
+            start_s = parse_time_str(m1.group(1))
+            end_s = parse_time_str(m1.group(2))
+            spk = m1.group(3).strip()
+            txt = m1.group(4).strip()
+            turns.append({"speaker": spk, "start": start_s, "end": end_s, "text": txt})
+            speaker_map[spk] = spk
+            cur_time = end_s
+            continue
+        m2 = simple_re.match(s)
+        if m2 and not s.startswith("#") and not s.startswith("http"):
+            spk = m2.group(1).strip()
+            txt = m2.group(2).strip()
+            turns.append({"speaker": spk, "start": cur_time, "end": cur_time + 5.0, "text": txt})
+            speaker_map[spk] = spk
+            cur_time += 5.0
+
+    if not turns and raw.strip():
+        paragraphs = [p.strip() for p in re.split(r"\n\s*\n", raw.strip()) if p.strip()]
+        for idx, p in enumerate(paragraphs):
+            turns.append({
+                "speaker": "SPEAKER_00",
+                "start": float(idx * 10),
+                "end": float((idx + 1) * 10),
+                "text": re.sub(r"\s+", " ", p),
+            })
+        speaker_map["SPEAKER_00"] = "SPEAKER_00"
+
+    return turns, speaker_map
+
+
+def extract_context_from_file(path: Path) -> str:
+    """Extract text from agenda, slides (.pptx, .odp, .pdf), or documents (.docx, .odt, .md, .txt, .html)."""
+    import xml.etree.ElementTree as ET
+    import zlib
+
+    ext = path.suffix.lower()
+    try:
+        if ext == ".pptx":
+            slides_out: list[str] = []
+            with zipfile.ZipFile(path, "r") as zf:
+                names = zf.namelist()
+                slide_files = sorted(
+                    [n for n in names if re.match(r"^ppt/slides/slide\d+\.xml$", n)],
+                    key=lambda x: int(re.findall(r"\d+", x)[0]),
+                )
+                for idx, s_file in enumerate(slide_files, start=1):
+                    xml_bytes = zf.read(s_file)
+                    root = ET.fromstring(xml_bytes)
+                    texts = [el.text.strip() for el in root.iter() if el.tag.endswith("}t") and el.text and el.text.strip()]
+                    note_file = f"ppt/notesSlides/notesSlide{idx}.xml"
+                    note_texts: list[str] = []
+                    if note_file in names:
+                        n_root = ET.fromstring(zf.read(note_file))
+                        note_texts = [
+                            el.text.strip()
+                            for el in n_root.iter()
+                            if el.tag.endswith("}t") and el.text and el.text.strip()
+                        ]
+                    if texts or note_texts:
+                        block = f"[Lysbilde {idx}] " + " | ".join(texts)
+                        if note_texts:
+                            block += "\n  Forelesernotat: " + " ".join(note_texts)
+                        slides_out.append(block)
+            return f"=== Lysbilder fra {path.name} ===\n" + "\n".join(slides_out)
+
+        if ext in (".docx", ".odt", ".odp"):
+            with zipfile.ZipFile(path, "r") as zf:
+                target_xml = "word/document.xml" if ext == ".docx" else "content.xml"
+                if target_xml in zf.namelist():
+                    root = ET.fromstring(zf.read(target_xml))
+                    texts = [el.text.strip() for el in root.iter() if el.text and el.text.strip()]
+                    return f"=== Dokument ({path.name}) ===\n" + "\n".join(texts)
+
+        if ext == ".pdf":
+            for cmd in (
+                ["pdftotext", str(path), "-"],
+                ["mdls", "-raw", "-name", "kMDItemTextContent", str(path)],
+            ):
+                if shutil.which(cmd[0]):
+                    res = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+                    out = res.stdout.strip()
+                    if out and out != "(null)" and len(out) > 20:
+                        return f"=== PDF ({path.name}) ===\n{out}"
+            raw_bytes = path.read_bytes()
+            extracted_chunks: list[str] = []
+            for m in re.finditer(rb"stream[\r\n]+(.*?)[\r\n]+endstream", raw_bytes, flags=re.DOTALL):
+                stream_data = m.group(1)
+                try:
+                    decomp = zlib.decompress(stream_data)
+                except Exception:
+                    decomp = stream_data
+                for tm in re.finditer(rb"\(([^()]{2,200})\)", decomp):
+                    s = tm.group(1).decode("latin-1", errors="ignore")
+                    s = re.sub(r"\\[nrtbf()\\]", " ", s).strip()
+                    if len(s) >= 2 and any(c.isalpha() for c in s):
+                        extracted_chunks.append(s)
+            if extracted_chunks:
+                return f"=== PDF ({path.name}) ===\n" + " ".join(extracted_chunks)
+
+        if ext in (".html", ".htm"):
+            raw_html = path.read_text(encoding="utf-8", errors="replace")
+            cleaned = re.sub(r"<(script|style)[^>]*>.*?</\1>", "", raw_html, flags=re.DOTALL | re.IGNORECASE)
+            cleaned = html.unescape(re.sub(r"<[^>]+>", " ", cleaned))
+            cleaned = re.sub(r"\s+", " ", cleaned).strip()
+            return f"=== {path.name} ===\n{cleaned}"
+
+        return path.read_text(encoding="utf-8", errors="replace").strip()
+    except Exception as exc:
+        return f"[Kunne ikke lese {path.name}: {exc}]"
+
+
+def build_whisper_initial_prompt(
+    speaker_names_hint: str,
+    agenda_text: str,
+) -> str:
+    """Build a concise domain/vocabulary prompt (up to ~750 chars) for Whisper ASR."""
+    parts: list[str] = []
+    if speaker_names_hint.strip():
+        parts.append(f"Deltakere: {speaker_names_hint.strip()}.")
+    if agenda_text.strip():
+        compact_ctx = re.sub(r"\s+", " ", agenda_text.strip())
+        parts.append(compact_ctx[:600])
+    return " ".join(parts).strip()[:750]
+
+
+def get_whisperx_python(whisperx_bin: str) -> str:
+    """Locate the Python interpreter inside the WhisperX tool virtualenv."""
+    bin_path = Path(whisperx_bin)
+    if bin_path.is_file():
+        for cand in (bin_path.parent / "python3", bin_path.parent / "python", bin_path.parent / "python.exe"):
+            if cand.is_file():
+                return str(cand)
+        try:
+            first_line = bin_path.read_text(encoding="utf-8", errors="ignore").splitlines()[0]
+            if first_line.startswith("#!"):
+                interp = first_line[2:].strip().split()[0]
+                if Path(interp).is_file():
+                    return interp
+        except Exception:
+            pass
+    return sys.executable
+
+
+WHISPERX_STAGE_RUNNER_CODE = """\
+import gc
+import json
+import os
+from pathlib import Path
+import sys
+import torch
+import whisperx
+from whisperx.audio import load_audio, SAMPLE_RATE
+from whisperx.diarize import DiarizationPipeline, assign_word_speakers
+
+def save_atomic_json(path: Path, payload: dict) -> None:
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(path)
+
+def main() -> int:
+    cfg = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+    audio_path = cfg["audio_path"]
+    ckpt_dir = Path(cfg["ckpt_dir"])
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+    stages = cfg["stages"]
+    device = cfg.get("device") or ("cuda" if torch.cuda.is_available() else "cpu")
+    compute_type = cfg.get("compute_type", "int8")
+    language = cfg.get("language") or "no"
+    model_name = cfg["model"]
+    hf_token = cfg.get("hf_token") or None
+    min_spk = cfg.get("min_speakers")
+    max_spk = cfg.get("max_speakers")
+    initial_prompt = cfg.get("initial_prompt") or None
+
+    asr_json = ckpt_dir / "1_asr.json"
+    align_json = ckpt_dir / "2_align.json"
+    diarize_json = ckpt_dir / "3_diarize.json"
+
+    audio_arr = None
+    def get_audio():
+        nonlocal audio_arr
+        if audio_arr is None:
+            audio_arr = load_audio(audio_path)
+        return audio_arr
+
+    result = None
+
+    if "asr" in stages or not asr_json.is_file():
+        print("STAGE:ASR:START", flush=True)
+        asr_options = {
+            "beam_size": 5,
+            "patience": 1.0,
+            "length_penalty": 1.0,
+            "temperatures": [0.0, 0.2, 0.4, 0.6, 0.8, 1.0],
+            "compression_ratio_threshold": 2.4,
+            "log_prob_threshold": -1.0,
+            "no_speech_threshold": 0.6,
+            "condition_on_previous_text": False,
+            "initial_prompt": initial_prompt,
+            "suppress_tokens": [-1],
+            "suppress_numerals": False,
+        }
+        model = whisperx.load_model(
+            model_name,
+            device=device,
+            compute_type=compute_type,
+            language=language,
+            asr_options=asr_options,
+        )
+        result = model.transcribe(
+            get_audio(),
+            batch_size=8,
+            language=language,
+            print_progress=True,
+        )
+        save_atomic_json(asr_json, result)
+        print("STAGE:ASR:DONE", flush=True)
+        del model
+        gc.collect()
+    else:
+        result = json.loads(asr_json.read_text(encoding="utf-8"))
+
+    if "align" in stages or ("diarize" in stages and not align_json.is_file()):
+        print("STAGE:ALIGN:START", flush=True)
+        if result is None:
+            result = json.loads(asr_json.read_text(encoding="utf-8"))
+        if result.get("segments"):
+            align_lang = result.get("language") or language
+            model_a, metadata = whisperx.load_align_model(language_code=align_lang, device=device)
+            result = whisperx.align(
+                result["segments"],
+                model_a,
+                metadata,
+                get_audio(),
+                device,
+                return_char_alignments=False,
+                print_progress=True,
+            )
+            result["language"] = align_lang
+            del model_a
+            gc.collect()
+        save_atomic_json(align_json, result)
+        print("STAGE:ALIGN:DONE", flush=True)
+    elif align_json.is_file():
+        result = json.loads(align_json.read_text(encoding="utf-8"))
+
+    if "diarize" in stages:
+        print("STAGE:DIARIZE:START", flush=True)
+        if result is None:
+            source_file = align_json if align_json.is_file() else asr_json
+            result = json.loads(source_file.read_text(encoding="utf-8"))
+
+        if min_spk == 1 and max_spk == 1:
+            for seg in result.get("segments", []):
+                seg["speaker"] = "SPEAKER_00"
+                for w in seg.get("words", []):
+                    if isinstance(w, dict):
+                        w["speaker"] = "SPEAKER_00"
+        else:
+            diarize_model = DiarizationPipeline(
+                model_name="pyannote/speaker-diarization-community-1",
+                token=hf_token,
+                device=device,
+            )
+            def _on_diarize_progress(pct: float) -> None:
+                print(f"DiarizeProgress: {pct:.2f}%", flush=True)
+
+            diarize_segments = diarize_model(
+                get_audio(),
+                min_speakers=min_spk,
+                max_speakers=max_spk,
+                progress_callback=_on_diarize_progress,
+            )
+            result = assign_word_speakers(diarize_segments, result)
+            del diarize_model
+            gc.collect()
+
+        save_atomic_json(diarize_json, result)
+        print("STAGE:DIARIZE:DONE", flush=True)
+
+    return 0
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+"""
+
+
 class MoteApi:
     def __init__(self) -> None:
         self.window: webview.Window | None = None
+        self._active_proc: subprocess.Popen | None = None
+        self._cancel_requested: bool = False
+        self._log_lines: list[str] = []
 
     def get_defaults(self) -> dict:
+        base_dir = Path(__file__).resolve().parent
+        default_dir = base_dir / "data" if (base_dir / "data").is_dir() else (Path.home() / "Downloads")
         return {
             "hf_token": get_initial_hf_token(),
             "diarization_cached": is_diarization_cached(),
-            "default_out_dir": str(Path.home() / "Downloads"),
+            "default_out_dir": str(default_dir),
         }
 
-    def suggest_output_names(self, audio_path_str: str, out_dir_str: str) -> dict:
-        audio_path = Path(audio_path_str)
+    def stop_job(self) -> dict:
+        """Stop/pause the active transcription or LLM job while keeping completed checkpoints."""
+        self._cancel_requested = True
+        proc = self._active_proc
+        if proc and proc.poll() is None:
+            try:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+            except Exception:
+                pass
+        self._log(
+            "==> STOPPET AV BRUKER: Fullførte steg er lagret i sjekkpunkt. "
+            "Trykk «Start / Fortsett» når du vil fortsette der jobben slapp."
+        )
+        self._set_progress(0, "Pauset / Stoppet (kan fortsettes)")
+        return {"ok": True}
+
+    def get_checkpoint_status(
+        self,
+        out_dir_str: str,
+        audio_path_str: str,
+        html_name_str: str = "",
+        notes_name_str: str = "",
+    ) -> dict:
+        if not audio_path_str:
+            return {
+                "has_input": False,
+                "is_transcript_input": False,
+                "s1_asr": False,
+                "s2_align": False,
+                "s3_diarize": False,
+                "s4_names": False,
+                "s5_notes": False,
+            }
+        base_dir = Path(__file__).resolve().parent
+        audio_path = resolve_moved_audio_path(Path(audio_path_str), base_dir)
         out_dir = Path(out_dir_str) if out_dir_str else audio_path.parent
-        stem = audio_path.stem
+        if not out_dir.exists() and audio_path.parent.is_dir():
+            out_dir = audio_path.parent
+        ckpt_dir = get_checkpoint_dir(out_dir, audio_path)
+        is_trans = is_transcript_file(audio_path)
+
+        html_exists = bool(html_name_str.strip()) and (out_dir / Path(html_name_str.strip()).name).is_file()
+        notes_exists = bool(notes_name_str.strip()) and (out_dir / Path(notes_name_str.strip()).name).is_file()
+
+        return {
+            "has_input": True,
+            "is_transcript_input": is_trans,
+            "s1_asr": is_trans or (ckpt_dir / "1_asr.json").is_file(),
+            "s2_align": is_trans or (ckpt_dir / "2_align.json").is_file(),
+            "s3_diarize": is_trans or (ckpt_dir / "3_diarize.json").is_file(),
+            "s4_names": (ckpt_dir / "4_speakers.json").is_file() or html_exists,
+            "s5_notes": notes_exists,
+            "ckpt_dir": str(ckpt_dir),
+        }
+
+    def save_log_dialog(self, log_text: str, out_dir_str: str, audio_path_str: str) -> str | None:
+        if not self.window:
+            return None
+        base_dir = Path(__file__).resolve().parent
+        stem = clean_base_stem(Path(audio_path_str)) if audio_path_str else "mote"
+        out_dir = Path(out_dir_str) if out_dir_str else base_dir
+        if not out_dir.is_dir():
+            out_dir = base_dir / "data" if (base_dir / "data").is_dir() else base_dir
+        default_name = unique_filename(out_dir, f"{stem}_logg", ".txt")
+        result = self.window.create_file_dialog(
+            FileDialog.SAVE,
+            directory=str(out_dir),
+            save_filename=default_name,
+        )
+        if not result:
+            return None
+        target_str = result if isinstance(result, str) else (result[0] if len(result) > 0 else "")
+        if not target_str:
+            return None
+        target_path = Path(target_str)
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        content = log_text.strip() or "\n".join(self._log_lines)
+        target_path.write_text(content + "\n", encoding="utf-8")
+        self._log(f"==> Logg lagret til: {target_path}")
+        return str(target_path)
+
+    def suggest_output_names(self, audio_path_str: str, out_dir_str: str) -> dict:
+        base_dir = Path(__file__).resolve().parent
+        audio_path = resolve_moved_audio_path(Path(audio_path_str), base_dir)
+        out_dir = Path(out_dir_str) if out_dir_str else audio_path.parent
+        if not out_dir.exists() and audio_path.parent.is_dir():
+            out_dir = audio_path.parent
+        stem = clean_base_stem(audio_path)
+
+        ckpt_dir = get_checkpoint_dir(out_dir, audio_path)
+        std_html = f"{stem}_transkripsjon.html"
+        std_md = f"{stem}_referat.md"
+        std_rhtml = f"{stem}_referat.html"
+        has_partial_ckpt = ckpt_dir.is_dir() and any(ckpt_dir.glob("*.json"))
+
+        if has_partial_ckpt and not ((out_dir / std_md).exists() and (out_dir / std_rhtml).exists()):
+            html_name = std_html if std_html != audio_path.name else unique_filename(out_dir, f"{stem}_transkripsjon", ".html")
+            notes_name = std_md
+            notes_html_name = std_rhtml
+        else:
+            html_name = unique_filename(out_dir, f"{stem}_transkripsjon", ".html")
+            notes_name = unique_filename(out_dir, f"{stem}_referat", ".md")
+            notes_html_name = unique_filename(out_dir, f"{stem}_referat", ".html")
+
         return {
             "audio_path": str(audio_path),
             "out_dir": str(out_dir),
-            "html_name": unique_filename(out_dir, f"{stem}_transkripsjon", ".html"),
-            "notes_name": unique_filename(out_dir, f"{stem}_referat", ".md"),
-            "notes_html_name": unique_filename(out_dir, f"{stem}_referat", ".html"),
+            "html_name": html_name,
+            "notes_name": notes_name,
+            "notes_html_name": notes_html_name,
+            "is_transcript_input": is_transcript_file(audio_path),
         }
 
     def pick_audio_file(self) -> dict | None:
         if not self.window:
             return None
-        file_types = ("Audio Files (*.wav;*.m4a;*.mp3;*.ogg;*.opus;*.flac)", "All files (*.*)")
         result = self.window.create_file_dialog(
-            FileDialog.OPEN, allow_multiple=False, file_types=file_types
+            FileDialog.OPEN, allow_multiple=False
         )
         if result and len(result) > 0:
             p = Path(result[0])
             return self.suggest_output_names(str(p), str(p.parent))
+        return None
+
+    def pick_agenda_file(self) -> str | None:
+        """Let user pick one or more agenda, slide (.pptx/.pdf/.odp), or document (.docx/.md/.txt) files."""
+        if not self.window:
+            return None
+        result = self.window.create_file_dialog(
+            FileDialog.OPEN, allow_multiple=True
+        )
+        if result and len(result) > 0:
+            chunks: list[str] = []
+            for item in result:
+                p = Path(item)
+                if p.is_file():
+                    extracted = extract_context_from_file(p)
+                    if extracted:
+                        chunks.append(extracted)
+                        self._log(f"==> Lastet inn kontekst fra {p.name} ({len(extracted)} tegn)")
+            if chunks:
+                return "\n\n".join(chunks)
+        return None
+
+    def load_context_file_path(self, file_path_str: str) -> str | None:
+        p = Path(file_path_str)
+        if p.is_file():
+            extracted = extract_context_from_file(p)
+            if extracted:
+                self._log(f"==> Lastet inn kontekst fra {p.name} ({len(extracted)} tegn)")
+                return extracted
         return None
 
     def pick_output_dir(self, current_audio_path: str) -> dict | None:
@@ -914,6 +1286,9 @@ class MoteApi:
         min_speakers: str,
         max_speakers: str,
         speaker_names_hint: str,
+        note_mode: str = "auto",
+        agenda_text: str = "",
+        task_mode: str = "auto_resume",
     ) -> None:
         threading.Thread(
             target=self._worker,
@@ -930,14 +1305,33 @@ class MoteApi:
                 min_speakers,
                 max_speakers,
                 speaker_names_hint,
+                note_mode,
+                agenda_text,
+                task_mode,
             ),
             daemon=True,
         ).start()
 
     def _log(self, msg: str) -> None:
+        self._log_lines.append(msg)
         if self.window:
             escaped = json.dumps(msg)
             self.window.evaluate_js(f"appendLog({escaped})")
+
+    def _refresh_checkpoints_ui(self) -> None:
+        if self.window:
+            self.window.evaluate_js("refreshCheckpointBar()")
+
+    def _auto_save_error_log(self, out_dir: Path, stem: str) -> None:
+        try:
+            base_dir = Path(__file__).resolve().parent
+            target_dir = out_dir if out_dir.is_dir() else (base_dir / "data" if (base_dir / "data").is_dir() else base_dir)
+            target_dir.mkdir(parents=True, exist_ok=True)
+            log_file = target_dir / unique_filename(target_dir, f"{stem}_feillogg", ".txt")
+            log_file.write_text("\n".join(self._log_lines) + "\n", encoding="utf-8")
+            self._log(f"==> Feillogg lagret automatisk: {log_file}")
+        except Exception:
+            pass
 
     def _set_progress(self, percent: int, label: str) -> None:
         if self.window:
@@ -962,18 +1356,31 @@ class MoteApi:
         min_speakers_str: str,
         max_speakers_str: str,
         speaker_names_hint: str,
+        note_mode: str = "auto",
+        agenda_text: str = "",
+        task_mode: str = "auto_resume",
     ) -> None:
+        self._cancel_requested = False
+        self._log_lines = [f"Starter jobb (oppgavemodus: {task_mode})..."]
         self._set_running(True)
-        self._set_progress(5, "Forbereder miljø og filer...")
+        self._set_progress(5, "Forbereder miljø og sjekkpunkter...")
+        base_dir = Path(__file__).resolve().parent
+        orig_audio_path = Path(audio_path_str)
+        audio_path = resolve_moved_audio_path(orig_audio_path, base_dir)
+        out_dir = Path(out_dir_str) if out_dir_str else audio_path.parent
+        if not out_dir.exists() and audio_path.parent.is_dir():
+            out_dir = audio_path.parent
         try:
-            audio_path = Path(audio_path_str).resolve()
-            out_dir = Path(out_dir_str).resolve() if out_dir_str else audio_path.parent
+            out_dir = out_dir.resolve()
             out_dir.mkdir(parents=True, exist_ok=True)
 
             if not audio_path.is_file():
-                self._log(f"FEIL: Fant ikke lydfilen {audio_path}")
-                self._set_progress(0, "Feil: Lydfil mangler")
+                self._log(f"FEIL: Fant ikke filen {audio_path}")
+                self._set_progress(0, "Feil: Fil mangler")
+                self._auto_save_error_log(out_dir, orig_audio_path.stem or "mote")
                 return
+            if audio_path != orig_audio_path.resolve():
+                self._log(f"Merk: Filen ble funnet på ny sti: {audio_path}")
 
             html_name = Path(html_name_str.strip()).name
             notes_name = Path(notes_name_str.strip()).name
@@ -983,165 +1390,348 @@ class MoteApi:
             notes_path = out_dir / notes_name
             notes_html_path = out_dir / notes_html_name
 
-            for target in (html_path, notes_path, notes_html_path):
-                if target.exists():
-                    self._log(f"AVBRUTT: Filen finnes allerede:\n  {target}")
-                    self._set_progress(0, "Avbrutt pga filkonflikt")
-                    return
+            ckpt_dir = get_checkpoint_dir(out_dir, audio_path)
+            ckpt_dir.mkdir(parents=True, exist_ok=True)
+            asr_json = ckpt_dir / "1_asr.json"
+            align_json = ckpt_dir / "2_align.json"
+            diarize_json = ckpt_dir / "3_diarize.json"
+            speakers_json = ckpt_dir / "4_speakers.json"
 
-            if hf_token.strip():
-                save_hf_token(hf_token)
-            elif not is_diarization_cached():
-                self._log("FEIL: Pyannote er ikke bufret ennå. Lim inn HF-token.")
-                self._set_progress(0, "Mangler HF-token")
-                return
+            is_trans_input = is_transcript_file(audio_path)
+
+            if task_mode == "full_fresh":
+                run_s1 = not is_trans_input
+                run_s2 = not is_trans_input
+                run_s3 = not is_trans_input
+                run_s4 = True
+                run_s5 = True
+            elif task_mode == "only_1_asr":
+                run_s1, run_s2, run_s3, run_s4, run_s5 = True, False, False, False, False
+            elif task_mode == "only_2_align":
+                run_s1 = not asr_json.is_file()
+                run_s2, run_s3, run_s4, run_s5 = True, False, False, False
+            elif task_mode == "only_3_diarize":
+                run_s1 = not asr_json.is_file() and not align_json.is_file()
+                run_s2 = not align_json.is_file()
+                run_s3, run_s4, run_s5 = True, False, False
+            elif task_mode == "from_3_diarize":
+                run_s1 = not asr_json.is_file() and not align_json.is_file()
+                run_s2 = not align_json.is_file()
+                run_s3, run_s4, run_s5 = True, True, True
+            elif task_mode == "from_4_names":
+                run_s1 = not is_trans_input and not diarize_json.is_file() and not align_json.is_file() and not asr_json.is_file()
+                run_s2 = not is_trans_input and not diarize_json.is_file() and not align_json.is_file()
+                run_s3 = not is_trans_input and not diarize_json.is_file()
+                run_s4, run_s5 = True, True
+            elif task_mode == "only_4_names":
+                run_s1 = not is_trans_input and not diarize_json.is_file() and not align_json.is_file() and not asr_json.is_file()
+                run_s2 = not is_trans_input and not diarize_json.is_file() and not align_json.is_file()
+                run_s3 = not is_trans_input and not diarize_json.is_file()
+                run_s4, run_s5 = True, False
+            elif task_mode == "only_5_notes":
+                has_trans_source = (
+                    is_trans_input
+                    or speakers_json.is_file()
+                    or html_path.is_file()
+                    or diarize_json.is_file()
+                    or align_json.is_file()
+                    or asr_json.is_file()
+                )
+                run_s1 = not has_trans_source
+                run_s2 = not has_trans_source
+                run_s3 = not has_trans_source
+                run_s4 = not (is_trans_input or speakers_json.is_file() or html_path.is_file())
+                run_s5 = True
+            else:
+                if is_trans_input:
+                    run_s1 = run_s2 = run_s3 = False
+                    run_s4 = not speakers_json.is_file() or not html_path.is_file()
+                    run_s5 = True
+                else:
+                    run_s1 = not asr_json.is_file()
+                    run_s2 = run_s1 or not align_json.is_file()
+                    run_s3 = run_s2 or not diarize_json.is_file()
+                    run_s4 = run_s3 or not speakers_json.is_file() or not html_path.is_file()
+                    run_s5 = True
+
+            if is_trans_input and (run_s1 or run_s2 or run_s3):
+                self._log(f"==> Merk: {audio_path.name} er allerede en transkripsjonsfil. Lydsteg 1–3 hoppes over.")
+                run_s1 = run_s2 = run_s3 = False
+                if task_mode in ("only_1_asr", "only_2_align", "only_3_diarize"):
+                    self._set_progress(100, "Inndata er allerede transkribert")
+                    return
 
             env = build_runtime_env()
-            ensure_ffmpeg(env, self._log)
-            whisperx_bin = ensure_whisperx(env, self._log, self._set_progress)
+            wx_stages: list[str] = []
+            if run_s1:
+                wx_stages.append("asr")
+            if run_s2:
+                wx_stages.append("align")
+            if run_s3:
+                wx_stages.append("diarize")
 
-            self._set_progress(12, f"[1/4] Laster inn {whisper_model}...")
-            self._log(f"==> [1/4] Kjører WhisperX ({whisper_model}) på {audio_path.name}...")
+            if wx_stages:
+                if "diarize" in wx_stages:
+                    if hf_token.strip():
+                        save_hf_token(hf_token)
+                    elif not is_diarization_cached():
+                        self._log("FEIL: Pyannote er ikke bufret ennå. Lim inn HF-token.")
+                        self._set_progress(0, "Mangler HF-token")
+                        return
 
-            with tempfile.TemporaryDirectory(prefix="mote_wx_") as tmp_dir:
-                cmd = [
-                    whisperx_bin,
-                    str(audio_path),
-                    "--output_dir", tmp_dir,
-                    "--model", whisper_model,
-                    "--language", language,
-                    "--diarize",
-                    "--compute_type", "int8",
-                    "--output_format", "json",
-                    "--print_progress", "True",
-                ]
-                if hf_token.strip():
-                    cmd.extend(["--hf_token", hf_token.strip()])
-                if min_speakers_str.strip().isdigit():
-                    cmd.extend(["--min_speakers", min_speakers_str.strip()])
-                if max_speakers_str.strip().isdigit():
-                    cmd.extend(["--max_speakers", max_speakers_str.strip()])
+                ensure_ffmpeg(env, self._log)
+                whisperx_bin = ensure_whisperx(env, self._log, self._set_progress)
+                wx_python = get_whisperx_python(whisperx_bin)
+                initial_prompt = build_whisper_initial_prompt(speaker_names_hint, agenda_text)
 
-                proc = subprocess.Popen(
-                    cmd,
-                    env=env,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    bufsize=1,
-                )
-                assert proc.stdout is not None
-                phase = 0
-                last_pct = 0.0
-                diarization_start: float | None = None
-                stop_heartbeat = threading.Event()
+                with tempfile.TemporaryDirectory(prefix="mote_wx_") as tmp_dir:
+                    tmp_dir_path = Path(tmp_dir)
+                    staged_audio = stage_audio_input(audio_path, tmp_dir_path)
+                    runner_script = tmp_dir_path / "wx_stage_runner.py"
+                    runner_script.write_text(WHISPERX_STAGE_RUNNER_CODE, encoding="utf-8")
 
-                def _diarization_heartbeat() -> None:
-                    while not stop_heartbeat.wait(1.0):
-                        if phase == 2 and diarization_start is not None:
-                            elapsed = int(time.time() - diarization_start)
-                            mm, ss = divmod(elapsed, 60)
-                            # Kryp sakte fra 60% opp mot 72% mens Pyannote jobber stille på CPU
-                            creep = min(12, elapsed // 15)
-                            self._set_progress(
-                                60 + creep,
-                                f"[3/4] Identifiserer talere med Pyannote ({mm:02d}:{ss:02d})...",
-                            )
+                    cfg_file = tmp_dir_path / "wx_config.json"
+                    cfg_data = {
+                        "audio_path": str(staged_audio),
+                        "ckpt_dir": str(ckpt_dir),
+                        "stages": wx_stages,
+                        "model": whisper_model,
+                        "language": language,
+                        "compute_type": "int8",
+                        "hf_token": hf_token.strip(),
+                        "min_speakers": int(min_speakers_str.strip()) if min_speakers_str.strip().isdigit() else None,
+                        "max_speakers": int(max_speakers_str.strip()) if max_speakers_str.strip().isdigit() else None,
+                        "initial_prompt": initial_prompt,
+                    }
+                    cfg_file.write_text(json.dumps(cfg_data, ensure_ascii=False), encoding="utf-8")
 
-                hb_thread = threading.Thread(target=_diarization_heartbeat, daemon=True)
-                hb_thread.start()
+                    cmd = [wx_python, "-u", str(runner_script), str(cfg_file)]
+                    proc = subprocess.Popen(
+                        cmd,
+                        env=env,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        encoding="utf-8",
+                        errors="replace",
+                        bufsize=1,
+                    )
+                    self._active_proc = proc
+                    assert proc.stdout is not None
+                    phase = 0 if "asr" in wx_stages else (1 if "align" in wx_stages else 2)
+                    diarization_start: float | None = None
+                    last_diarize_pct: float = 0.0
+                    stop_heartbeat = threading.Event()
 
-                try:
-                    for line in proc.stdout:
-                        clean = sanitize_text(line)
-                        if not clean:
-                            continue
-                        self._log(clean)
-                        low = clean.lower()
-
-                        if "performing alignment" in low:
-                            phase = 1
-                            last_pct = 0.0
-                            self._set_progress(50, "[2/4] Tidsjusterer ord (Alignment): 0%")
-                            continue
-                        if "performing diarization" in low or "assigning speaker" in low:
-                            if phase < 2:
-                                phase = 2
-                                diarization_start = time.time()
-                                self._log(
-                                    "Pyannote analyserer stemmer i bakgrunnen (tar vanligvis 2–6 min uten logg-utskrift)..."
-                                )
-                            last_pct = 0.0
-                            self._set_progress(60, "[3/4] Identifiserer talere med Pyannote (00:00)...")
-                            continue
-
-                        match = re.search(r"Progress:\s*([0-9]+(?:\.[0-9]+)?)%", clean)
-                        if match:
-                            p_pct = float(match.group(1))
-                            if p_pct < last_pct - 30.0 and last_pct > 50.0:
-                                phase = min(2, phase + 1)
-                            last_pct = p_pct
-                            if phase == 0:
-                                mapped = int(15 + (p_pct * 0.35))
-                                self._set_progress(mapped, f"[1/4] Transkriberer tale: {p_pct:.0f}%")
-                            elif phase == 1:
-                                mapped = int(50 + (p_pct * 0.10))
-                                self._set_progress(mapped, f"[2/4] Tidsjusterer ord (Alignment): {p_pct:.0f}%")
-                                if p_pct >= 99.9:
-                                    phase = 2
-                                    diarization_start = time.time()
-                                    self._log(
-                                        "Ord-tidsjustering ferdig. Starter Pyannote taler-identifisering "
-                                        "(jobber stille på CPU i 2–6 minutter)..."
-                                    )
+                    def _diarization_heartbeat() -> None:
+                        while not stop_heartbeat.wait(1.0):
+                            if phase == 2 and diarization_start is not None:
+                                elapsed = int(time.time() - diarization_start)
+                                mm, ss = divmod(elapsed, 60)
+                                if last_diarize_pct > 0:
+                                    mapped = int(60 + (last_diarize_pct * 0.14))
                                     self._set_progress(
-                                        60, "[3/4] Identifiserer talere med Pyannote (00:00)..."
+                                        mapped,
+                                        f"[Steg 3/5] Pyannote taler-ID: {last_diarize_pct:.0f}% ({mm:02d}:{ss:02d})...",
                                     )
-                            else:
-                                mapped = int(60 + (p_pct * 0.12))
-                                self._set_progress(mapped, f"[3/4] Identifiserer talere (Diarization): {p_pct:.0f}%")
-                finally:
-                    stop_heartbeat.set()
+                                else:
+                                    creep = min(13, elapsed // 15)
+                                    self._set_progress(
+                                        60 + creep,
+                                        f"[Steg 3/5] Identifiserer talere med Pyannote ({mm:02d}:{ss:02d})...",
+                                    )
 
-                if proc.wait() != 0:
-                    self._log("FEIL: WhisperX feilet.")
-                    self._set_progress(0, "Feil under WhisperX")
+                    hb_thread = threading.Thread(target=_diarization_heartbeat, daemon=True)
+                    hb_thread.start()
+
+                    try:
+                        for line in proc.stdout:
+                            clean = sanitize_text(line)
+                            if not clean:
+                                continue
+
+                            if clean == "STAGE:ASR:START":
+                                phase = 0
+                                self._set_progress(12, f"[Steg 1/5] Transkriberer med {whisper_model}...")
+                                self._log(f"==> [Steg 1/5] Kjører WhisperX ASR ({whisper_model}) på {audio_path.name}...")
+                                continue
+                            if clean == "STAGE:ASR:DONE":
+                                self._log("==> [Steg 1/5] Rå-transkripsjon lagret i sjekkpunkt (1_asr.json).")
+                                self._refresh_checkpoints_ui()
+                                continue
+                            if clean == "STAGE:ALIGN:START":
+                                phase = 1
+                                self._set_progress(48, "[Steg 2/5] Tidsjusterer ord (Alignment): 0%")
+                                self._log("==> [Steg 2/5] Starter ord-tidsjustering (Alignment)...")
+                                continue
+                            if clean == "STAGE:ALIGN:DONE":
+                                self._log("==> [Steg 2/5] Tidsjustering lagret i sjekkpunkt (2_align.json).")
+                                self._refresh_checkpoints_ui()
+                                continue
+                            if clean == "STAGE:DIARIZE:START":
+                                phase = 2
+                                last_diarize_pct = 0.0
+                                diarization_start = time.time()
+                                self._set_progress(60, "[Steg 3/5] Identifiserer talere med Pyannote (00:00)...")
+                                self._log("==> [Steg 3/5] Starter Pyannote taler-identifisering...")
+                                continue
+                            if clean == "STAGE:DIARIZE:DONE":
+                                self._log("==> [Steg 3/5] Taler-identifisering lagret i sjekkpunkt (3_diarize.json).")
+                                self._refresh_checkpoints_ui()
+                                continue
+
+                            d_match = re.search(r"DiarizeProgress:\s*([0-9]+(?:\.[0-9]+)?)%", clean)
+                            if d_match:
+                                last_diarize_pct = float(d_match.group(1))
+                                mapped = int(60 + (last_diarize_pct * 0.14))
+                                elapsed = int(time.time() - (diarization_start or time.time()))
+                                mm, ss = divmod(elapsed, 60)
+                                self._set_progress(
+                                    mapped,
+                                    f"[Steg 3/5] Pyannote taler-ID: {last_diarize_pct:.0f}% ({mm:02d}:{ss:02d})...",
+                                )
+                                continue
+
+                            self._log(clean)
+
+                            match = re.search(r"Progress:\s*([0-9]+(?:\.[0-9]+)?)%", clean)
+                            if match:
+                                p_pct = float(match.group(1))
+                                if phase == 0:
+                                    mapped = int(12 + (p_pct * 0.35))
+                                    self._set_progress(mapped, f"[Steg 1/5] Transkriberer tale: {p_pct:.0f}%")
+                                elif phase == 1:
+                                    mapped = int(48 + (p_pct * 0.11))
+                                    self._set_progress(mapped, f"[Steg 2/5] Tidsjusterer ord (Alignment): {p_pct:.0f}%")
+                    finally:
+                        stop_heartbeat.set()
+                        self._active_proc = None
+
+                    rc = proc.wait()
+                    if self._cancel_requested:
+                        self._refresh_checkpoints_ui()
+                        return
+                    if rc != 0:
+                        self._log("FEIL: WhisperX-steget feilet. Fullførte tidligere steg er lagret i sjekkpunkt.")
+                        self._set_progress(0, "Feil under WhisperX (kan gjenopptas)")
+                        self._auto_save_error_log(out_dir, clean_base_stem(audio_path))
+                        self._refresh_checkpoints_ui()
+                        return
+
+            if self._cancel_requested:
+                return
+
+            if not run_s4 and not run_s5:
+                self._refresh_checkpoints_ui()
+                self._set_progress(100, f"Steg ({', '.join(wx_stages)}) fullført og lagret i sjekkpunkt")
+                self._log(f"==> Valgt deloppgave ({task_mode}) er ferdig og lagret i {ckpt_dir}")
+                return
+
+            turns: list[dict] = []
+            speaker_map: dict[str, str] = {}
+
+            if is_trans_input:
+                self._log(f"==> Leser inn eksisterende transkripsjon fra {audio_path.name}...")
+                turns, speaker_map = load_turns_from_transcript_file(audio_path)
+                if not turns:
+                    self._log(f"FEIL: Klarte ikke hente ut replikker fra {audio_path.name}.")
+                    self._set_progress(0, "Kunne ikke lese transkripsjon")
                     return
-
-                raw_json = Path(tmp_dir) / f"{audio_path.stem}.json"
-                if not raw_json.is_file():
-                    self._log("FEIL: Fant ikke JSON-utdata fra WhisperX.")
-                    self._set_progress(0, "JSON mangler")
+                self._log(f"==> Lastet {len(turns)} replikker fra transkripsjonsfil.")
+            elif not run_s4 and speakers_json.is_file():
+                saved_s4 = json.loads(speakers_json.read_text(encoding="utf-8"))
+                turns = saved_s4.get("turns", [])
+                speaker_map = saved_s4.get("speaker_map", {})
+                self._log(f"==> Gjenbruker taler-navnekobling fra sjekkpunkt (4_speakers.json, {len(turns)} replikker).")
+            elif not run_s4 and html_path.is_file():
+                turns, speaker_map = load_turns_from_transcript_file(html_path)
+                self._log(f"==> Gjenbruker ferdig HTML-transkripsjon ({html_path.name}, {len(turns)} replikker).")
+            else:
+                source_json = (
+                    diarize_json
+                    if diarize_json.is_file()
+                    else (align_json if align_json.is_file() else asr_json)
+                )
+                if not source_json.is_file():
+                    self._log("FEIL: Fant ingen transkripsjonsdata å bygge videre på.")
+                    self._set_progress(0, "Mangler transkripsjonsdata")
                     return
+                turns = extract_turns_from_whisperx(source_json)
 
-                self._set_progress(73, "[3/4] Ekstraherer ord-baserte talerskifter...")
-                turns = extract_turns_from_whisperx(raw_json)
+            doc_title = clean_base_stem(audio_path)
 
             with managed_ollama_server(self._log, self._set_progress, env=env) as ollama_bin:
                 installed = fetch_ollama_models() or []
                 if ollama_model not in installed and f"{ollama_model}:latest" not in installed:
-                    self._set_progress(75, f"[4/4] Laster ned {ollama_model}...")
+                    self._set_progress(75, f"Laster ned {ollama_model}...")
                     self._log(f"==> Laster ned '{ollama_model}'...")
                     subprocess.run([ollama_bin, "pull", ollama_model], env=env, check=True)
 
-                self._set_progress(78, "[4/4] Gjenkjenner deltakernavn fra introduksjoner...")
-                self._log("==> [2/3] Analyserer introduksjoner for å knytte taler-ID til navn...")
-                speaker_map = infer_speaker_names_via_api(
-                    turns, ollama_model, speaker_names_hint, self._log
-                )
-                for spk_id, resolved_name in speaker_map.items():
-                    if resolved_name != spk_id:
-                        self._log(f"    Gjenkjent {spk_id} -> {resolved_name}")
+                if self._cancel_requested:
+                    return
 
-                clean_transcript = build_transcript_html_and_text(
-                    turns, speaker_map, html_path, audio_path.stem
-                )
-                self._log(f"==> Rik HTML-transkripsjon lagret: {html_path}")
+                if run_s4:
+                    self._set_progress(78, "[Steg 4/5] Gjenkjenner deltakernavn fra introduksjoner...")
+                    self._log("==> [Steg 4/5] Analyserer introduksjoner og kontekst for å knytte taler-ID til navn...")
+                    inferred_map = infer_speaker_names_via_api(
+                        turns, ollama_model, speaker_names_hint, self._log, agenda_text=agenda_text
+                    )
+                    merged_map = dict(speaker_map)
+                    merged_map.update(inferred_map)
+                    speaker_map = merged_map
+                    for spk_id, resolved_name in speaker_map.items():
+                        if resolved_name != spk_id:
+                            self._log(f"    Gjenkjent {spk_id} -> {resolved_name}")
 
-                self._set_progress(84, f"[4/4] Analyserer transkripsjon med {ollama_model}...")
-                self._log(f"==> [3/3] Genererer møtereferat via Ollama REST API ({ollama_model})...")
+                    clean_transcript = build_transcript_html_and_text(
+                        turns, speaker_map, html_path, doc_title
+                    )
+                    tmp_s4 = speakers_json.with_suffix(".json.tmp")
+                    tmp_s4.write_text(
+                        json.dumps({"speaker_map": speaker_map, "turns": turns}, ensure_ascii=False),
+                        encoding="utf-8",
+                    )
+                    tmp_s4.replace(speakers_json)
+                    self._refresh_checkpoints_ui()
+                    self._log(f"==> [Steg 4/5] Rik HTML-transkripsjon lagret: {html_path}")
+                else:
+                    if not html_path.is_file():
+                        clean_transcript = build_transcript_html_and_text(
+                            turns, speaker_map, html_path, doc_title
+                        )
+                    else:
+                        lines_out: list[str] = []
+                        for t in turns:
+                            spk = speaker_map.get(t["speaker"], t["speaker"])
+                            ts = f"{format_seconds(t['start'])} – {format_seconds(t['end'])}"
+                            lines_out.append(f"[{ts}] {spk}: {t['text']}")
+                        clean_transcript = "\n\n".join(lines_out)
+
+                if not run_s5 or self._cancel_requested:
+                    self._refresh_checkpoints_ui()
+                    if not self._cancel_requested:
+                        self._set_progress(100, "Steg 4 (Taler-ID & HTML-transkripsjon) fullført!")
+                        self._log(f"==> FERDIG med Steg 4: {html_path}")
+                    return
+
+                if note_mode in ("foredrag", "mote"):
+                    effective_mode = note_mode
+                elif (
+                    max_speakers_str.strip() == "1"
+                    or (min_speakers_str.strip() == "1" and not max_speakers_str.strip())
+                    or len(set(speaker_map.keys())) == 1
+                ):
+                    effective_mode = "foredrag"
+                else:
+                    effective_mode = "mote"
+
+                mode_desc = (
+                    "foredragsnotater (1-talers modus / faglige hovedpoenger)"
+                    if effective_mode == "foredrag"
+                    else "møtereferat (flere deltakere & aksjonspunkter)"
+                )
+                self._set_progress(84, f"[Steg 5/5] Skriver {mode_desc} med {ollama_model}...")
+                self._log(f"==> [Steg 5/5] Genererer {mode_desc} via Ollama REST API ({ollama_model})...")
 
                 notes_md = generate_notes_via_api(
                     clean_transcript,
@@ -1149,24 +1739,33 @@ class MoteApi:
                     speaker_map,
                     speaker_names_hint,
                     progress_fn=self._set_progress,
+                    note_mode=effective_mode,
+                    agenda_text=agenda_text,
                 )
+                if self._cancel_requested:
+                    return
                 notes_path.write_text(notes_md + "\n", encoding="utf-8")
 
-                self._set_progress(99, "Bygger HTML-møtereferat...")
-                build_notes_html(notes_md, notes_html_path, audio_path.stem)
+                self._set_progress(99, "Bygger HTML-utgave av referat/notater...")
+                build_notes_html(notes_md, notes_html_path, doc_title)
+                self._refresh_checkpoints_ui()
 
             self._set_progress(100, "Fullført!")
             self._log(
                 f"==> FERDIG!\n"
                 f"    HTML-transkripsjon: {html_path}\n"
-                f"    Møtereferat (MD)  : {notes_path}\n"
-                f"    Møtereferat (HTML): {notes_html_path}"
+                f"    Referat/notat (MD): {notes_path}\n"
+                f"    Referat/notat(HTML): {notes_html_path}"
             )
         except Exception as exc:
-            self._log(f"FEIL: {exc}")
-            self._set_progress(0, f"Feilet: {exc}")
+            if not self._cancel_requested:
+                self._log(f"FEIL: {exc}")
+                self._set_progress(0, f"Feilet (kan gjenopptas): {exc}")
+                self._auto_save_error_log(out_dir, clean_base_stem(audio_path) or "mote")
         finally:
+            self._active_proc = None
             self._set_running(False)
+            self._refresh_checkpoints_ui()
 
 
 HTML = """<!DOCTYPE html>
@@ -1179,41 +1778,62 @@ HTML = """<!DOCTYPE html>
     font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
   }
   body {
-    margin: 0; padding: 14px;
+    margin: 0; padding: 12px 14px;
     background: Canvas; color: CanvasText;
-    font-size: 13px; user-select: none;
-    display: flex; flex-direction: column; gap: 7px; height: calc(100vh - 28px);
+    font-size: 12.5px; user-select: none;
+    display: flex; flex-direction: column; gap: 6px; height: calc(100vh - 24px);
   }
   #dropzone {
     border: 2px dashed GrayText; border-radius: 10px;
-    padding: 9px 14px; display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 14px; display: flex; align-items: center; justify-content: space-between;
     gap: 12px; transition: all 0.15s ease;
   }
   #dropzone.dragover { border-color: #0a84ff; background: rgba(10, 132, 255, 0.1); }
   .dz-text { flex: 1; overflow: hidden; }
-  .dz-text strong { font-size: 13px; display: block; margin-bottom: 2px; }
+  .dz-text strong { font-size: 12.5px; display: block; margin-bottom: 2px; }
   #selected-file {
     color: GrayText; display: block; white-space: nowrap;
     overflow: hidden; text-overflow: ellipsis; font-size: 11.5px;
   }
-  .row { display: flex; gap: 8px; align-items: center; }
-  .row label { width: 115px; flex-shrink: 0; font-weight: 500; font-size: 12.5px; }
-  input[type="text"], input[type="password"], input[type="number"], select {
-    flex: 1; padding: 5px 8px; border-radius: 6px;
+  .row { display: flex; gap: 7px; align-items: center; }
+  .row label { width: 115px; flex-shrink: 0; font-weight: 500; font-size: 12px; }
+  input[type="text"], input[type="password"], input[type="number"], select, textarea {
+    flex: 1; padding: 4px 8px; border-radius: 6px;
     border: 1px solid rgba(128,128,128,0.4); background: Field; color: FieldText;
-    font-size: 12.5px;
+    font-size: 12px; font-family: inherit;
   }
-  input.conflict { border-color: #ff453a; background: rgba(255, 69, 58, 0.08); }
+  textarea { resize: vertical; min-height: 40px; max-height: 95px; }
+  input.conflict { border-color: #ff9f0a; background: rgba(255, 159, 10, 0.08); }
   button {
-    padding: 5px 11px; border-radius: 6px; border: 1px solid rgba(128,128,128,0.4);
-    background: ButtonFace; color: ButtonText; cursor: pointer; font-size: 12.5px;
+    padding: 4px 10px; border-radius: 6px; border: 1px solid rgba(128,128,128,0.4);
+    background: ButtonFace; color: ButtonText; cursor: pointer; font-size: 12px;
     white-space: nowrap;
   }
   button.primary {
-    background: #0a84ff; color: white; border: none; font-weight: 600; padding: 7px 15px;
+    background: #0a84ff; color: white; border: none; font-weight: 600; padding: 6px 14px;
   }
-  button:disabled { opacity: 0.5; cursor: not-allowed; }
-  #conflict-msg { color: #ff453a; font-size: 12px; min-height: 14px; flex: 1; }
+  button.danger {
+    background: rgba(255, 69, 58, 0.14); color: #ff453a; border-color: rgba(255, 69, 58, 0.45); font-weight: 600;
+  }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  #conflict-msg { color: GrayText; font-size: 11px; min-height: 14px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .ckpt-bar {
+    display: flex; gap: 5px; align-items: center; flex-wrap: wrap;
+  }
+  .ckpt-pill {
+    font-size: 10.5px; padding: 2px 8px; border-radius: 999px;
+    border: 1px solid rgba(128,128,128,0.35); color: GrayText;
+    background: rgba(128,128,128,0.07); cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .ckpt-pill.done {
+    border-color: rgba(48, 209, 88, 0.6);
+    background: rgba(48, 209, 88, 0.14);
+    color: CanvasText;
+    font-weight: 600;
+  }
+  .ckpt-pill:hover { border-color: #0a84ff; }
 
   .progress-section { display: flex; flex-direction: column; gap: 3px; }
   .progress-header { display: flex; justify-content: space-between; font-size: 11px; color: GrayText; }
@@ -1225,7 +1845,7 @@ HTML = """<!DOCTYPE html>
 
   #log {
     flex: 1; background: rgba(128,128,128,0.1); border-radius: 8px;
-    padding: 9px; font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 11px;
+    padding: 8px; font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 11px;
     overflow-y: auto; white-space: pre-wrap; user-select: text;
     border: 1px solid rgba(128,128,128,0.25);
   }
@@ -1235,8 +1855,8 @@ HTML = """<!DOCTYPE html>
 
   <div id="dropzone">
     <div class="dz-text">
-      <strong>Slipp lydfil her (.m4a, .wav, .opus, .mp3)</strong>
-      <span id="selected-file">Ingen lydfil valgt ennå</span>
+      <strong>Slipp lydfil (.m4a, .wav, .opus, .mp3) eller transkripsjon (.html, .json, .txt, .srt)</strong>
+      <span id="selected-file">Ingen lyd- eller transkripsjonsfil valgt ennå</span>
     </div>
     <button onclick="browseAudio()">Velg fil...</button>
   </div>
@@ -1249,57 +1869,86 @@ HTML = """<!DOCTYPE html>
   </div>
 
   <div class="row">
-    <label>Transkripsjon:</label>
-    <input type="text" id="html_name" placeholder="mote_transkripsjon.html" oninput="validateNames()">
+    <label>Utdatafiler:</label>
+    <input type="text" id="html_name" placeholder="mote_transkripsjon.html" oninput="validateNames()" title="HTML Transkripsjon">
+    <input type="text" id="notes_name" placeholder="mote_referat.md" oninput="validateNames()" title="Markdown Referat">
+    <input type="text" id="notes_html_name" placeholder="mote_referat.html" oninput="validateNames()" title="HTML Referat">
     <button onclick="autoIncrementNames()">Ledig navn</button>
   </div>
 
   <div class="row">
-    <label>Referat (MD/HTML):</label>
-    <input type="text" id="notes_name" placeholder="mote_referat.md" oninput="validateNames()">
-    <input type="text" id="notes_html_name" placeholder="mote_referat.html" oninput="validateNames()">
-  </div>
-
-  <div class="row">
-    <label>Modeller:</label>
+    <label>Modeller &HF:</label>
     <select id="whisper_model">
       <option value="NbAiLab/nb-whisper-large" selected>NB-Whisper Large (Anbefalt Norsk)</option>
       <option value="large-v3-turbo">Whisper: large-v3-turbo</option>
       <option value="large-v3">Whisper: large-v3</option>
       <option value="NbAiLab/nb-whisper-medium">NB-Whisper Medium (Raskere)</option>
     </select>
-    <input type="text" id="ollama_model" value="gemma4:e4b" placeholder="Ollama-modell">
-    <select id="language" style="max-width: 65px;">
+    <input type="text" id="ollama_model" value="gemma4:e4b" placeholder="Ollama-modell" style="max-width: 115px;">
+    <select id="language" style="max-width: 58px;">
       <option value="no" selected>NO</option>
       <option value="en">EN</option>
       <option value="sv">SV</option>
       <option value="da">DA</option>
     </select>
+    <input type="password" id="hf_token" placeholder="HF Token (hf_...)" style="max-width: 120px;">
   </div>
 
   <div class="row">
-    <label>Antall talere:</label>
-    <input type="number" id="min_speakers" placeholder="Min (f.eks 4)" min="1" max="20" style="max-width: 95px;">
-    <input type="number" id="max_speakers" placeholder="Maks (f.eks 4)" min="1" max="20" style="max-width: 95px;">
+    <label>Talere & Modus:</label>
+    <input type="number" id="min_speakers" placeholder="Min" min="1" max="20" style="max-width: 54px;">
+    <input type="number" id="max_speakers" placeholder="Maks" min="1" max="20" style="max-width: 54px;">
+    <button onclick="setExactSpeakers(1)" title="1 taler – Foredrag / Presentasjon">1</button>
     <button onclick="setExactSpeakers(2)" title="Lås til nøyaktig 2 talere">2</button>
     <button onclick="setExactSpeakers(3)" title="Lås til nøyaktig 3 talere">3</button>
     <button onclick="setExactSpeakers(4)" title="Lås til nøyaktig 4 talere">4</button>
     <button onclick="setExactSpeakers(5)" title="Lås til nøyaktig 5 talere">5</button>
+    <select id="note_mode" onchange="onModeChanged()" title="Velg eller overstyr modus før du genererer transkripsjon og notater">
+      <option value="auto" selected>Modus: Auto (Foredrag ved 1 taler, ellers Møte)</option>
+      <option value="mote">Modus: Møtereferat (flere deltakere & aksjonspunkter)</option>
+      <option value="foredrag">Modus: Foredrag / Presentasjon (faglige hovedpoenger)</option>
+    </select>
   </div>
 
   <div class="row">
     <label>Deltakernavn:</label>
     <input type="text" id="speaker_names_hint" placeholder="Valgfritt: f.eks. Ola, Kari, Per, Anne (hjelper AI å koble stemme til navn)">
+    <button onclick="loadAgendaFile()" title="Last inn agenda, lysbilder (.pptx, .pdf, .odp) eller notater (.docx, .md, .txt)">+ Agenda / Lysbilder...</button>
+  </div>
+
+  <div class="row" style="align-items: flex-start;">
+    <label style="padding-top: 4px;">Agenda / Lysbilder:</label>
+    <textarea id="agenda_text" placeholder="Valgfritt: Lim inn saksliste/kontekst, eller klikk «+ Agenda / Lysbilder...» (.pptx, .pdf, .docx, .md)..."></textarea>
   </div>
 
   <div class="row">
-    <label>HF Token:</label>
-    <input type="password" id="hf_token" placeholder="hf_... (kun ved første gangs oppsett)">
+    <label>Sjekkpunkt & Steg:</label>
+    <div class="ckpt-bar" id="ckpt_bar">
+      <span class="ckpt-pill" id="ckpt_s1" onclick="selectTaskMode('only_1_asr')">1. ASR</span>
+      <span class="ckpt-pill" id="ckpt_s2" onclick="selectTaskMode('only_2_align')">2. Align</span>
+      <span class="ckpt-pill" id="ckpt_s3" onclick="selectTaskMode('from_3_diarize')">3. Pyannote</span>
+      <span class="ckpt-pill" id="ckpt_s4" onclick="selectTaskMode('from_4_names')">4. Navn & HTML</span>
+      <span class="ckpt-pill" id="ckpt_s5" onclick="selectTaskMode('only_5_notes')">5. Referat/Notat</span>
+    </div>
+    <select id="task_mode" onchange="validateNames()">
+      <option value="auto_resume" selected>Fortsett fra sjekkpunkt (hopp over ferdige steg)</option>
+      <option value="full_fresh">Kjør alt på nytt (Steg 1–5)</option>
+      <option value="from_3_diarize">Fra Steg 3 -> 5 (Pyannote + Navn + Referat)</option>
+      <option value="from_4_names">Fra Steg 4 -> 5 (Navn & HTML + Referat)</option>
+      <option value="only_5_notes">Kun Steg 5: Generer Referat / Notater på nytt</option>
+      <option value="only_4_names">Kun Steg 4: Taler-navn & HTML-transkripsjon</option>
+      <option value="only_3_diarize">Kun Steg 3: Taler-ID (Pyannote)</option>
+      <option value="only_2_align">Kun Steg 2: Ord-tidsjustering (Alignment)</option>
+      <option value="only_1_asr">Kun Steg 1: Rå-transkripsjon (ASR)</option>
+    </select>
   </div>
 
   <div class="row">
     <span id="conflict-msg"></span>
-    <button class="primary" id="run_btn" onclick="runPipeline()" disabled>Transkriber & Lag Referat</button>
+    <button onclick="copyLog()" title="Kopier hele loggen til utklippstavlen">Kopier logg</button>
+    <button onclick="saveLog()" title="Lagre loggen til en .txt-fil">Lagre logg...</button>
+    <button class="danger" id="stop_btn" onclick="stopJob()" disabled>Stopp / Pause</button>
+    <button class="primary" id="run_btn" onclick="runPipeline()" disabled>Start / Fortsett</button>
   </div>
 
   <div class="progress-section">
@@ -1312,7 +1961,7 @@ HTML = """<!DOCTYPE html>
     </div>
   </div>
 
-  <div id="log">Klar. Dra inn en lydfil for å begynne.</div>
+  <div id="log">Klar. Dra inn en lydfil eller en eksisterende transkripsjonsfil for å begynne.</div>
 
 <script>
   let currentAudioPath = "";
@@ -1322,7 +1971,7 @@ HTML = """<!DOCTYPE html>
     const defs = await pywebview.api.get_defaults();
     if (defs.hf_token) document.getElementById('hf_token').value = defs.hf_token;
     if (defs.diarization_cached && !defs.hf_token) {
-      document.getElementById('hf_token').placeholder = "Pyannote bufret lokalt (token valgfri)";
+      document.getElementById('hf_token').placeholder = "HF bufret lokalt";
     }
     document.getElementById('out_dir').value = defs.default_out_dir;
   });
@@ -1332,22 +1981,78 @@ HTML = """<!DOCTYPE html>
   dz.addEventListener('dragleave', () => dz.classList.remove('dragover'));
   dz.addEventListener('drop', (e) => { e.preventDefault(); dz.classList.remove('dragover'); });
 
+  function selectTaskMode(mode) {
+    const sel = document.getElementById('task_mode');
+    if (sel) {
+      sel.value = mode;
+      validateNames();
+    }
+  }
+
   function setExactSpeakers(n) {
     document.getElementById('min_speakers').value = n;
     document.getElementById('max_speakers').value = n;
   }
 
+  function onModeChanged() {
+    const mode = document.getElementById('note_mode').value;
+    if (mode === 'foredrag' && !document.getElementById('min_speakers').value && !document.getElementById('max_speakers').value) {
+      document.getElementById('min_speakers').value = 1;
+      document.getElementById('max_speakers').value = 1;
+    }
+  }
+
+  async function loadAgendaFile() {
+    const content = await pywebview.api.pick_agenda_file();
+    if (content) {
+      const box = document.getElementById('agenda_text');
+      box.value = box.value.trim() ? (box.value.trim() + "\\n\\n" + content) : content;
+    }
+  }
+
+  async function refreshCheckpointBar() {
+    if (!currentAudioPath) return;
+    const outDir = document.getElementById('out_dir').value;
+    const htmlName = document.getElementById('html_name').value;
+    const notesName = document.getElementById('notes_name').value;
+    const st = await pywebview.api.get_checkpoint_status(outDir, currentAudioPath, htmlName, notesName);
+    const map = [
+      ['ckpt_s1', st.s1_asr, '1. ASR'],
+      ['ckpt_s2', st.s2_align, '2. Align'],
+      ['ckpt_s3', st.s3_diarize, '3. Pyannote'],
+      ['ckpt_s4', st.s4_names, '4. Navn & HTML'],
+      ['ckpt_s5', st.s5_notes, '5. Referat/Notat'],
+    ];
+    for (const [id, done, label] of map) {
+      const el = document.getElementById(id);
+      if (el) {
+        el.classList.toggle('done', !!done);
+        el.textContent = (done ? "✓ " : "") + label;
+      }
+    }
+  }
+
   async function applySelection(info) {
     currentAudioPath = info.audio_path;
-    document.getElementById('selected-file').textContent = info.audio_path;
+    document.getElementById('selected-file').textContent = info.audio_path + (info.is_transcript_input ? " (Transkripsjon)" : "");
     if (info.out_dir) document.getElementById('out_dir').value = info.out_dir;
     if (info.html_name) document.getElementById('html_name').value = info.html_name;
     if (info.notes_name) document.getElementById('notes_name').value = info.notes_name;
     if (info.notes_html_name) document.getElementById('notes_html_name').value = info.notes_html_name;
+    await refreshCheckpointBar();
     await validateNames();
   }
 
   async function handleDroppedAudio(fullPath) {
+    const low = fullPath.toLowerCase();
+    if (low.endsWith('.pptx') || low.endsWith('.pdf') || low.endsWith('.odp') || low.endsWith('.docx') || low.endsWith('.odt')) {
+      const ctx = await pywebview.api.load_context_file_path(fullPath);
+      if (ctx) {
+        const box = document.getElementById('agenda_text');
+        box.value = box.value.trim() ? (box.value.trim() + "\\n\\n" + ctx) : ctx;
+      }
+      return;
+    }
     const info = await pywebview.api.suggest_output_names(
       fullPath,
       document.getElementById('out_dir').value
@@ -1367,6 +2072,7 @@ HTML = """<!DOCTYPE html>
       if (res.html_name) document.getElementById('html_name').value = res.html_name;
       if (res.notes_name) document.getElementById('notes_name').value = res.notes_name;
       if (res.notes_html_name) document.getElementById('notes_html_name').value = res.notes_html_name;
+      await refreshCheckpointBar();
       await validateNames();
     }
   }
@@ -1380,6 +2086,7 @@ HTML = """<!DOCTYPE html>
     document.getElementById('html_name').value = info.html_name;
     document.getElementById('notes_name').value = info.notes_name;
     document.getElementById('notes_html_name').value = info.notes_html_name;
+    await refreshCheckpointBar();
     await validateNames();
   }
 
@@ -1411,25 +2118,42 @@ HTML = """<!DOCTYPE html>
     }
 
     const conflicts = await pywebview.api.check_conflicts(outDir, htmlName, notesName, notesHtmlName);
-    const hasHtmlConflict = conflicts.includes(htmlName);
-    const hasNotesConflict = conflicts.includes(notesName);
-    const hasNotesHtmlConflict = conflicts.includes(notesHtmlName);
-
-    htmlInput.classList.toggle('conflict', hasHtmlConflict);
-    notesInput.classList.toggle('conflict', hasNotesConflict);
-    notesHtmlInput.classList.toggle('conflict', hasNotesHtmlConflict);
+    htmlInput.classList.toggle('conflict', conflicts.includes(htmlName));
+    notesInput.classList.toggle('conflict', conflicts.includes(notesName));
+    notesHtmlInput.classList.toggle('conflict', conflicts.includes(notesHtmlName));
 
     if (conflicts.length > 0) {
-      msg.textContent = "Filen finnes allerede! Klikk «Ledig navn».";
-      btn.disabled = true;
+      msg.textContent = "Merk: Eksisterende utdatafil oppdateres ved kjøring (eller klikk «Ledig navn»).";
     } else {
       msg.textContent = "";
-      btn.disabled = isJobRunning;
     }
+    btn.disabled = isJobRunning;
+    await refreshCheckpointBar();
   }
 
   function openFinder() {
     pywebview.api.reveal_in_finder(document.getElementById('out_dir').value);
+  }
+
+  async function copyLog() {
+    const text = document.getElementById('log').textContent;
+    try {
+      await navigator.clipboard.writeText(text);
+      appendLog("==> Logg kopiert til utklippstavlen.");
+    } catch (e) {
+      appendLog("Merk: Kunne ikke kopiere automatisk – marker teksten i loggen med Cmd+A / Ctrl+A.");
+    }
+  }
+
+  async function saveLog() {
+    const text = document.getElementById('log').textContent;
+    const outDir = document.getElementById('out_dir').value;
+    await pywebview.api.save_log_dialog(text, outDir, currentAudioPath);
+  }
+
+  async function stopJob() {
+    if (!isJobRunning) return;
+    await pywebview.api.stop_job();
   }
 
   function appendLog(line) {
@@ -1448,7 +2172,9 @@ HTML = """<!DOCTYPE html>
   function setRunning(running) {
     isJobRunning = running;
     const btn = document.getElementById('run_btn');
-    btn.textContent = running ? "Arbeider..." : "Transkriber & Lag Referat";
+    const stopBtn = document.getElementById('stop_btn');
+    btn.textContent = running ? "Arbeider..." : "Start / Fortsett";
+    stopBtn.disabled = !running;
     validateNames();
   }
 
@@ -1456,8 +2182,9 @@ HTML = """<!DOCTYPE html>
     await validateNames();
     if (document.getElementById('run_btn').disabled) return;
 
+    const taskMode = document.getElementById('task_mode').value;
     updateProgress(0, "Starter jobb...");
-    document.getElementById('log').textContent = "Starter jobb...";
+    document.getElementById('log').textContent = "Starter jobb (" + taskMode + ")...";
     pywebview.api.start_job(
       currentAudioPath,
       document.getElementById('out_dir').value,
@@ -1470,7 +2197,10 @@ HTML = """<!DOCTYPE html>
       document.getElementById('hf_token').value,
       document.getElementById('min_speakers').value,
       document.getElementById('max_speakers').value,
-      document.getElementById('speaker_names_hint').value
+      document.getElementById('speaker_names_hint').value,
+      document.getElementById('note_mode').value,
+      document.getElementById('agenda_text').value,
+      taskMode
     );
   }
 </script>
@@ -1496,8 +2226,8 @@ def main() -> None:
         "Møtereferat (WhisperX + Ollama)",
         html=HTML,
         js_api=api,
-        width=680,
-        height=690,
+        width=780,
+        height=740,
     )
     api.window = window
     webview.start(bind_drag_and_drop, window)
