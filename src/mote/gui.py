@@ -23,38 +23,24 @@ from mote.core import (  # noqa: E402
     MODEL_PROFILES,
     WHISPERX_STAGE_RUNNER_CODE,
     LiveAudioMonitor,
-    TurnDict,
-    build_notes_html,
+    build_cli_parser,
     build_runtime_env,
-    build_transcript_html_and_text,
     build_whisper_initial_prompt,
     clean_base_stem,
     cli_main,
     detect_hardware_resources,
-    determine_stages_to_run,
     ensure_ffmpeg,
-    ensure_whisperx,
     evaluate_model_resource_fit,
     extract_context_from_file,
-    extract_turns_from_whisperx,
-    fetch_ollama_models,
-    format_seconds,
-    generate_notes_via_api,
     get_checkpoint_dir,
     get_checkpoint_status_dict,
     get_initial_hf_token,
-    get_whisperx_python,
-    infer_speaker_names_via_api,
     is_diarization_cached,
     is_transcript_file,
-    load_turns_from_transcript_file,
-    managed_ollama_server,
-    resolve_effective_note_mode,
     resolve_moved_audio_path,
+    resolve_speaker_bounds,
     run_live_check_on_file,
-    sanitize_text,
-    save_hf_token,
-    stage_audio_input,
+    run_pipeline,
     unique_filename,
 )
 from mote.template_loader import load_template  # noqa: E402
@@ -591,6 +577,9 @@ class MoteApi:
         if self.window:
             self.window.evaluate_js(f"setRunning({'true' if running else 'false'})")
 
+    def _set_active_proc(self, proc: subprocess.Popen[str] | None) -> None:
+        self._active_proc = proc
+
     def _worker(
         self,
         audio_path_str: str,
@@ -624,7 +613,6 @@ class MoteApi:
         try:
             out_dir = out_dir.resolve()
             out_dir.mkdir(parents=True, exist_ok=True)
-
             if not audio_path.is_file():
                 self._log(f"FEIL: Fant ikke inndatafilen {audio_path}")
                 self._set_progress(0, "Feil: Fil mangler")
@@ -633,349 +621,32 @@ class MoteApi:
             if audio_path != orig_audio_path.resolve():
                 self._log(f"Merk: Filen ble funnet på ny sti: {audio_path}")
 
-            html_name = Path(html_name_str.strip()).name
-            notes_name = Path(notes_name_str.strip()).name
-            notes_html_name = Path(notes_html_name_str.strip()).name
-
-            html_path = out_dir / html_name
-            notes_path = out_dir / notes_name
-            notes_html_path = out_dir / notes_html_name
-
-            ckpt_dir = get_checkpoint_dir(out_dir, audio_path)
-            ckpt_dir.mkdir(parents=True, exist_ok=True)
-            asr_json = ckpt_dir / "1_asr.json"
-            align_json = ckpt_dir / "2_align.json"
-            diarize_json = ckpt_dir / "3_diarize.json"
-            speakers_json = ckpt_dir / "4_speakers.json"
-
-            is_trans_input = is_transcript_file(audio_path)
-            run_s1, run_s2, run_s3, run_s4, run_s5 = determine_stages_to_run(
-                task_mode=task_mode,
-                is_trans_input=is_trans_input,
-                has_s1=asr_json.is_file(),
-                has_s2=align_json.is_file(),
-                has_s3=diarize_json.is_file(),
-                has_s4=speakers_json.is_file(),
-                has_html=html_path.is_file(),
+            min_spk, max_spk = resolve_speaker_bounds(
+                min_speakers_str, max_speakers_str, speaker_names_hint
             )
-
-            if is_trans_input and task_mode in ("only_1_asr", "only_2_align", "only_3_diarize"):
-                self._log(
-                    f"==> Merk: {audio_path.name} er allerede en transkripsjonsfil. "
-                    "Lydsteg 1–3 hoppes over."
-                )
-                self._set_progress(100, "Inndata er allerede transkribert")
-                return
-
-            env = build_runtime_env()
-
-            wx_stages: list[str] = []
-            if run_s1:
-                wx_stages.append("asr")
-            if run_s2:
-                wx_stages.append("align")
-            if run_s3:
-                wx_stages.append("diarize")
-
-            if wx_stages:
-                if "diarize" in wx_stages:
-                    if hf_token.strip():
-                        save_hf_token(hf_token)
-                    elif not is_diarization_cached():
-                        self._log("FEIL: Pyannote er ikke bufret ennå. Lim inn HF-token.")
-                        self._set_progress(0, "Mangler HF-token")
-                        return
-
-                ensure_ffmpeg(env, self._log)
-                whisperx_bin = ensure_whisperx(env, self._log, self._set_progress)
-                wx_python = get_whisperx_python(whisperx_bin)
-
-                initial_prompt = build_whisper_initial_prompt(
-                    meeting_title, speaker_names_hint, agenda_text, manual_notes_text
-                )
-                if initial_prompt:
-                    self._log(f"==> Kontekst-ordliste til Whisper ({len(initial_prompt)} tegn) aktivert.")
-
-                skipped = [s for s in ("asr", "align", "diarize") if s not in wx_stages]
-                if skipped:
-                    self._log(
-                        f"==> Sjekkpunkt-gjenopptak: Gjenbruker ferdige steg ({', '.join(skipped)}) "
-                        f"fra {ckpt_dir.name}/ og kjører: {', '.join(wx_stages)}"
-                    )
-
-                with tempfile.TemporaryDirectory(prefix="mote_wx_") as tmp_dir:
-                    tmp_dir_path = Path(tmp_dir)
-                    staged_audio = stage_audio_input(audio_path, tmp_dir_path)
-                    runner_script = tmp_dir_path / "wx_stage_runner.py"
-                    runner_script.write_text(WHISPERX_STAGE_RUNNER_CODE, encoding="utf-8")
-
-                    cfg_file = tmp_dir_path / "wx_config.json"
-                    cfg_data = {
-                        "audio_path": str(staged_audio),
-                        "ckpt_dir": str(ckpt_dir),
-                        "stages": wx_stages,
-                        "model": whisper_model,
-                        "language": language,
-                        "compute_type": "int8",
-                        "hf_token": hf_token.strip(),
-                        "min_speakers": int(min_speakers_str.strip()) if min_speakers_str.strip().isdigit() else None,
-                        "max_speakers": int(max_speakers_str.strip()) if max_speakers_str.strip().isdigit() else None,
-                        "initial_prompt": initial_prompt,
-                    }
-                    cfg_file.write_text(json.dumps(cfg_data, ensure_ascii=False), encoding="utf-8")
-
-                    cmd = [wx_python, "-u", str(runner_script), str(cfg_file)]
-                    proc = subprocess.Popen(
-                        cmd,
-                        env=env,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT,
-                        text=True,
-                        encoding="utf-8",
-                        errors="replace",
-                        bufsize=1,
-                    )
-                    self._active_proc = proc
-                    assert proc.stdout is not None
-                    phase = 0 if "asr" in wx_stages else (1 if "align" in wx_stages else 2)
-                    diarization_start: float | None = None
-                    last_diarize_pct: float = 0.0
-                    stop_heartbeat = threading.Event()
-
-                    def _diarization_heartbeat() -> None:
-                        while not stop_heartbeat.wait(1.0):
-                            if phase == 2 and diarization_start is not None:
-                                elapsed = int(time.time() - diarization_start)
-                                mm, ss = divmod(elapsed, 60)
-                                if last_diarize_pct > 0:
-                                    mapped = int(60 + (last_diarize_pct * 0.14))
-                                    self._set_progress(
-                                        mapped,
-                                        f"[Steg 3/5] Pyannote taler-ID: {last_diarize_pct:.0f}% ({mm:02d}:{ss:02d})...",
-                                    )
-                                else:
-                                    creep = min(13, elapsed // 15)
-                                    self._set_progress(
-                                        60 + creep,
-                                        f"[Steg 3/5] Identifiserer talere med Pyannote ({mm:02d}:{ss:02d})...",
-                                    )
-
-                    hb_thread = threading.Thread(target=_diarization_heartbeat, daemon=True)
-                    hb_thread.start()
-
-                    try:
-                        for line in proc.stdout:
-                            clean = sanitize_text(line)
-                            if not clean:
-                                continue
-
-                            if clean == "STAGE:ASR:START":
-                                phase = 0
-                                self._set_progress(12, f"[Steg 1/5] Transkriberer med {whisper_model}...")
-                                self._log(f"==> [Steg 1/5] Kjører WhisperX ASR ({whisper_model}) på {audio_path.name}...")
-                                continue
-                            if clean == "STAGE:ASR:DONE":
-                                self._log("==> [Steg 1/5] Rå-transkripsjon lagret i sjekkpunkt (1_asr.json).")
-                                self._refresh_checkpoints_ui()
-                                continue
-                            if clean == "STAGE:ALIGN:START":
-                                phase = 1
-                                self._set_progress(48, "[Steg 2/5] Tidsjusterer ord (Alignment): 0%")
-                                self._log("==> [Steg 2/5] Starter ord-tidsjustering (Alignment)...")
-                                continue
-                            if clean == "STAGE:ALIGN:DONE":
-                                self._log("==> [Steg 2/5] Tidsjustering lagret i sjekkpunkt (2_align.json).")
-                                self._refresh_checkpoints_ui()
-                                continue
-                            if clean == "STAGE:DIARIZE:START":
-                                phase = 2
-                                last_diarize_pct = 0.0
-                                diarization_start = time.time()
-                                self._set_progress(60, "[Steg 3/5] Identifiserer talere med Pyannote (00:00)...")
-                                self._log("==> [Steg 3/5] Starter Pyannote taler-identifisering...")
-                                continue
-                            if clean == "STAGE:DIARIZE:DONE":
-                                self._log("==> [Steg 3/5] Taler-identifisering lagret i sjekkpunkt (3_diarize.json).")
-                                self._refresh_checkpoints_ui()
-                                continue
-
-                            d_match = re.search(r"DiarizeProgress:\s*([0-9]+(?:\.[0-9]+)?)%", clean)
-                            if d_match:
-                                last_diarize_pct = float(d_match.group(1))
-                                mapped = int(60 + (last_diarize_pct * 0.14))
-                                elapsed = int(time.time() - (diarization_start or time.time()))
-                                mm, ss = divmod(elapsed, 60)
-                                self._set_progress(
-                                    mapped,
-                                    f"[Steg 3/5] Pyannote taler-ID: {last_diarize_pct:.0f}% ({mm:02d}:{ss:02d})...",
-                                )
-                                continue
-
-                            self._log(clean)
-
-                            match = re.search(r"Progress:\s*([0-9]+(?:\.[0-9]+)?)%", clean)
-                            if match:
-                                p_pct = float(match.group(1))
-                                if phase == 0:
-                                    mapped = int(12 + (p_pct * 0.35))
-                                    self._set_progress(mapped, f"[Steg 1/5] Transkriberer tale: {p_pct:.0f}%")
-                                elif phase == 1:
-                                    mapped = int(48 + (p_pct * 0.11))
-                                    self._set_progress(mapped, f"[Steg 2/5] Tidsjusterer ord (Alignment): {p_pct:.0f}%")
-                    finally:
-                        stop_heartbeat.set()
-                        self._active_proc = None
-
-                    rc = proc.wait()
-                    if self._cancel_requested:
-                        self._refresh_checkpoints_ui()
-                        return
-                    if rc != 0:
-                        self._log("FEIL: WhisperX-steget feilet. Fullførte tidligere steg er lagret i sjekkpunkt.")
-                        self._set_progress(0, "Feil under WhisperX (kan gjenopptas)")
-                        self._auto_save_error_log(out_dir, clean_base_stem(audio_path))
-                        self._refresh_checkpoints_ui()
-                        return
-
-            if self._cancel_requested:
-                return
-
-            if not run_s4 and not run_s5:
-                self._refresh_checkpoints_ui()
-                self._set_progress(100, f"Steg ({', '.join(wx_stages)}) fullført og lagret i sjekkpunkt")
-                self._log(f"==> Valgt deloppgave ({task_mode}) er ferdig og lagret i {ckpt_dir}")
-                return
-
-            turns: list[TurnDict] = []
-            speaker_map: dict[str, str] = {}
-
-            if is_trans_input:
-                self._log(f"==> Leser inn eksisterende transkripsjon fra {audio_path.name}...")
-                turns, speaker_map = load_turns_from_transcript_file(audio_path)
-                if not turns:
-                    self._log(f"FEIL: Klarte ikke hente ut replikker fra {audio_path.name}.")
-                    self._set_progress(0, "Kunne ikke lese transkripsjon")
-                    return
-                self._log(f"==> Lastet {len(turns)} replikker fra transkripsjonsfil.")
-            elif not run_s4 and speakers_json.is_file():
-                saved_s4 = json.loads(speakers_json.read_text(encoding="utf-8"))
-                turns = list(saved_s4.get("turns", []))
-                speaker_map = dict(saved_s4.get("speaker_map", {}))
-                self._log(f"==> Gjenbruker taler-navnekobling fra sjekkpunkt (4_speakers.json, {len(turns)} replikker).")
-            elif not run_s4 and html_path.is_file():
-                turns, speaker_map = load_turns_from_transcript_file(html_path)
-                self._log(f"==> Gjenbruker ferdig HTML-transkripsjon ({html_path.name}, {len(turns)} replikker).")
-            else:
-                source_json = (
-                    diarize_json
-                    if diarize_json.is_file()
-                    else (align_json if align_json.is_file() else asr_json)
-                )
-                if not source_json.is_file():
-                    self._log("FEIL: Fant ingen transkripsjonsdata å bygge videre på.")
-                    self._set_progress(0, "Mangler transkripsjonsdata")
-                    return
-                turns = extract_turns_from_whisperx(source_json)
-
-            doc_title = meeting_title.strip() or clean_base_stem(audio_path)
-
-            with managed_ollama_server(self._log, self._set_progress, env=env) as ollama_bin:
-                installed = fetch_ollama_models() or []
-                if ollama_model not in installed and f"{ollama_model}:latest" not in installed:
-                    self._set_progress(75, f"Laster ned {ollama_model}...")
-                    self._log(f"==> Laster ned '{ollama_model}'...")
-                    subprocess.run([ollama_bin, "pull", ollama_model], env=env, check=True)
-
-                if self._cancel_requested:
-                    return
-
-                if run_s4:
-                    self._set_progress(78, "[Steg 4/5] Gjenkjenner deltakernavn og titler...")
-                    self._log("==> [Steg 4/5] Analyserer introduksjoner, deltakerliste og kontekst for å knytte taler-ID til navn...")
-                    inferred_map = infer_speaker_names_via_api(
-                        turns,
-                        ollama_model,
-                        speaker_names_hint,
-                        meeting_title,
-                        agenda_text,
-                        self._log,
-                        manual_notes_text=manual_notes_text,
-                    )
-                    merged_map = dict(speaker_map)
-                    merged_map.update(inferred_map)
-                    speaker_map = merged_map
-                    for spk_id, resolved_name in speaker_map.items():
-                        if resolved_name != spk_id:
-                            self._log(f"    Gjenkjent {spk_id} -> {resolved_name}")
-
-                    clean_transcript = build_transcript_html_and_text(
-                        turns, speaker_map, html_path, doc_title
-                    )
-                    tmp_s4 = speakers_json.with_suffix(".json.tmp")
-                    tmp_s4.write_text(
-                        json.dumps({"speaker_map": speaker_map, "turns": turns}, ensure_ascii=False),
-                        encoding="utf-8",
-                    )
-                    tmp_s4.replace(speakers_json)
-                    self._refresh_checkpoints_ui()
-                    self._log(f"==> [Steg 4/5] Rik HTML-transkripsjon lagret: {html_path}")
-                else:
-                    if not html_path.is_file():
-                        clean_transcript = build_transcript_html_and_text(
-                            turns, speaker_map, html_path, doc_title
-                        )
-                    else:
-                        lines_out: list[str] = []
-                        for t in turns:
-                            spk = speaker_map.get(t["speaker"], t["speaker"])
-                            ts = f"{format_seconds(t['start'])} – {format_seconds(t['end'])}"
-                            lines_out.append(f"[{ts}] {spk}: {t['text']}")
-                        clean_transcript = "\n\n".join(lines_out)
-
-                if not run_s5 or self._cancel_requested:
-                    self._refresh_checkpoints_ui()
-                    if not self._cancel_requested:
-                        self._set_progress(100, "Steg 4 (Taler-ID & HTML-transkripsjon) fullført!")
-                        self._log(f"==> FERDIG med Steg 4: {html_path}")
-                    return
-
-                effective_mode = resolve_effective_note_mode(
-                    note_mode, min_speakers_str, max_speakers_str, speaker_map
-                )
-                mode_desc = (
-                    "foredragsnotater (1-talers modus / faglige hovedpoenger)"
-                    if effective_mode == "foredrag"
-                    else "møtereferat (flere deltakere & aksjonspunkter)"
-                )
-                self._set_progress(84, f"[Steg 5/5] Skriver {mode_desc} med {ollama_model}...")
-                self._log(f"==> [Steg 5/5] Genererer {mode_desc} ({ollama_model})...")
-
-                notes_md = generate_notes_via_api(
-                    clean_transcript,
-                    ollama_model,
-                    speaker_map,
-                    speaker_names_hint,
-                    meeting_title,
-                    agenda_text,
-                    progress_fn=self._set_progress,
-                    note_mode=effective_mode,
-                    manual_notes_text=manual_notes_text,
-                )
-                if self._cancel_requested:
-                    return
-
-                notes_path.write_text(notes_md + "\n", encoding="utf-8")
-
-                self._set_progress(99, "Bygger HTML-utgave av referat/notater...")
-                build_notes_html(notes_md, notes_html_path, doc_title)
-                self._refresh_checkpoints_ui()
-
-            self._set_progress(100, "Fullført!")
-            self._log(
-                f"==> FERDIG!\n"
-                f"    HTML-transkripsjon: {html_path}\n"
-                f"    Referat/notat (MD): {notes_path}\n"
-                f"    Referat/notat(HTML): {notes_html_path}"
+            run_pipeline(
+                input_path=audio_path,
+                out_dir=out_dir,
+                html_name=html_name_str,
+                notes_name=notes_name_str,
+                notes_html_name=notes_html_name_str,
+                whisper_model=whisper_model,
+                ollama_model=ollama_model,
+                language=language,
+                hf_token=hf_token,
+                min_speakers=min_spk,
+                max_speakers=max_spk,
+                speaker_names_hint=speaker_names_hint,
+                meeting_title=meeting_title,
+                agenda_text=agenda_text,
+                manual_notes_text=manual_notes_text,
+                note_mode=note_mode,
+                task_mode=task_mode,
+                log_fn=self._log,
+                progress_fn=self._set_progress,
+                cancel_check_fn=lambda: self._cancel_requested,
+                on_proc_fn=self._set_active_proc,
+                on_checkpoint_fn=self._refresh_checkpoints_ui,
             )
         except Exception as exc:
             if not self._cancel_requested:
@@ -1044,18 +715,40 @@ def run_self_test() -> int:
     return 0
 
 
+def strip_macos_psn_args(argv: list[str]) -> list[str]:
+    """Filter out macOS LaunchServices process serial number (-psn_0_...) arguments.
+
+    >>> strip_macos_psn_args(["-psn_0_123456"])
+    []
+    >>> strip_macos_psn_args(["-psn_0_123456", "--check-hw"])
+    ['--check-hw']
+    >>> strip_macos_psn_args(["--profile", "light", "mote.opus"])
+    ['--profile', 'light', 'mote.opus']
+    """
+    return [arg for arg in argv if not arg.startswith("-psn_")]
+
+
 def entrypoint(argv: list[str] | None = None) -> int:
-    """Unified CLI and GUI dispatcher."""
-    args = sys.argv[1:] if argv is None else list(argv)
-    if args:
-        if args[0] == "--self-test":
-            return run_self_test()
-        if args[0] == "--cli":
-            return cli_main(args[1:])
-        if args[0] in ("-h", "--help", "--status", "--live-check") or not args[0].startswith("--"):
-            return cli_main(args)
-    main()
-    return 0
+    """Unified CLI and GUI dispatcher driven by build_cli_parser()."""
+    raw_args = sys.argv[1:] if argv is None else list(argv)
+    clean_args = strip_macos_psn_args(raw_args)
+    if not clean_args:
+        main()
+        return 0
+
+    if "-h" in clean_args or "--help" in clean_args:
+        return cli_main(clean_args)
+
+    parser = build_cli_parser()
+    parsed, _unknown = parser.parse_known_args(clean_args)
+    if parsed.self_test:
+        return run_self_test()
+    if parsed.gui and not parsed.cli:
+        main()
+        return 0
+
+    cli_args = [a for a in clean_args if a != "--cli"]
+    return cli_main(cli_args)
 
 
 if __name__ == "__main__":

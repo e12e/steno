@@ -417,6 +417,9 @@
         <button class="btn" onclick="copyFullTranscript()" id="copy-all-btn" title="Kopier hele transkripsjonen som ren tekst">
           📋 Kopier
         </button>
+        <button class="btn" onclick="saveUpdatedHtml()" id="save-html-btn" title="Lagre oppdatert HTML-transkripsjon med nye deltakernavn til disk">
+          💾 Lagre HTML
+        </button>
         <button class="btn" onclick="toggleTheme()" title="Bytt mellom lyst og mørkt tema">
           🌓 Tema
         </button>
@@ -528,6 +531,22 @@
         inp.value = inp.dataset.orig;
         renameSpeaker(inp.dataset.orig, inp.dataset.orig, true);
       }});
+    }}
+
+    function saveUpdatedHtml() {{
+      document.querySelectorAll('.spk-edit input').forEach(inp => {{
+        inp.setAttribute('value', inp.value);
+      }});
+      const htmlContent = '<!DOCTYPE html>\\n' + document.documentElement.outerHTML;
+      const blob = new Blob([htmlContent], {{ type: 'text/html;charset=utf-8' }});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = (document.title.split('–')[0].trim().replace(/\\s+/g, '_') || 'mote') + '_transkripsjon.html';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
     }}
 
     function copyTurnText(id) {{

@@ -435,6 +435,37 @@ def resolve_effective_note_mode(
     return "mote"
 
 
+def resolve_speaker_bounds(
+    min_speakers: int | str | None,
+    max_speakers: int | str | None,
+    speaker_names_hint: str = "",
+) -> tuple[int | None, int | None]:
+    """Normalize min/max speaker bounds, inferring exact speaker count from speaker_names_hint when both are empty.
+
+    >>> resolve_speaker_bounds(None, None, "Kari Nordmann, Ola Hansen, Ingrid Berg")
+    (3, 3)
+    >>> resolve_speaker_bounds("2", "4", "Kari Nordmann, Ola Hansen, Ingrid Berg")
+    (2, 4)
+    >>> resolve_speaker_bounds("", "", "")
+    (None, None)
+    """
+    def _to_int(val: int | str | None) -> int | None:
+        if isinstance(val, int):
+            return val if val > 0 else None
+        if isinstance(val, str) and val.strip().isdigit():
+            parsed = int(val.strip())
+            return parsed if parsed > 0 else None
+        return None
+
+    min_s = _to_int(min_speakers)
+    max_s = _to_int(max_speakers)
+    if min_s is None and max_s is None and speaker_names_hint.strip():
+        parts = [p.strip() for p in re.split(r"[,;\n]+", speaker_names_hint) if p.strip()]
+        if 1 <= len(parts) <= 20:
+            return len(parts), len(parts)
+    return min_s, max_s
+
+
 def determine_stages_to_run(
     task_mode: str,
     is_trans_input: bool,
@@ -2550,8 +2581,8 @@ def run_pipeline(
     ollama_model: str = "gemma4:e4b",
     language: str = "no",
     hf_token: str = "",
-    min_speakers: int | None = None,
-    max_speakers: int | None = None,
+    min_speakers: int | str | None = None,
+    max_speakers: int | str | None = None,
     speaker_names_hint: str = "",
     meeting_title: str = "",
     agenda_text: str = "",
@@ -2562,6 +2593,9 @@ def run_pipeline(
     task_mode: str = "auto_resume",
     log_fn: Callable[[str], None] | None = None,
     progress_fn: Callable[[int, str], None] | None = None,
+    cancel_check_fn: Callable[[], bool] | None = None,
+    on_proc_fn: Callable[[subprocess.Popen[str] | None], None] | None = None,
+    on_checkpoint_fn: Callable[[], None] | None = None,
 ) -> PipelineResult:
     """Run the checkpointed 5-stage transcription, speaker diarization, name mapping, and note generation pipeline."""
     t0 = time.time()
@@ -2651,15 +2685,18 @@ def run_pipeline(
         wx_stages.append("diarize")
 
     env = build_runtime_env()
-    min_spk_str = str(min_speakers) if min_speakers is not None else ""
-    max_spk_str = str(max_speakers) if max_speakers is not None else ""
+    resolved_min_spk, resolved_max_spk = resolve_speaker_bounds(
+        min_speakers, max_speakers, speaker_names_hint
+    )
+    min_spk_str = str(resolved_min_spk) if resolved_min_spk is not None else ""
+    max_spk_str = str(resolved_max_spk) if resolved_max_spk is not None else ""
 
     if wx_stages:
         eff_token = hf_token.strip() or get_initial_hf_token()
         if "diarize" in wx_stages:
             if eff_token:
                 save_hf_token(eff_token)
-            elif not is_diarization_cached() and not (min_speakers == 1 and max_speakers == 1):
+            elif not is_diarization_cached() and not (resolved_min_spk == 1 and resolved_max_spk == 1):
                 raise RuntimeError("Pyannote er ikke bufret ennå. Oppgi HF_TOKEN eller --hf-token.")
 
         ensure_ffmpeg(env, log)
@@ -2690,8 +2727,8 @@ def run_pipeline(
                 "language": language,
                 "compute_type": "int8",
                 "hf_token": eff_token,
-                "min_speakers": min_speakers,
-                "max_speakers": max_speakers,
+                "min_speakers": resolved_min_spk,
+                "max_speakers": resolved_max_spk,
                 "initial_prompt": initial_prompt,
             }
             cfg_file.write_text(json.dumps(cfg_data, ensure_ascii=False), encoding="utf-8")
@@ -2707,6 +2744,8 @@ def run_pipeline(
                 errors="replace",
                 bufsize=1,
             )
+            if on_proc_fn is not None:
+                on_proc_fn(proc)
             assert proc.stdout is not None
             phase = 0 if "asr" in wx_stages else (1 if "align" in wx_stages else 2)
             diarization_start: float | None = None
@@ -2747,6 +2786,8 @@ def run_pipeline(
                     if clean == "STAGE:ASR:DONE":
                         executed_stages.append("1_asr")
                         log("==> [Steg 1/5] Rå-transkripsjon lagret i sjekkpunkt (1_asr.json).")
+                        if on_checkpoint_fn is not None:
+                            on_checkpoint_fn()
                         continue
                     if clean == "STAGE:ALIGN:START":
                         phase = 1
@@ -2756,6 +2797,8 @@ def run_pipeline(
                     if clean == "STAGE:ALIGN:DONE":
                         executed_stages.append("2_align")
                         log("==> [Steg 2/5] Tidsjustering lagret i sjekkpunkt (2_align.json).")
+                        if on_checkpoint_fn is not None:
+                            on_checkpoint_fn()
                         continue
                     if clean == "STAGE:DIARIZE:START":
                         phase = 2
@@ -2767,6 +2810,8 @@ def run_pipeline(
                     if clean == "STAGE:DIARIZE:DONE":
                         executed_stages.append("3_diarize")
                         log("==> [Steg 3/5] Taler-identifisering lagret i sjekkpunkt (3_diarize.json).")
+                        if on_checkpoint_fn is not None:
+                            on_checkpoint_fn()
                         continue
 
                     d_match = re.search(r"DiarizeProgress:\s*([0-9]+(?:\.[0-9]+)?)%", clean)
@@ -2796,8 +2841,26 @@ def run_pipeline(
                         log(clean)
             finally:
                 stop_heartbeat.set()
+                if on_proc_fn is not None:
+                    on_proc_fn(None)
 
             rc = proc.wait()
+            if cancel_check_fn is not None and cancel_check_fn():
+                if on_checkpoint_fn is not None:
+                    on_checkpoint_fn()
+                return {
+                    "ok": False,
+                    "input_path": resolved_input,
+                    "out_dir": target_out_dir,
+                    "ckpt_dir": ckpt_dir,
+                    "html_path": html_path,
+                    "notes_path": notes_path,
+                    "notes_html_path": notes_html_path,
+                    "executed_stages": executed_stages,
+                    "effective_mode": note_mode,
+                    "speaker_map": {},
+                    "turn_count": 0,
+                }
             if rc != 0:
                 raise RuntimeError(f"WhisperX feilet med returkode {rc}.")
 
@@ -2880,6 +2943,8 @@ def run_pipeline(
             )
             tmp_s4.replace(speakers_json)
             executed_stages.append("4_speakers")
+            if on_checkpoint_fn is not None:
+                on_checkpoint_fn()
             log(f"==> [Steg 4/5] Rik HTML-transkripsjon lagret: {html_path}")
         else:
             if not html_path.is_file():
@@ -2933,6 +2998,8 @@ def run_pipeline(
         prog(99, "Bygger HTML-utgave av referat/notater...")
         build_notes_html(notes_md, notes_html_path, doc_title)
         executed_stages.append("5_notes")
+        if on_checkpoint_fn is not None:
+            on_checkpoint_fn()
 
     prog(100, "Fullført!")
     log(
@@ -3101,6 +3168,21 @@ def build_cli_parser() -> Any:
         default=20.0,
         help="Varighet i sekunder for --live-check (standard: %(default)s)",
     )
+    parser.add_argument(
+        "--gui",
+        action="store_true",
+        help="Åpne skrivebordsvinduet (GUI) eksplisitt",
+    )
+    parser.add_argument(
+        "--cli",
+        action="store_true",
+        help="Kjør i kommandolinjemodus (CLI)",
+    )
+    parser.add_argument(
+        "--self-test",
+        action="store_true",
+        help="Kjør innebygd selvtest av maler, API og rørledning uten å åpne GUI-vindu",
+    )
     return parser
 
 
@@ -3238,14 +3320,11 @@ def cli_main(argv: list[str] | None = None) -> int:
         )
         return 0
 
-    min_spk = args.speakers if args.speakers is not None else args.min_speakers
-    max_spk = args.speakers if args.speakers is not None else args.max_speakers
-    if not args.speaker_names and min_spk is None and max_spk is None:
-        pass
-    elif args.speaker_names and min_spk is None and max_spk is None:
-        parts = [p.strip() for p in re.split(r"[,;\n]+", args.speaker_names) if p.strip()]
-        if 1 <= len(parts) <= 20:
-            min_spk = max_spk = len(parts)
+    min_spk, max_spk = resolve_speaker_bounds(
+        args.speakers if args.speakers is not None else args.min_speakers,
+        args.speakers if args.speakers is not None else args.max_speakers,
+        args.speaker_names,
+    )
 
     try:
         run_pipeline(
@@ -3278,807 +3357,25 @@ def cli_main(argv: list[str] | None = None) -> int:
         print(f"FEIL: {exc}", file=sys.stderr)
         return 1
 
+
 _FALLBACK_TRANSCRIPT_TPL = """<!DOCTYPE html>
 <html lang="no">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{escaped_title} – Transkripsjon</title>
-  <style>
-    :root {{
-      --bg: #f8fafc;
-      --card-bg: #ffffff;
-      --card-border: #e2e8f0;
-      --text-main: #0f172a;
-      --text-muted: #64748b;
-      --accent: #2563eb;
-      --accent-soft: rgba(37, 99, 235, 0.08);
-      --header-bg: rgba(255, 255, 255, 0.88);
-      --badge-border: rgba(0, 0, 0, 0.08);
-      --shadow-sm: 0 1px 3px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.03);
-      --shadow-md: 0 4px 12px -2px rgba(0,0,0,0.08), 0 2px 6px -2px rgba(0,0,0,0.04);
-    }}
-    [data-theme="dark"] {{
-      --bg: #0b0f19;
-      --card-bg: #151d2e;
-      --card-border: #233047;
-      --text-main: #f1f5f9;
-      --text-muted: #94a3b8;
-      --accent: #38bdf8;
-      --accent-soft: rgba(56, 189, 248, 0.12);
-      --header-bg: rgba(21, 29, 46, 0.90);
-      --badge-border: rgba(255, 255, 255, 0.12);
-      --shadow-sm: 0 1px 3px rgba(0,0,0,0.3);
-      --shadow-md: 0 4px 16px rgba(0,0,0,0.45);
-    }}
-    @media (prefers-color-scheme: dark) {{
-      :root:not([data-theme="light"]) {{
-        --bg: #0b0f19;
-        --card-bg: #151d2e;
-        --card-border: #233047;
-        --text-main: #f1f5f9;
-        --text-muted: #94a3b8;
-        --accent: #38bdf8;
-        --accent-soft: rgba(56, 189, 248, 0.12);
-        --header-bg: rgba(21, 29, 46, 0.90);
-        --badge-border: rgba(255, 255, 255, 0.12);
-        --shadow-sm: 0 1px 3px rgba(0,0,0,0.3);
-        --shadow-md: 0 4px 16px rgba(0,0,0,0.45);
-      }}
-    }}
-    * {{ box-sizing: border-box; }}
-    body {{
-      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      background: var(--bg);
-      color: var(--text-main);
-      max-width: 900px;
-      margin: 0 auto;
-      padding: 24px 16px 80px;
-      line-height: 1.6;
-      -webkit-font-smoothing: antialiased;
-      transition: background-color 0.2s ease, color 0.2s ease;
-    }}
-    header.sticky-header {{
-      background: var(--header-bg);
-      backdrop-filter: blur(14px);
-      -webkit-backdrop-filter: blur(14px);
-      border: 1px solid var(--card-border);
-      border-radius: 16px;
-      padding: 18px 22px;
-      margin-bottom: 22px;
-      position: sticky;
-      top: 12px;
-      z-index: 100;
-      box-shadow: var(--shadow-md);
-    }}
-    .header-top {{
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      gap: 16px;
-      margin-bottom: 12px;
-      flex-wrap: wrap;
-    }}
-    .title-group h1 {{
-      font-size: 1.35rem;
-      font-weight: 700;
-      margin: 0 0 4px 0;
-      letter-spacing: -0.01em;
-    }}
-    .stats-bar {{
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      font-size: 12px;
-      color: var(--text-muted);
-    }}
-    .stat-pill {{
-      background: var(--accent-soft);
-      color: var(--accent);
-      padding: 2px 10px;
-      border-radius: 999px;
-      font-weight: 600;
-    }}
-    .header-actions {{
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }}
-    .btn {{
-      font-size: 12.5px;
-      font-weight: 500;
-      padding: 6px 12px;
-      border-radius: 8px;
-      border: 1px solid var(--card-border);
-      background: var(--card-bg);
-      color: var(--text-main);
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      transition: all 0.15s ease;
-    }}
-    .btn:hover {{
-      border-color: var(--accent);
-      color: var(--accent);
-    }}
-    .search-row {{
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }}
-    .search-wrap {{
-      flex: 1;
-      position: relative;
-    }}
-    #filter {{
-      width: 100%;
-      padding: 9px 34px 9px 12px;
-      border: 1px solid var(--card-border);
-      border-radius: 8px;
-      background: var(--card-bg);
-      color: var(--text-main);
-      font-size: 13.5px;
-      transition: border-color 0.15s ease;
-    }}
-    #filter:focus {{
-      outline: none;
-      border-color: var(--accent);
-      box-shadow: 0 0 0 3px var(--accent-soft);
-    }}
-    #filter-clear {{
-      position: absolute;
-      right: 10px;
-      top: 50%;
-      transform: translateY(-50%);
-      background: none;
-      border: none;
-      color: var(--text-muted);
-      cursor: pointer;
-      font-size: 16px;
-      padding: 0;
-      display: none;
-    }}
-    #match-count {{
-      font-size: 12px;
-      color: var(--text-muted);
-      white-space: nowrap;
-      min-width: 110px;
-      text-align: right;
-    }}
-    .filter-pills-row {{
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-      margin-top: 10px;
-      padding-top: 10px;
-      border-top: 1px solid var(--card-border);
-      align-items: center;
-    }}
-    .filter-pills-label {{
-      font-size: 11.5px;
-      font-weight: 600;
-      color: var(--text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-      margin-right: 4px;
-    }}
-    .spk-filter-btn {{
-      font-size: 12px;
-      padding: 4px 10px;
-      border-radius: 8px;
-      border: 1px solid var(--card-border);
-      background: var(--card-bg);
-      color: var(--text-muted);
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      font-weight: 500;
-      transition: all 0.15s ease;
-    }}
-    .spk-filter-btn:hover {{
-      border-color: var(--accent);
-      color: var(--text-main);
-    }}
-    .spk-filter-btn.active {{
-      background: var(--accent);
-      color: #ffffff;
-      border-color: var(--accent);
-    }}
-    .spk-filter-btn.active .dot {{
-      border: 1.5px solid #ffffff;
-    }}
-    .speakers-section {{
-      margin-top: 10px;
-      padding-top: 10px;
-      border-top: 1px solid var(--card-border);
-    }}
-    .speakers-label {{
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      color: var(--text-muted);
-      margin-bottom: 6px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }}
-    .reset-link {{
-      color: var(--accent);
-      cursor: pointer;
-      font-size: 11px;
-      text-transform: none;
-      letter-spacing: normal;
-    }}
-    .reset-link:hover {{
-      text-decoration: underline;
-    }}
-    .speakers-list {{
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      align-items: center;
-    }}
-    .spk-edit {{
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      background: var(--card-bg);
-      border: 1px solid var(--card-border);
-      padding: 3px 8px 3px 8px;
-      border-radius: 8px;
-    }}
-    .dot {{
-      width: 9px;
-      height: 9px;
-      border-radius: 50%;
-      flex-shrink: 0;
-      display: inline-block;
-    }}
-    .spk-edit input {{
-      border: none;
-      background: transparent;
-      color: var(--text-main);
-      font-size: 12px;
-      font-weight: 600;
-      width: 155px;
-      padding: 2px 0;
-    }}
-    .spk-edit input:focus {{
-      outline: none;
-    }}
-    .turns-list {{
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-    }}
-    .turn {{
-      background: var(--card-bg);
-      border: 1px solid var(--card-border);
-      border-radius: 12px;
-      padding: 14px 18px;
-      box-shadow: var(--shadow-sm);
-      transition: transform 0.1s ease, border-color 0.15s ease;
-    }}
-    .turn:hover {{
-      border-color: var(--accent);
-    }}
-    .meta {{
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      margin-bottom: 8px;
-      font-size: 12px;
-    }}
-    .badge {{
-      color: #ffffff;
-      font-weight: 600;
-      padding: 3px 10px;
-      border-radius: 999px;
-      letter-spacing: 0.02em;
-      border: 1px solid var(--badge-border);
-      display: inline-block;
-      font-size: 11.5px;
-    }}
-    .timestamp {{
-      color: var(--text-muted);
-      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-      font-size: 11.5px;
-    }}
-    .copy-turn-btn {{
-      margin-left: auto;
-      font-size: 11px;
-      padding: 2px 8px;
-      border-radius: 6px;
-      border: 1px solid var(--card-border);
-      background: var(--card-bg);
-      color: var(--text-muted);
-      cursor: pointer;
-      opacity: 0.6;
-      transition: all 0.15s ease;
-    }}
-    .turn:hover .copy-turn-btn {{
-      opacity: 1;
-    }}
-    .copy-turn-btn:hover {{
-      border-color: var(--accent);
-      color: var(--accent);
-    }}
-    .text {{
-      font-size: 14.5px;
-      white-space: pre-wrap;
-      word-break: break-word;
-      color: var(--text-main);
-    }}
-    @media print {{
-      body {{ background: #fff !important; color: #000 !important; padding: 0 !important; max-width: 100% !important; }}
-      .no-print, header.sticky-header {{ display: none !important; }}
-      .turn {{ border: none !important; border-bottom: 1px solid #e2e8f0 !important; border-radius: 0 !important; box-shadow: none !important; padding: 10px 0 !important; break-inside: avoid; }}
-      .badge {{ color: #000 !important; background: #eee !important; border: 1px solid #ccc !important; }}
-      .timestamp {{ color: #555 !important; }}
-    }}
-  </style>
-</head>
+<head><meta charset="utf-8"><title>{escaped_title} – Transkripsjon</title></head>
 <body>
-  <header class="sticky-header">
-    <div class="header-top">
-      <div class="title-group">
-        <h1>{escaped_title}</h1>
-        <div class="stats-bar">
-          <span class="stat-pill">{total_turns} innlegg</span>
-          <span class="stat-pill">{speaker_count} deltakere</span>
-          <span>Varighet ca. {total_duration_str}</span>
-        </div>
-      </div>
-      <div class="header-actions no-print">
-        <button class="btn" onclick="copyFullTranscript()" id="copy-all-btn" title="Kopier hele transkripsjonen som ren tekst">
-          📋 Kopier alt
-        </button>
-        <button class="btn" onclick="toggleTheme()" title="Bytt mellom lyst og mørkt tema">
-          🌓 Tema
-        </button>
-        <button class="btn" onclick="window.print()" title="Skriv ut eller lagre PDF">
-          🖨️ PDF
-        </button>
-      </div>
-    </div>
-
-    <div class="search-row no-print">
-      <div class="search-wrap">
-        <input type="text" id="filter" placeholder="Søk i tekst, tidspunkt eller navn..." oninput="onSearchInput()">
-        <button id="filter-clear" onclick="clearSearch()" title="Tøm søk">&times;</button>
-      </div>
-      <div id="match-count">Viser {total_turns} innlegg</div>
-    </div>
-
-    <div class="filter-pills-row no-print">
-      <span class="filter-pills-label">Filtrer:</span>
-      <button class="spk-filter-btn active" data-spk="ALL" onclick="filterBySpeaker('ALL')">Alle</button>
-      {speaker_filters}
-    </div>
-
-    <div class="speakers-section no-print">
-      <div class="speakers-label">
-        <span>Rediger deltakernavn (lagres lokalt):</span>
-        <span class="reset-link" onclick="resetSpeakerNames()">Tilbakestill standardnavn</span>
-      </div>
-      <div class="speakers-list">
-        {speaker_inputs}
-      </div>
-    </div>
-  </header>
-
-  <main class="turns-list" id="container">
-    {html_items}
-  </main>
-
-  <script>
-    const STORAGE_KEY = "mote_spk_" + document.title;
-    const THEME_KEY = "mote_theme_pref";
-    let activeSpeakerFilter = "ALL";
-
-    function getSearchQuery() {{
-      return (document.getElementById('filter').value || '').trim().toLowerCase();
-    }}
-
-    function onSearchInput() {{
-      const q = getSearchQuery();
-      document.getElementById('filter-clear').style.display = q ? 'block' : 'none';
-      applyFilters();
-    }}
-
-    function clearSearch() {{
-      document.getElementById('filter').value = '';
-      document.getElementById('filter-clear').style.display = 'none';
-      applyFilters();
-    }}
-
-    function filterBySpeaker(spk) {{
-      activeSpeakerFilter = spk;
-      document.querySelectorAll('.spk-filter-btn').forEach(btn => {{
-        btn.classList.toggle('active', btn.dataset.spk === spk);
-      }});
-      applyFilters();
-    }}
-
-    function applyFilters() {{
-      const q = getSearchQuery();
-      const turns = document.querySelectorAll('.turn');
-      let visibleCount = 0;
-
-      turns.forEach(el => {{
-        const matchesSpeaker = (activeSpeakerFilter === 'ALL' || el.dataset.speaker === activeSpeakerFilter);
-        const matchesText = !q || el.innerText.toLowerCase().includes(q);
-        const show = matchesSpeaker && matchesText;
-        el.style.display = show ? '' : 'none';
-        if (show) visibleCount++;
-      }});
-
-      document.getElementById('match-count').textContent = `Viser ${{visibleCount}} av ${{turns.length}} innlegg`;
-    }}
-
-    function renameSpeaker(orig, newName, skipSave) {{
-      const label = newName.trim() || orig;
-      document.querySelectorAll(`[data-spk-label="${{orig}}"]`).forEach(el => {{
-        el.textContent = label;
-      }});
-      document.querySelectorAll(`[data-spk-btn-label="${{orig}}"]`).forEach(el => {{
-        el.textContent = label;
-      }});
-      if (!skipSave) {{
-        try {{
-          const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{{}}");
-          saved[orig] = newName;
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
-        }} catch (e) {{}}
-      }}
-      applyFilters();
-    }}
-
-    function resetSpeakerNames() {{
-      try {{
-        localStorage.removeItem(STORAGE_KEY);
-      }} catch (e) {{}}
-      document.querySelectorAll('.spk-edit input').forEach(inp => {{
-        inp.value = inp.dataset.orig;
-        renameSpeaker(inp.dataset.orig, inp.dataset.orig, true);
-      }});
-    }}
-
-    function copyTurnText(id) {{
-      const el = document.getElementById(id);
-      if (!el) return;
-      const text = el.querySelector('.text').innerText;
-      const meta = el.querySelector('.meta').innerText.replace('Kopier', '').trim();
-      navigator.clipboard.writeText(`[${{meta}}]\n${{text}}`).then(() => {{
-        const btn = el.querySelector('.copy-turn-btn');
-        if (btn) {{
-          const old = btn.textContent;
-          btn.textContent = "Kopiert!";
-          setTimeout(() => {{ btn.textContent = old; }}, 1200);
-        }}
-      }});
-    }}
-
-    function copyFullTranscript() {{
-      const turns = Array.from(document.querySelectorAll('.turn'))
-        .filter(el => el.style.display !== 'none')
-        .map(el => {{
-          const meta = el.querySelector('.badge').textContent + ' (' + el.querySelector('.timestamp').textContent + ')';
-          const txt = el.querySelector('.text').innerText;
-          return `${{meta}}:\n${{txt}}`;
-        }}).join('\\n\\n');
-
-      navigator.clipboard.writeText(turns).then(() => {{
-        const btn = document.getElementById('copy-all-btn');
-        const old = btn.textContent;
-        btn.textContent = "✓ Kopiert!";
-        setTimeout(() => {{ btn.textContent = old; }}, 1500);
-      }});
-    }}
-
-    function toggleTheme() {{
-      const cur = document.documentElement.getAttribute('data-theme');
-      const next = cur === 'dark' ? 'light' : 'dark';
-      document.documentElement.setAttribute('data-theme', next);
-      try {{ localStorage.setItem(THEME_KEY, next); }} catch (e) {{}}
-    }}
-
-    window.addEventListener('DOMContentLoaded', () => {{
-      try {{
-        const savedTheme = localStorage.getItem(THEME_KEY);
-        if (savedTheme) {{
-          document.documentElement.setAttribute('data-theme', savedTheme);
-        }}
-      }} catch (e) {{}}
-
-      try {{
-        const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{{}}");
-        document.querySelectorAll('.spk-edit input').forEach(inp => {{
-          const orig = inp.dataset.orig;
-          if (saved[orig]) {{
-            inp.value = saved[orig];
-            renameSpeaker(orig, saved[orig], true);
-          }}
-        }});
-      }} catch (e) {{}}
-      applyFilters();
-    }});
-  </script>
+  <h1>{escaped_title} ({total_turns} innlegg, {speaker_count} deltakere, {total_duration_str})</h1>
+  <div>{speaker_filters}</div>
+  <div>{speaker_inputs}</div>
+  <main id="container">{html_items}</main>
+  <script>function saveUpdatedHtml() {{}}</script>
 </body>
 </html>"""
+
 _FALLBACK_NOTES_TPL = """<!DOCTYPE html>
 <html lang="no">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{escaped_title} – Møtereferat</title>
-  <style>
-    :root {{
-      --bg: #f8fafc;
-      --card-bg: #ffffff;
-      --card-border: #e2e8f0;
-      --text-main: #0f172a;
-      --text-muted: #64748b;
-      --accent: #2563eb;
-      --accent-soft: rgba(37, 99, 235, 0.08);
-      --header-bg: rgba(255, 255, 255, 0.90);
-      --code-bg: #f1f5f9;
-      --table-stripe: rgba(241, 245, 249, 0.6);
-      --shadow-sm: 0 1px 3px rgba(0,0,0,0.05);
-      --shadow-lg: 0 10px 25px -5px rgba(0,0,0,0.06), 0 8px 10px -6px rgba(0,0,0,0.04);
-    }}
-    [data-theme="dark"] {{
-      --bg: #0b0f19;
-      --card-bg: #151d2e;
-      --card-border: #233047;
-      --text-main: #f1f5f9;
-      --text-muted: #94a3b8;
-      --accent: #38bdf8;
-      --accent-soft: rgba(56, 189, 248, 0.12);
-      --header-bg: rgba(21, 29, 46, 0.92);
-      --code-bg: #1e293b;
-      --table-stripe: rgba(30, 41, 59, 0.4);
-      --shadow-sm: 0 1px 3px rgba(0,0,0,0.3);
-      --shadow-lg: 0 12px 30px rgba(0,0,0,0.45);
-    }}
-    @media (prefers-color-scheme: dark) {{
-      :root:not([data-theme="light"]) {{
-        --bg: #0b0f19;
-        --card-bg: #151d2e;
-        --card-border: #233047;
-        --text-main: #f1f5f9;
-        --text-muted: #94a3b8;
-        --accent: #38bdf8;
-        --accent-soft: rgba(56, 189, 248, 0.12);
-        --header-bg: rgba(21, 29, 46, 0.92);
-        --code-bg: #1e293b;
-        --table-stripe: rgba(30, 41, 59, 0.4);
-        --shadow-sm: 0 1px 3px rgba(0,0,0,0.3);
-        --shadow-lg: 0 12px 30px rgba(0,0,0,0.45);
-      }}
-    }}
-    * {{ box-sizing: border-box; }}
-    body {{
-      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      background: var(--bg);
-      color: var(--text-main);
-      max-width: 880px;
-      margin: 0 auto;
-      padding: 24px 16px 80px;
-      line-height: 1.68;
-      -webkit-font-smoothing: antialiased;
-      transition: background-color 0.2s ease, color 0.2s ease;
-    }}
-    .toolbar {{
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 18px;
-      padding: 10px 16px;
-      background: var(--card-bg);
-      border: 1px solid var(--card-border);
-      border-radius: 12px;
-      box-shadow: var(--shadow-sm);
-    }}
-    .toolbar-title {{
-      font-size: 13.5px;
-      font-weight: 600;
-      color: var(--text-muted);
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }}
-    .toolbar-actions {{
-      display: flex;
-      gap: 8px;
-    }}
-    .toolbar button {{
-      padding: 6px 12px;
-      border-radius: 8px;
-      border: 1px solid var(--card-border);
-      background: var(--card-bg);
-      color: var(--text-main);
-      cursor: pointer;
-      font-size: 12.5px;
-      font-weight: 500;
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      transition: all 0.15s ease;
-    }}
-    .toolbar button:hover {{
-      border-color: var(--accent);
-      color: var(--accent);
-    }}
-    article {{
-      background: var(--card-bg);
-      border: 1px solid var(--card-border);
-      border-radius: 16px;
-      padding: 42px 48px;
-      box-shadow: var(--shadow-lg);
-    }}
-    h1 {{
-      font-size: 1.75rem;
-      font-weight: 700;
-      margin-top: 0;
-      margin-bottom: 18px;
-      letter-spacing: -0.02em;
-      border-bottom: 2px solid var(--card-border);
-      padding-bottom: 12px;
-    }}
-    h2 {{
-      font-size: 1.25rem;
-      font-weight: 600;
-      color: var(--accent);
-      margin-top: 1.8em;
-      margin-bottom: 10px;
-      letter-spacing: -0.01em;
-    }}
-    h3 {{
-      font-size: 1.05rem;
-      font-weight: 600;
-      margin-top: 1.4em;
-      margin-bottom: 8px;
-    }}
-    p {{
-      margin: 0.8em 0;
-    }}
-    table {{
-      width: 100%;
-      border-collapse: separate;
-      border-spacing: 0;
-      margin: 20px 0;
-      font-size: 13.5px;
-      border: 1px solid var(--card-border);
-      border-radius: 10px;
-      overflow: hidden;
-    }}
-    th, td {{
-      padding: 10px 14px;
-      text-align: left;
-      vertical-align: top;
-    }}
-    th {{
-      background: var(--accent-soft);
-      font-weight: 600;
-      border-bottom: 1px solid var(--card-border);
-    }}
-    td {{
-      border-bottom: 1px solid var(--card-border);
-    }}
-    tr:last-child td {{
-      border-bottom: none;
-    }}
-    tr:nth-child(even) td {{
-      background: var(--table-stripe);
-    }}
-    ul, ol {{
-      padding-left: 24px;
-      margin: 0.8em 0;
-    }}
-    li {{
-      margin-bottom: 6px;
-    }}
-    blockquote {{
-      margin: 18px 0;
-      padding: 12px 20px;
-      border-left: 4px solid var(--accent);
-      background: var(--accent-soft);
-      border-radius: 0 10px 10px 0;
-      color: var(--text-main);
-    }}
-    blockquote p {{
-      margin: 0;
-    }}
-    code {{
-      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-      font-size: 13px;
-      background: var(--code-bg);
-      padding: 2px 6px;
-      border-radius: 6px;
-      border: 1px solid var(--card-border);
-    }}
-    pre {{
-      background: var(--code-bg);
-      border: 1px solid var(--card-border);
-      border-radius: 10px;
-      padding: 14px 18px;
-      overflow-x: auto;
-      font-size: 13px;
-    }}
-    pre code {{
-      background: none;
-      padding: 0;
-      border: none;
-    }}
-    hr {{
-      border: none;
-      border-top: 1px solid var(--card-border);
-      margin: 28px 0;
-    }}
-    @media print {{
-      body {{ background: #fff !important; color: #000 !important; margin: 0 !important; padding: 0 !important; max-width: 100% !important; }}
-      .no-print {{ display: none !important; }}
-      article {{ border: none !important; box-shadow: none !important; padding: 0 !important; }}
-      h1, h2, h3, table, blockquote {{ break-inside: avoid; }}
-      h2 {{ color: #000 !important; }}
-    }}
-  </style>
-</head>
+<head><meta charset="utf-8"><title>{escaped_title} – Møtereferat</title></head>
 <body>
-  <div class="toolbar no-print">
-    <div class="toolbar-title">
-      <span>📄 {escaped_title}</span>
-    </div>
-    <div class="toolbar-actions">
-      <button onclick="copyMarkdown()" id="copy-md-btn" title="Kopier referatet som Markdown-tekst">
-        📋 Kopier Markdown
-      </button>
-      <button onclick="toggleTheme()" title="Bytt mellom lyst og mørkt tema">
-        🌓 Tema
-      </button>
-      <button onclick="window.print()" title="Skriv ut eller lagre PDF">
-        🖨️ Skriv ut / PDF
-      </button>
-    </div>
-  </div>
-
-  <article>
-    {rendered_body}
-  </article>
-
+  <h1>{escaped_title}</h1>
+  <article>{rendered_body}</article>
   <textarea id="raw-markdown" style="display:none">{escaped_notes_md}</textarea>
-
-  <script>
-    const THEME_KEY = "mote_theme_pref";
-
-    function copyMarkdown() {{
-      const md = document.getElementById('raw-markdown').value;
-      navigator.clipboard.writeText(md).then(() => {{
-        const btn = document.getElementById('copy-md-btn');
-        const old = btn.textContent;
-        btn.textContent = "✓ Kopiert!";
-        setTimeout(() => {{ btn.textContent = old; }}, 1500);
-      }});
-    }}
-
-    function toggleTheme() {{
-      const cur = document.documentElement.getAttribute('data-theme');
-      const next = cur === 'dark' ? 'light' : 'dark';
-      document.documentElement.setAttribute('data-theme', next);
-      try {{ localStorage.setItem(THEME_KEY, next); }} catch (e) {{}}
-    }}
-
-    window.addEventListener('DOMContentLoaded', () => {{
-      try {{
-        const savedTheme = localStorage.getItem(THEME_KEY);
-        if (savedTheme) {{
-          document.documentElement.setAttribute('data-theme', savedTheme);
-        }}
-      }} catch (e) {{}}
-    }});
-  </script>
 </body>
 </html>"""
