@@ -39,7 +39,7 @@ from pathlib import Path
 
 def _self_bootstrap_if_needed() -> None:
     """If launched via raw 'python3 mote_app.py' without uv, re-exec inside uv environment."""
-    if "--help" in sys.argv or "-h" in sys.argv or "--self-test" in sys.argv:
+    if any(flag in sys.argv for flag in ("-h", "--help", "--self-test", "--check-hw", "--status")):
         return
     try:
         import markdown  # noqa: F401

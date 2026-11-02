@@ -152,6 +152,17 @@ class TestGherkinBDDScenarios(unittest.TestCase):
 
 
 class TestAARImprovements(unittest.TestCase):
+    def test_dist_single_file_is_in_sync_with_sources(self) -> None:
+        from scripts import build_single_file
+
+        expected = build_single_file.generate_single_file_content()
+        actual = build_single_file.DIST_FILE.read_text(encoding="utf-8")
+        self.assertEqual(
+            actual,
+            expected,
+            "dist/mote_app.py is out of sync with src/mote/* — run scripts/build_single_file.py",
+        )
+
     def test_fallback_templates_are_compact_and_not_duplicated_bloat(self) -> None:
         self.assertLessEqual(
             len(mote_core._FALLBACK_TRANSCRIPT_TPL.splitlines()),

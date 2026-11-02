@@ -57,7 +57,7 @@ from pathlib import Path
 BOOTSTRAP_CODE = r'''
 def _self_bootstrap_if_needed() -> None:
     """If launched via raw 'python mote_app.py' without uv, auto-install uv and re-exec."""
-    if "--help" in sys.argv or "-h" in sys.argv or "--self-test" in sys.argv:
+    if any(flag in sys.argv for flag in ("-h", "--help", "--self-test", "--check-hw", "--status")):
         return
     try:
         import markdown  # noqa: F401
@@ -113,10 +113,8 @@ _self_bootstrap_if_needed()
 '''
 
 
-def build() -> int:
-    DIST_DIR.mkdir(parents=True, exist_ok=True)
-    print(f"==> Bygger universell enkeltfil: {DIST_FILE}")
-
+def generate_single_file_content() -> str:
+    """Assemble and AST-validate the single-file distribution content in memory."""
     tpl_app = (SRC_DIR / "templates" / "app.html").read_text(encoding="utf-8")
     tpl_transcript = (SRC_DIR / "templates" / "transcript.html").read_text(encoding="utf-8")
     tpl_notes = (SRC_DIR / "templates" / "notes.html").read_text(encoding="utf-8")
@@ -165,13 +163,17 @@ def load_template(name: str, fallback: str = "") -> str:
     ]
 
     out_content = "".join(bundle_parts)
-    # Compile/parse AST to guarantee zero syntax errors or invalid escape sequences
     ast.parse(out_content, filename=str(DIST_FILE))
     compile(out_content, str(DIST_FILE), "exec")
+    return out_content
 
+
+def build() -> int:
+    DIST_DIR.mkdir(parents=True, exist_ok=True)
+    print(f"==> Bygger universell enkeltfil: {DIST_FILE}")
+    out_content = generate_single_file_content()
     DIST_FILE.write_text(out_content, encoding="utf-8")
     DIST_FILE.chmod(0o755)
-
     print(f"==> Ferdig bygget og AST-verifisert! Størrelse: {DIST_FILE.stat().st_size // 1024} KB")
     return 0
 
