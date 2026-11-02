@@ -5,154 +5,525 @@
 <style>
   :root {
     color-scheme: light dark;
-    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+    --accent: #0a84ff;
+    --accent-hover: #0070e0;
+    --accent-soft: rgba(10, 132, 255, 0.10);
+    --danger: #ff453a;
+    --danger-soft: rgba(255, 69, 58, 0.14);
+    --success: #30d158;
+    --success-soft: rgba(48, 209, 88, 0.14);
+    --warn: #ff9f0a;
+    --warn-soft: rgba(255, 159, 10, 0.15);
+    --card-bg: rgba(128, 128, 128, 0.055);
+    --card-border: rgba(128, 128, 128, 0.24);
+    --input-border: rgba(128, 128, 128, 0.34);
   }
+  * { box-sizing: border-box; }
   body {
-    margin: 0; padding: 10px 14px;
-    background: Canvas; color: CanvasText;
-    font-size: 12.5px; user-select: none;
-    display: flex; flex-direction: column; gap: 5px; height: calc(100vh - 20px);
+    margin: 0;
+    padding: 14px 18px;
+    background: Canvas;
+    color: CanvasText;
+    font-size: 13px;
+    line-height: 1.4;
+    user-select: none;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    height: 100vh;
+    overflow-y: auto;
   }
+
+  /* Zone 1: Hero Audio Source & Recording */
   .top-cards {
-    display: flex; gap: 8px; align-items: stretch;
+    display: grid;
+    grid-template-columns: 1.2fr 1fr;
+    gap: 12px;
+    align-items: stretch;
   }
   #dropzone {
-    flex: 1.25; border: 2px dashed GrayText; border-radius: 10px;
-    padding: 7px 12px; display: flex; align-items: center; justify-content: space-between;
-    gap: 10px; transition: all 0.15s ease;
+    border: 1.5px dashed rgba(128, 128, 128, 0.45);
+    border-radius: 12px;
+    padding: 12px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    background: var(--card-bg);
+    transition: border-color 0.15s ease, background-color 0.15s ease;
   }
-  #dropzone.dragover { border-color: #0a84ff; background: rgba(10, 132, 255, 0.1); }
-  .dz-text { flex: 1; overflow: hidden; }
-  .dz-text strong { font-size: 12px; display: block; margin-bottom: 2px; }
+  #dropzone.dragover {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+  .dz-text {
+    flex: 1;
+    min-width: 0;
+  }
+  .dz-text strong {
+    font-size: 13px;
+    font-weight: 600;
+    display: block;
+    margin-bottom: 3px;
+  }
   #selected-file {
-    color: GrayText; display: block; white-space: nowrap;
-    overflow: hidden; text-overflow: ellipsis; font-size: 11px;
+    color: GrayText;
+    display: block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 11.5px;
   }
+  .dz-actions {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    flex-shrink: 0;
+  }
+
   .rec-card {
-    flex: 0.95; border: 1px solid rgba(128,128,128,0.35); border-radius: 10px;
-    padding: 7px 12px; display: flex; flex-direction: column; justify-content: center; gap: 4px;
-    background: rgba(128,128,128,0.06);
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    padding: 10px 14px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 6px;
+    background: var(--card-bg);
   }
-  .rec-controls { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
-  #rec_btn.recording { background: #ff453a; color: white; border-color: #ff453a; font-weight: 600; }
-  #rec_timer { font-family: "SF Mono", Menlo, monospace; font-weight: 600; font-size: 12px; color: #ff453a; }
+  .rec-controls {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  #rec_btn {
+    font-weight: 600;
+  }
+  #rec_btn.recording {
+    background: var(--danger);
+    color: white;
+    border-color: var(--danger);
+  }
+  #rec_timer {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-weight: 600;
+    font-size: 12.5px;
+    color: var(--danger);
+  }
+  .rec-options {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .rec-options label {
+    font-size: 11.5px;
+    color: GrayText;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+  }
+
   .live-badge {
-    font-size: 10.5px; padding: 2px 7px; border-radius: 999px;
-    border: 1px solid rgba(128,128,128,0.35); color: GrayText;
-    background: rgba(128,128,128,0.08); white-space: nowrap;
-  }
-  .live-badge.godt { border-color: rgba(48, 209, 88, 0.7); background: rgba(48, 209, 88, 0.16); color: CanvasText; font-weight: 600; }
-  .live-badge.lavt { border-color: rgba(255, 159, 10, 0.75); background: rgba(255, 159, 10, 0.16); color: CanvasText; font-weight: 600; }
-  .live-badge.hoyt { border-color: rgba(255, 69, 58, 0.8); background: rgba(255, 69, 58, 0.18); color: #ff453a; font-weight: 600; }
-  #live_check_panel {
-    display: none; background: rgba(48, 209, 88, 0.07); border: 1px solid rgba(48, 209, 88, 0.45);
-    border-radius: 8px; padding: 6px 10px; font-size: 11px; line-height: 1.4;
-    max-height: 68px; overflow-y: auto; font-family: "SF Mono", Menlo, Consolas, monospace;
-    white-space: pre-wrap; user-select: text;
-  }
-
-  #prompt_banner {
-    display: none; background: rgba(10, 132, 255, 0.1); border: 1px solid #0a84ff;
-    border-radius: 8px; padding: 7px 12px; font-size: 11.5px; line-height: 1.4;
-  }
-  #prompt_banner strong { color: #0a84ff; }
-
-  #hw_resource_banner {
-    display: flex; align-items: center; justify-content: space-between; gap: 8px;
-    border-radius: 7px; padding: 4px 10px; font-size: 11px; line-height: 1.35;
-    border: 1px solid rgba(48, 209, 88, 0.45); background: rgba(48, 209, 88, 0.08);
-  }
-  #hw_resource_banner.warning {
-    border-color: rgba(255, 159, 10, 0.85); background: rgba(255, 159, 10, 0.15);
-    font-weight: 500;
-  }
-  #hw_resource_banner.critical {
-    border-color: rgba(255, 69, 58, 0.9); background: rgba(255, 69, 58, 0.18);
-    color: #ff453a; font-weight: 600;
-  }
-
-  .row { display: flex; gap: 6px; align-items: center; }
-  .row label { width: 115px; flex-shrink: 0; font-weight: 500; font-size: 12px; }
-  input[type="text"], input[type="password"], input[type="number"], select, textarea {
-    flex: 1; padding: 4px 8px; border-radius: 6px;
-    border: 1px solid rgba(128,128,128,0.4); background: Field; color: FieldText;
-    font-size: 12px; font-family: inherit;
-  }
-  textarea { resize: vertical; min-height: 42px; max-height: 100px; }
-  input.conflict { border-color: #ff9f0a; background: rgba(255, 159, 10, 0.08); }
-  button {
-    padding: 4px 10px; border-radius: 6px; border: 1px solid rgba(128,128,128,0.4);
-    background: ButtonFace; color: ButtonText; cursor: pointer; font-size: 12px;
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    border: 1px solid var(--card-border);
+    color: GrayText;
+    background: rgba(128, 128, 128, 0.08);
     white-space: nowrap;
   }
-  button.primary {
-    background: #0a84ff; color: white; border: none; font-weight: 600; padding: 6px 14px;
-  }
-  button.danger {
-    background: rgba(255, 69, 58, 0.14); color: #ff453a; border-color: rgba(255, 69, 58, 0.45); font-weight: 600;
-  }
-  button:disabled { opacity: 0.45; cursor: not-allowed; }
-  #conflict-msg { color: GrayText; font-size: 11px; min-height: 14px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-  .ckpt-bar {
-    display: flex; gap: 5px; align-items: center; flex-wrap: wrap;
-  }
-  .ckpt-pill {
-    font-size: 10.5px; padding: 2px 8px; border-radius: 999px;
-    border: 1px solid rgba(128,128,128,0.35); color: GrayText;
-    background: rgba(128,128,128,0.07); cursor: pointer;
-    transition: all 0.15s ease;
-  }
-  .ckpt-pill.done {
-    border-color: rgba(48, 209, 88, 0.6);
-    background: rgba(48, 209, 88, 0.14);
+  .live-badge.godt {
+    border-color: rgba(48, 209, 88, 0.7);
+    background: var(--success-soft);
     color: CanvasText;
     font-weight: 600;
   }
-  .ckpt-pill:hover { border-color: #0a84ff; }
-
-  .progress-section { display: flex; flex-direction: column; gap: 2px; }
-  .progress-header { display: flex; justify-content: space-between; font-size: 11px; color: GrayText; }
-  .progress-bg {
-    width: 100%; height: 7px; background: rgba(128,128,128,0.25);
-    border-radius: 4px; overflow: hidden;
+  .live-badge.lavt {
+    border-color: rgba(255, 159, 10, 0.75);
+    background: var(--warn-soft);
+    color: CanvasText;
+    font-weight: 600;
   }
-  .progress-fill { height: 100%; width: 0%; background: #0a84ff; border-radius: 4px; transition: width 0.3s ease; }
+  .live-badge.hoyt {
+    border-color: rgba(255, 69, 58, 0.8);
+    background: var(--danger-soft);
+    color: var(--danger);
+    font-weight: 600;
+  }
 
+  #live_check_panel {
+    display: none;
+    background: rgba(48, 209, 88, 0.07);
+    border: 1px solid rgba(48, 209, 88, 0.45);
+    border-radius: 10px;
+    padding: 8px 12px;
+    font-size: 11.5px;
+    line-height: 1.4;
+    max-height: 76px;
+    overflow-y: auto;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    white-space: pre-wrap;
+    user-select: text;
+  }
+
+  #prompt_banner {
+    display: none;
+    background: var(--accent-soft);
+    border: 1px solid var(--accent);
+    border-radius: 10px;
+    padding: 8px 12px;
+    font-size: 12px;
+    line-height: 1.45;
+  }
+  #prompt_banner strong { color: var(--accent); }
+
+  /* Zone 2: Meeting Context Card */
+  .context-card {
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    padding: 12px 14px;
+    background: var(--card-bg);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .context-grid {
+    display: grid;
+    grid-template-columns: 1fr 1.25fr;
+    gap: 12px;
+  }
+  .field-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+  .field-group label {
+    font-size: 11.5px;
+    font-weight: 600;
+    color: GrayText;
+  }
+
+  /* Progressive Disclosure Drawers */
+  details.sub-drawer,
+  details.zone-drawer {
+    border: 1px solid var(--card-border);
+    border-radius: 10px;
+    background: rgba(128, 128, 128, 0.03);
+    overflow: hidden;
+  }
+  details.sub-drawer summary,
+  details.zone-drawer summary {
+    padding: 8px 12px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    list-style: none;
+  }
+  details.sub-drawer summary::-webkit-details-marker,
+  details.zone-drawer summary::-webkit-details-marker {
+    display: none;
+  }
+  .summary-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .chevron {
+    display: inline-block;
+    font-size: 10px;
+    transition: transform 0.15s ease;
+    color: GrayText;
+  }
+  details[open] > summary .chevron {
+    transform: rotate(90deg);
+  }
+  .drawer-body {
+    padding: 10px 12px 12px;
+    border-top: 1px solid var(--card-border);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .notes-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  #settings_summary_pill {
+    font-size: 11px;
+    font-weight: 500;
+    color: GrayText;
+    background: rgba(128, 128, 128, 0.10);
+    padding: 2px 9px;
+    border-radius: 999px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 460px;
+  }
+
+  /* Form Elements & Rows */
+  .row {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .row label {
+    width: 118px;
+    flex-shrink: 0;
+    font-weight: 500;
+    font-size: 12px;
+    color: GrayText;
+  }
+  input[type="text"],
+  input[type="password"],
+  input[type="number"],
+  select,
+  textarea {
+    flex: 1;
+    padding: 5px 9px;
+    border-radius: 7px;
+    border: 1px solid var(--input-border);
+    background: Field;
+    color: FieldText;
+    font-size: 12.5px;
+    font-family: inherit;
+    min-width: 0;
+  }
+  input:focus, select:focus, textarea:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: -1px;
+  }
+  textarea {
+    resize: vertical;
+    min-height: 58px;
+    max-height: 120px;
+  }
+  input.conflict {
+    border-color: var(--warn);
+    background: rgba(255, 159, 10, 0.08);
+  }
+  button {
+    padding: 5px 11px;
+    border-radius: 7px;
+    border: 1px solid var(--input-border);
+    background: ButtonFace;
+    color: ButtonText;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+    transition: opacity 0.15s ease, border-color 0.15s ease;
+  }
+  button:hover:not(:disabled) {
+    border-color: var(--accent);
+  }
+  button.btn-sm {
+    padding: 3px 8px;
+    font-size: 11.5px;
+  }
+  button.primary {
+    background: var(--accent);
+    color: white;
+    border: none;
+    font-weight: 600;
+    padding: 7px 18px;
+    font-size: 13px;
+  }
+  button.primary:hover:not(:disabled) {
+    background: var(--accent-hover);
+  }
+  button.danger {
+    background: var(--danger-soft);
+    color: var(--danger);
+    border-color: rgba(255, 69, 58, 0.45);
+    font-weight: 600;
+  }
+  button:disabled {
+    opacity: 0.42;
+    cursor: not-allowed;
+  }
+
+  /* Checkpoints & Hardware Banner */
+  .status-strip {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding: 6px 12px;
+    border-radius: 10px;
+    border: 1px solid var(--card-border);
+    background: var(--card-bg);
+  }
+  .ckpt-bar {
+    display: flex;
+    gap: 5px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .ckpt-pill {
+    font-size: 11px;
+    padding: 2px 9px;
+    border-radius: 999px;
+    border: 1px solid var(--card-border);
+    color: GrayText;
+    background: rgba(128, 128, 128, 0.06);
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .ckpt-pill.done {
+    border-color: rgba(48, 209, 88, 0.65);
+    background: var(--success-soft);
+    color: CanvasText;
+    font-weight: 600;
+  }
+  .ckpt-pill:hover { border-color: var(--accent); }
+
+  #hw_resource_banner {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    border-radius: 999px;
+    padding: 2px 10px;
+    font-size: 11px;
+    border: 1px solid rgba(48, 209, 88, 0.45);
+    background: rgba(48, 209, 88, 0.08);
+  }
+  #hw_resource_banner.warning {
+    border-color: rgba(255, 159, 10, 0.85);
+    background: var(--warn-soft);
+    font-weight: 500;
+  }
+  #hw_resource_banner.critical {
+    border-color: rgba(255, 69, 58, 0.9);
+    background: var(--danger-soft);
+    color: var(--danger);
+    font-weight: 600;
+  }
+
+  /* Footer Action & Progress Card */
+  .action-card {
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    padding: 10px 14px;
+    background: var(--card-bg);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .action-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  #conflict-msg {
+    color: GrayText;
+    font-size: 11.5px;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .progress-section {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .progress-header {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11.5px;
+    color: GrayText;
+  }
+  .progress-bg {
+    width: 100%;
+    height: 7px;
+    background: rgba(128, 128, 128, 0.22);
+    border-radius: 999px;
+    overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%;
+    width: 0%;
+    background: var(--accent);
+    border-radius: 999px;
+    transition: width 0.3s ease;
+  }
+
+  /* Activity Log Area */
+  .log-container {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-height: 95px;
+  }
+  .log-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 11px;
+    color: GrayText;
+    padding: 0 2px;
+  }
   #log {
-    flex: 1; background: rgba(128,128,128,0.1); border-radius: 8px;
-    padding: 8px; font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 11px;
-    overflow-y: auto; white-space: pre-wrap; user-select: text;
-    border: 1px solid rgba(128,128,128,0.25); min-height: 80px;
+    flex: 1;
+    background: rgba(128, 128, 128, 0.08);
+    border-radius: 10px;
+    padding: 9px 11px;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 11.5px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    user-select: text;
+    border: 1px solid var(--card-border);
+    min-height: 80px;
   }
 </style>
 </head>
 <body>
 
+  <!-- ZONE 1: Audio Input & Live Recording -->
   <div class="top-cards">
     <div id="dropzone">
       <div class="dz-text">
-        <strong>Slipp lydfil (.m4a, .wav, .opus, .mp3) eller transkripsjon (.html, .json, .txt, .srt)</strong>
-        <span id="selected-file">Ingen lyd- eller transkripsjonsfil valgt ennå</span>
+        <strong>1. Lydfil eller transkripsjon</strong>
+        <span id="selected-file">Slipp fil her (.m4a, .wav, .opus, .mp3, .html, .json) eller velg...</span>
       </div>
-      <button onclick="browseAudio()">Velg fil...</button>
+      <div class="dz-actions">
+        <button id="check_audio_btn" class="btn-sm" onclick="runQuickAudioCheck()" disabled title="Kjør grov sanntidstranskripsjon og lydnivåsjekk (dBFS) på de første 20 sekundene av valgt lydfil">Lydsjekk (20s)</button>
+        <button onclick="browseAudio()">Velg fil...</button>
+      </div>
     </div>
 
     <div class="rec-card">
       <div class="rec-controls">
-        <button id="rec_btn" onclick="toggleRecording()">Spill inn møte</button>
+        <button id="rec_btn" onclick="toggleRecording()">🎙️ Spill inn møte</button>
         <span id="rec_timer">00:00</span>
         <span id="live_level_badge" class="live-badge" title="Sanntids lydnivå (dBFS) fra mikrofon">Lyd: klar</span>
-        <button onclick="speakGuide()" title="Les opp møtestart-instruks høyt">Tale-instruks</button>
+        <button class="btn-sm" onclick="speakGuide()" title="Les opp møtestart-instruks høyt">Tale-instruks</button>
       </div>
-      <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-        <label style="font-size: 11px; color: GrayText; display: flex; align-items: center; gap: 4px;">
+      <div class="rec-options">
+        <label>
           <input type="checkbox" id="auto_speak_guide" checked>
           Les opp navnerunde-guide
         </label>
-        <label style="font-size: 11px; color: GrayText; display: flex; align-items: center; gap: 4px;" title="Transkriberer grove 5-sekunders utsnitt fortløpende under opptak for å bekrefte at alle rundt bordet høres tydelig">
+        <label title="Transkriberer grove 5-sekunders utsnitt fortløpende under opptak for å bekrefte at alle rundt bordet høres tydelig">
           <input type="checkbox" id="live_transcribe_chk" checked>
-          Grov sanntids-transkripsjon (lydsjekk)
+          Sanntids-lydsjekk
         </label>
       </div>
     </div>
@@ -161,132 +532,184 @@
   <div id="prompt_banner">
     <strong>Møtestart-guide for god talergjenkjenning og lydsjekk:</strong><br>
     1. <b>Møteleder:</b> Si kort hva møtet gjelder og dagens dato.<br>
-    2. <b>Navnerunde rundt bordet:</b> Hver deltaker sier eget navn og tittel/rolle i én hel setning. Følg med i <b>Grov sanntids-lydsjekk</b> under for å se at alle rundt bordet fanges opp med <i>Godt lydnivå</i> (slå av macOS «Stemmeisolasjon» hvis noen faller ut).
+    2. <b>Navnerunde rundt bordet:</b> Hver deltaker sier eget navn og tittel/rolle i én hel setning. Følg med i <b>Sanntids-lydsjekk</b> under for å se at alle rundt bordet fanges opp med <i>Godt lydnivå</i> (slå av macOS «Stemmeisolasjon» hvis noen faller ut).
   </div>
 
   <div id="live_check_panel"></div>
 
-  <div class="row">
-    <label>Møtetittel & Dato:</label>
-    <input type="text" id="meeting_title" placeholder="F.eks. Prosjektmøte – 2026-10-29">
-    <button onclick="loadAgendaFile()" title="Last inn agenda eller lysbilder (.pptx, .pdf, .odp, .docx, .md, .txt)">+ Agenda / Lysbilder...</button>
-    <button onclick="loadManualNotesFile()" title="Last inn manuelle møtenotater / referat-utkast (.odt, .docx, .pdf, .md, .txt)">+ Manuelle notater...</button>
+  <!-- ZONE 2: Essential Meeting Context + Progressive Disclosure for Agenda/Notes -->
+  <div class="context-card">
+    <div class="context-grid">
+      <div class="field-group">
+        <label for="meeting_title">2. Møtetittel & Dato</label>
+        <input type="text" id="meeting_title" placeholder="F.eks. Prosjektmøte – 2026-10-29">
+      </div>
+      <div class="field-group">
+        <label for="speaker_names_hint">Deltakere & Roller (setter antall talere automatisk)</label>
+        <input type="text" id="speaker_names_hint" placeholder="F.eks. Ola Nordmann (Møteleder), Kari Hansen (Arkitekt)" oninput="autoCountSpeakersFromHint()">
+      </div>
+    </div>
+
+    <details id="context_notes_drawer" class="sub-drawer">
+      <summary>
+        <span class="summary-title">
+          <span class="chevron">▶</span>
+          <span>📎 Agenda, lysbilder & manuelle møtenotater (valgfritt)</span>
+          <span id="context_count_badge" style="font-weight: 500; color: GrayText; font-size: 11px;"></span>
+        </span>
+        <span style="display: inline-flex; gap: 6px;" onclick="event.stopPropagation();">
+          <button class="btn-sm" onclick="loadAgendaFile()" title="Last inn agenda eller lysbilder (.pptx, .pdf, .odp, .docx, .md, .txt)">+ Agenda / Lysbilder...</button>
+          <button class="btn-sm" onclick="loadManualNotesFile()" title="Last inn manuelle møtenotater / referat-utkast (.odt, .docx, .pdf, .md, .txt)">+ Manuelle notater...</button>
+        </span>
+      </summary>
+      <div class="drawer-body">
+        <div class="notes-grid">
+          <div class="field-group">
+            <label for="agenda_text">Agenda / Lysbilder (.pptx, .pdf, .docx, .md)</label>
+            <textarea id="agenda_text" placeholder="Lim inn saksliste eller klikk «+ Agenda / Lysbilder...»" oninput="updateSettingsSummary()"></textarea>
+          </div>
+          <div class="field-group">
+            <label for="manual_notes_text">Manuelle møtenotater / Fasit-utkast (.odt, .docx, .md)</label>
+            <textarea id="manual_notes_text" placeholder="Valgfritt: Egne notater fra møtet for å kvalitetssikre navn, saker og vedtak..." oninput="updateSettingsSummary()"></textarea>
+          </div>
+        </div>
+      </div>
+    </details>
   </div>
 
-  <div class="row">
-    <label>Tilstede (Navn/tittel):</label>
-    <input type="text" id="speaker_names_hint" placeholder="F.eks. Ola Nordmann (Møteleder), Kari Hansen (Arkitekt), Per Olsen, Anne Berg" oninput="autoCountSpeakersFromHint()">
-  </div>
-
-  <div class="row" style="align-items: flex-start;">
-    <label style="padding-top: 4px;">Agenda / Notater:</label>
-    <textarea id="agenda_text" placeholder="Valgfritt: Agenda eller lysbilder (.pptx, .pdf, .docx, .md)..."></textarea>
-    <textarea id="manual_notes_text" placeholder="Valgfritt: Manuelle møtenotater / referat-utkast (.odt, .docx, .md, .txt) som brukes til å kvalitetssikre navn, saker og vedtak..."></textarea>
-  </div>
-
-  <div class="row">
-    <label>Talere & Modus:</label>
-    <input type="number" id="min_speakers" placeholder="Min" min="1" max="20" style="max-width: 54px;">
-    <input type="number" id="max_speakers" placeholder="Maks" min="1" max="20" style="max-width: 54px;">
-    <button onclick="setExactSpeakers(1)" title="1 taler – Foredrag / Presentasjon">1</button>
-    <button onclick="setExactSpeakers(2)" title="2 talere">2</button>
-    <button onclick="setExactSpeakers(3)" title="3 talere">3</button>
-    <button onclick="setExactSpeakers(4)" title="4 talere">4</button>
-    <button onclick="setExactSpeakers(5)" title="5 talere">5</button>
-    <select id="note_mode" onchange="onModeChanged()" title="Velg eller overstyr modus før du genererer transkripsjon og notater">
-      <option value="auto" selected>Modus: Auto (Foredrag ved 1 taler, ellers Møte)</option>
-      <option value="mote">Modus: Møtereferat (flere deltakere & aksjonspunkter)</option>
-      <option value="foredrag">Modus: Foredrag / Presentasjon (faglige hovedpoenger)</option>
-    </select>
-  </div>
-
-  <div class="row">
-    <label>Lagre i mappe:</label>
-    <input type="text" id="out_dir" placeholder="Velg mappe..." oninput="validateNames()">
-    <button onclick="browseFolder()">Velg...</button>
-    <button onclick="openFinder()" title="Vis i filutforsker">Åpne</button>
-  </div>
-
-  <div class="row">
-    <label>Utdatafiler:</label>
-    <input type="text" id="html_name" placeholder="transkripsjon.html" oninput="validateNames()" title="HTML Transkripsjon">
-    <input type="text" id="notes_name" placeholder="referat.md" oninput="validateNames()" title="Markdown Referat">
-    <input type="text" id="notes_html_name" placeholder="referat.html" oninput="validateNames()" title="HTML Referat">
-    <button onclick="autoIncrementNames()" title="Foreslå nye ledige filnavn hvis du ikke vil overskrive">Ledig navn</button>
-  </div>
-
-  <div class="row">
-    <label>Modeller & Språk:</label>
-    <select id="model_profile" onchange="onProfileChanged()" style="max-width: 190px;" title="Velg ferdig modellprofil tilpasset maskinvaren eller velg modeller manuelt">
-      <option value="auto" selected>★ Anbefalt (Auto ut fra PC/Mac)</option>
-      <option value="recommended">Profil: Testvinner #1 (Small + Gemma 4)</option>
-      <option value="fast">Profil: Alternativ #2 (Distil-Turbo + Gemma 4)</option>
-      <option value="light">Profil: Lettvekt / 8 GB RAM (Small + Llama 3.2)</option>
-      <option value="custom">Profil: Egendefinert</option>
-    </select>
-    <select id="whisper_model" onchange="onManualModelChanged()">
-      <option value="NbAiLab/nb-whisper-small" selected>NB-Whisper Small (Anbefalt Testvinner – 244M)</option>
-      <option value="UlrikKoren/nb-whisper-large-distil-turbo-beta-ct2">NB-Whisper Large Distil-Turbo (756M)</option>
-      <option value="NbAiLab/nb-whisper-medium">NB-Whisper Medium (769M)</option>
-      <option value="NbAiLab/nb-whisper-large">NB-Whisper Large (1.55B – Manuell)</option>
-    </select>
-    <input type="text" id="ollama_model" value="gemma4:e4b" placeholder="Ollama-modell" style="max-width: 110px;" oninput="onManualModelChanged()">
-    <select id="language" style="max-width: 55px;">
-      <option value="no" selected>NO</option>
-      <option value="en">EN</option>
-      <option value="sv">SV</option>
-      <option value="da">DA</option>
-    </select>
-    <input type="password" id="hf_token" placeholder="HF Token (hf_...)" style="max-width: 110px;">
-  </div>
-
-  <div id="hw_resource_banner">
-    <span id="hw_resource_text">Sjekker maskinvare og minnekrav...</span>
-    <button id="apply_rec_btn" onclick="applyRecommendedProfile()" style="display: none; font-size: 11px; padding: 2px 8px;">Bruk anbefalt</button>
-  </div>
-
-  <div class="row">
-    <label>Sjekkpunkt & Steg:</label>
+  <!-- Compact Checkpoint & Hardware Status Strip -->
+  <div class="status-strip">
     <div class="ckpt-bar" id="ckpt_bar">
+      <span style="font-size: 11px; font-weight: 600; color: GrayText; margin-right: 2px;">Steg:</span>
       <span class="ckpt-pill" id="ckpt_s1" onclick="selectTaskMode('only_1_asr')" title="Klikk for å kjøre kun Steg 1 (Whisper ASR)">1. ASR</span>
       <span class="ckpt-pill" id="ckpt_s2" onclick="selectTaskMode('only_2_align')" title="Klikk for å kjøre kun Steg 2 (Alignment)">2. Align</span>
       <span class="ckpt-pill" id="ckpt_s3" onclick="selectTaskMode('from_3_diarize')" title="Klikk for å kjøre fra Steg 3 (Pyannote -> Referat)">3. Pyannote</span>
       <span class="ckpt-pill" id="ckpt_s4" onclick="selectTaskMode('from_4_names')" title="Klikk for å kjøre fra Steg 4 (Navn & HTML -> Referat)">4. Navn & HTML</span>
       <span class="ckpt-pill" id="ckpt_s5" onclick="selectTaskMode('only_5_notes')" title="Klikk for å kjøre kun Steg 5 (Generer Referat/Notat på nytt)">5. Referat/Notat</span>
     </div>
-    <select id="task_mode" onchange="validateNames()" title="Velg om du vil fortsette fra siste sjekkpunkt, kjøre alt på nytt, eller kjøre enkeltoppgaver">
-      <option value="auto_resume" selected>Fortsett fra sjekkpunkt (hopp over ferdige steg)</option>
-      <option value="full_fresh">Kjør alt på nytt (Steg 1–5)</option>
-      <option value="from_3_diarize">Fra Steg 3 -> 5 (Pyannote + Navn + Referat)</option>
-      <option value="from_4_names">Fra Steg 4 -> 5 (Navn & HTML + Referat)</option>
-      <option value="only_5_notes">Kun Steg 5: Generer Referat / Notater på nytt</option>
-      <option value="only_4_names">Kun Steg 4: Taler-navn & HTML-transkripsjon</option>
-      <option value="only_3_diarize">Kun Steg 3: Taler-ID (Pyannote)</option>
-      <option value="only_2_align">Kun Steg 2: Ord-tidsjustering (Alignment)</option>
-      <option value="only_1_asr">Kun Steg 1: Rå-transkripsjon (ASR)</option>
-    </select>
-  </div>
 
-  <div class="row">
-    <span id="conflict-msg"></span>
-    <button id="check_audio_btn" onclick="runQuickAudioCheck()" disabled title="Kjør grov sanntidstranskripsjon og lydnivåsjekk (dBFS) på de første 20 sekundene av valgt lydfil">Lydsjekk (20s)</button>
-    <button onclick="copyLog()" title="Kopier hele loggen til utklippstavlen">Kopier logg</button>
-    <button onclick="saveLog()" title="Lagre loggen til en .txt-fil">Lagre logg...</button>
-    <button class="danger" id="stop_btn" onclick="stopJob()" disabled title="Stopp/pause pågående steg (fullførte steg er lagret i sjekkpunkt)">Stopp / Pause</button>
-    <button class="primary" id="run_btn" onclick="runPipeline()" disabled>Start / Fortsett</button>
-  </div>
-
-  <div class="progress-section">
-    <div class="progress-header">
-      <span id="progress_label">Klar</span>
-      <span id="progress_val">0%</span>
-    </div>
-    <div class="progress-bg">
-      <div id="progress_bar" class="progress-fill"></div>
+    <div id="hw_resource_banner">
+      <span id="hw_resource_text">Sjekker maskinvare...</span>
+      <button id="apply_rec_btn" class="btn-sm" onclick="applyRecommendedProfile()" style="display: none;">Bruk anbefalt</button>
     </div>
   </div>
 
-  <div id="log">Klar. Start et opptak, eller velg en lydfil (.wav/.m4a/.opus/.mp3) eller en eksisterende transkripsjonsfil (.html/.json/.txt/.srt).</div>
+  <!-- ZONE 3: Collapsible Advanced Settings, Models & Output Files -->
+  <details id="advanced_settings_drawer" class="zone-drawer">
+    <summary>
+      <span class="summary-title">
+        <span class="chevron">▶</span>
+        <span>⚙️ Innstillinger, Modeller & Utdatafiler</span>
+      </span>
+      <span id="settings_summary_pill">★ Anbefalt (Auto) • Auto-modus • Fortsett fra sjekkpunkt</span>
+    </summary>
+    <div class="drawer-body">
+      <div class="row">
+        <label>Talere & Modus:</label>
+        <input type="number" id="min_speakers" placeholder="Min" min="1" max="20" style="max-width: 58px;" oninput="updateSettingsSummary()">
+        <input type="number" id="max_speakers" placeholder="Maks" min="1" max="20" style="max-width: 58px;" oninput="updateSettingsSummary()">
+        <button class="btn-sm" onclick="setExactSpeakers(1)" title="1 taler – Foredrag / Presentasjon">1</button>
+        <button class="btn-sm" onclick="setExactSpeakers(2)" title="2 talere">2</button>
+        <button class="btn-sm" onclick="setExactSpeakers(3)" title="3 talere">3</button>
+        <button class="btn-sm" onclick="setExactSpeakers(4)" title="4 talere">4</button>
+        <button class="btn-sm" onclick="setExactSpeakers(5)" title="5 talere">5</button>
+        <select id="note_mode" onchange="onModeChanged()" title="Velg eller overstyr modus før du genererer transkripsjon og notater">
+          <option value="auto" selected>Modus: Auto (Foredrag ved 1 taler, ellers Møte)</option>
+          <option value="mote">Modus: Møtereferat (flere deltakere & aksjonspunkter)</option>
+          <option value="foredrag">Modus: Foredrag / Presentasjon (faglige hovedpoenger)</option>
+        </select>
+      </div>
+
+      <div class="row">
+        <label>Modeller & Språk:</label>
+        <select id="model_profile" onchange="onProfileChanged()" style="max-width: 195px;" title="Velg ferdig modellprofil tilpasset maskinvaren eller velg modeller manuelt">
+          <option value="auto" selected>★ Anbefalt (Auto ut fra PC/Mac)</option>
+          <option value="recommended">Profil: Testvinner #1 (Small + Gemma 4)</option>
+          <option value="fast">Profil: Alternativ #2 (Distil-Turbo + Gemma 4)</option>
+          <option value="light">Profil: Lettvekt / 8 GB RAM (Small + Llama 3.2)</option>
+          <option value="custom">Profil: Egendefinert</option>
+        </select>
+        <select id="whisper_model" onchange="onManualModelChanged()">
+          <option value="NbAiLab/nb-whisper-small" selected>NB-Whisper Small (Anbefalt Testvinner – 244M)</option>
+          <option value="UlrikKoren/nb-whisper-large-distil-turbo-beta-ct2">NB-Whisper Large Distil-Turbo (756M)</option>
+          <option value="NbAiLab/nb-whisper-medium">NB-Whisper Medium (769M)</option>
+          <option value="NbAiLab/nb-whisper-large">NB-Whisper Large (1.55B – Manuell)</option>
+        </select>
+        <input type="text" id="ollama_model" value="gemma4:e4b" placeholder="Ollama-modell" style="max-width: 115px;" oninput="onManualModelChanged()">
+        <select id="language" style="max-width: 60px;" onchange="updateSettingsSummary()">
+          <option value="no" selected>NO</option>
+          <option value="en">EN</option>
+          <option value="sv">SV</option>
+          <option value="da">DA</option>
+        </select>
+        <input type="password" id="hf_token" placeholder="HF Token (hf_...)" style="max-width: 115px;">
+      </div>
+
+      <div class="row">
+        <label>Steg-oppgave:</label>
+        <select id="task_mode" onchange="validateNames()" title="Velg om du vil fortsette fra siste sjekkpunkt, kjøre alt på nytt, eller kjøre enkeltoppgaver">
+          <option value="auto_resume" selected>Fortsett fra sjekkpunkt (hopp over ferdige steg)</option>
+          <option value="full_fresh">Kjør alt på nytt (Steg 1–5)</option>
+          <option value="from_3_diarize">Fra Steg 3 -> 5 (Pyannote + Navn + Referat)</option>
+          <option value="from_4_names">Fra Steg 4 -> 5 (Navn & HTML + Referat)</option>
+          <option value="only_5_notes">Kun Steg 5: Generer Referat / Notater på nytt</option>
+          <option value="only_4_names">Kun Steg 4: Taler-navn & HTML-transkripsjon</option>
+          <option value="only_3_diarize">Kun Steg 3: Taler-ID (Pyannote)</option>
+          <option value="only_2_align">Kun Steg 2: Ord-tidsjustering (Alignment)</option>
+          <option value="only_1_asr">Kun Steg 1: Rå-transkripsjon (ASR)</option>
+        </select>
+      </div>
+
+      <div class="row">
+        <label>Lagre i mappe:</label>
+        <input type="text" id="out_dir" placeholder="Velg mappe..." oninput="validateNames()">
+        <button class="btn-sm" onclick="browseFolder()">Velg...</button>
+        <button class="btn-sm" onclick="openFinder()" title="Vis i filutforsker">Åpne</button>
+      </div>
+
+      <div class="row">
+        <label>Utdatafiler:</label>
+        <input type="text" id="html_name" placeholder="transkripsjon.html" oninput="validateNames()" title="HTML Transkripsjon">
+        <input type="text" id="notes_name" placeholder="referat.md" oninput="validateNames()" title="Markdown Referat">
+        <input type="text" id="notes_html_name" placeholder="referat.html" oninput="validateNames()" title="HTML Referat">
+        <button class="btn-sm" onclick="autoIncrementNames()" title="Foreslå nye ledige filnavn hvis du ikke vil overskrive">Ledig navn</button>
+      </div>
+    </div>
+  </details>
+
+  <!-- Primary Action & Progress Card -->
+  <div class="action-card">
+    <div class="action-bar">
+      <span id="conflict-msg"></span>
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <button class="danger" id="stop_btn" onclick="stopJob()" disabled title="Stopp/pause pågående steg (fullførte steg er lagret i sjekkpunkt)">Stopp / Pause</button>
+        <button class="primary" id="run_btn" onclick="runPipeline()" disabled>▶ Start / Fortsett</button>
+      </div>
+    </div>
+
+    <div class="progress-section">
+      <div class="progress-header">
+        <span id="progress_label">Klar</span>
+        <span id="progress_val">0%</span>
+      </div>
+      <div class="progress-bg">
+        <div id="progress_bar" class="progress-fill"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Activity Log -->
+  <div class="log-container">
+    <div class="log-header">
+      <span>Aktivitetslogg</span>
+      <span style="display: inline-flex; gap: 6px;">
+        <button class="btn-sm" onclick="openFinder()" title="Åpne utdatamappen i Finder / Utforsker">📂 Åpne mappe</button>
+        <button class="btn-sm" onclick="copyLog()" title="Kopier hele loggen til utklippstavlen">Kopier logg</button>
+        <button class="btn-sm" onclick="saveLog()" title="Lagre loggen til en .txt-fil">Lagre logg...</button>
+      </span>
+    </div>
+    <div id="log">Klar. Start et opptak, eller velg en lydfil (.wav/.m4a/.opus/.mp3) eller en eksisterende transkripsjonsfil (.html/.json/.txt/.srt).</div>
+  </div>
 
 <script>
   let currentAudioPath = "";
@@ -296,6 +719,32 @@
   let recTimerInterval = null;
   let cachedHwInfo = null;
   let cachedProfiles = {};
+
+  function updateSettingsSummary() {
+    const pill = document.getElementById('settings_summary_pill');
+    if (pill) {
+      const wVal = document.getElementById('whisper_model').value || '';
+      const shortW = wVal.split('/').pop().replace('nb-whisper-', 'whisper-');
+      const mVal = document.getElementById('ollama_model').value.trim() || 'gemma4:e4b';
+      const minS = document.getElementById('min_speakers').value;
+      const maxS = document.getElementById('max_speakers').value;
+      const spkTxt = (minS && minS === maxS) ? `${minS} taler(e)` : ((minS || maxS) ? `${minS || '?'}-${maxS || '?'} talere` : 'Auto talere');
+      const taskSel = document.getElementById('task_mode');
+      const taskTxt = taskSel && taskSel.options[taskSel.selectedIndex]
+        ? taskSel.options[taskSel.selectedIndex].text.split('(')[0].trim()
+        : 'Fortsett';
+      pill.textContent = `${shortW} + ${mVal} • ${spkTxt} • ${taskTxt}`;
+    }
+    const badge = document.getElementById('context_count_badge');
+    if (badge) {
+      const ag = document.getElementById('agenda_text').value.trim();
+      const mn = document.getElementById('manual_notes_text').value.trim();
+      const parts = [];
+      if (ag) parts.push(`Agenda (${ag.length} tegn)`);
+      if (mn) parts.push(`Notater (${mn.length} tegn)`);
+      badge.textContent = parts.length ? `— ${parts.join(' + ')}` : '';
+    }
+  }
 
   function updateHardwareBanner(hw, fit) {
     const banner = document.getElementById('hw_resource_banner');
@@ -307,12 +756,14 @@
     if (btn) {
       btn.style.display = (fit.level === 'critical' || fit.level === 'warning') ? 'inline-block' : 'none';
     }
+    updateSettingsSummary();
   }
 
   async function refreshResourceFit() {
     const w = document.getElementById('whisper_model').value;
     const m = document.getElementById('ollama_model').value.trim();
     const outDir = document.getElementById('out_dir').value.trim();
+    updateSettingsSummary();
     if (window.pywebview && pywebview.api && pywebview.api.check_model_resources) {
       const res = await pywebview.api.check_model_resources(w, m, outDir);
       if (res) {
@@ -365,6 +816,7 @@
       document.getElementById('ollama_model').value = defs.hardware.recommended_ollama || 'gemma4:e4b';
       updateHardwareBanner(defs.hardware, defs.resource_fit);
     }
+    updateSettingsSummary();
   });
 
   const dz = document.getElementById('dropzone');
@@ -377,12 +829,14 @@
     if (sel) {
       sel.value = mode;
       validateNames();
+      updateSettingsSummary();
     }
   }
 
   function setExactSpeakers(n) {
     document.getElementById('min_speakers').value = n;
     document.getElementById('max_speakers').value = n;
+    updateSettingsSummary();
   }
 
   function onModeChanged() {
@@ -391,15 +845,17 @@
       document.getElementById('min_speakers').value = 1;
       document.getElementById('max_speakers').value = 1;
     }
+    updateSettingsSummary();
   }
 
   function autoCountSpeakersFromHint() {
     const raw = document.getElementById('speaker_names_hint').value.trim();
     if (!raw) return;
-    const parts = raw.split(/[,;\\n]+/).map(s => s.trim()).filter(Boolean);
+    const parts = raw.split(/[,;\n]+/).map(s => s.trim()).filter(Boolean);
     if (parts.length >= 1 && parts.length <= 20) {
       document.getElementById('min_speakers').value = parts.length;
       document.getElementById('max_speakers').value = parts.length;
+      updateSettingsSummary();
     }
   }
 
@@ -471,7 +927,7 @@
         return;
       }
       isRecording = true;
-      btn.textContent = "Stopp opptak";
+      btn.textContent = "⏹ Stopp opptak";
       btn.classList.add('recording');
       recStartTime = Date.now();
       recTimerInterval = setInterval(() => {
@@ -483,7 +939,7 @@
     } else {
       clearInterval(recTimerInterval);
       isRecording = false;
-      btn.textContent = "Spill inn møte";
+      btn.textContent = "🎙️ Spill inn møte";
       btn.classList.remove('recording');
       const info = await pywebview.api.stop_recording(outDir);
       if (info) {
@@ -496,7 +952,10 @@
     const content = await pywebview.api.pick_agenda_file();
     if (content) {
       const box = document.getElementById('agenda_text');
-      box.value = box.value.trim() ? (box.value.trim() + "\\n\\n" + content) : content;
+      box.value = box.value.trim() ? (box.value.trim() + "\n\n" + content) : content;
+      const drawer = document.getElementById('context_notes_drawer');
+      if (drawer) drawer.open = true;
+      updateSettingsSummary();
     }
   }
 
@@ -504,7 +963,10 @@
     const content = await pywebview.api.pick_agenda_file();
     if (content) {
       const box = document.getElementById('manual_notes_text');
-      box.value = box.value.trim() ? (box.value.trim() + "\\n\\n" + content) : content;
+      box.value = box.value.trim() ? (box.value.trim() + "\n\n" + content) : content;
+      const drawer = document.getElementById('context_notes_drawer');
+      if (drawer) drawer.open = true;
+      updateSettingsSummary();
     }
   }
 
@@ -542,6 +1004,7 @@
     }
     await refreshCheckpointBar();
     await validateNames();
+    updateSettingsSummary();
   }
 
   async function handleDroppedAudio(fullPath) {
@@ -550,7 +1013,10 @@
       const ctx = await pywebview.api.load_context_file_path(fullPath);
       if (ctx) {
         const box = document.getElementById('agenda_text');
-        box.value = box.value.trim() ? (box.value.trim() + "\\n\\n" + ctx) : ctx;
+        box.value = box.value.trim() ? (box.value.trim() + "\n\n" + ctx) : ctx;
+        const drawer = document.getElementById('context_notes_drawer');
+        if (drawer) drawer.open = true;
+        updateSettingsSummary();
       }
       return;
     }
@@ -600,6 +1066,7 @@
     const btn = document.getElementById('run_btn');
     const checkBtn = document.getElementById('check_audio_btn');
     if (checkBtn) checkBtn.disabled = !currentAudioPath || isJobRunning;
+    updateSettingsSummary();
 
     const htmlName = htmlInput.value.trim();
     const notesName = notesInput.value.trim();
@@ -626,7 +1093,7 @@
     notesHtmlInput.classList.toggle('conflict', conflicts.includes(notesHtmlName));
 
     if (conflicts.length > 0) {
-      msg.textContent = "Merk: Eksisterende utdatafil oppdateres ved kjøring (eller klikk «Ledig navn»).";
+      msg.textContent = "Merk: Eksisterende utdatafil oppdateres ved kjøring (eller åpne ⚙️ Innstillinger -> «Ledig navn»).";
     } else {
       msg.textContent = "";
     }
@@ -661,7 +1128,7 @@
 
   function appendLog(line) {
     const log = document.getElementById('log');
-    log.textContent += "\\n" + line;
+    log.textContent += "\n" + line;
     log.scrollTop = log.scrollHeight;
   }
 
@@ -676,7 +1143,7 @@
     isJobRunning = running;
     const btn = document.getElementById('run_btn');
     const stopBtn = document.getElementById('stop_btn');
-    btn.textContent = running ? "Arbeider..." : "Start / Fortsett";
+    btn.textContent = running ? "Arbeider..." : "▶ Start / Fortsett";
     stopBtn.disabled = !running;
     validateNames();
   }
