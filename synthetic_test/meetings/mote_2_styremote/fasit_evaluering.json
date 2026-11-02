@@ -1,0 +1,59 @@
+{
+  "id": "mote_2_styremote",
+  "title": "Styremøte Tromsø Kultur- ogIdrettslag – Høst 2026",
+  "num_speakers": 3,
+  "speaker_hint": "Astrid Solberg (Styreleder), Henrik Vik (Kasserer), Marte Lunde (Arrangementansvarlig)",
+  "speakers": [
+    {
+      "name": "Astrid Solberg",
+      "role": "Styreleder",
+      "slot": 0
+    },
+    {
+      "name": "Henrik Vik",
+      "role": "Kasserer",
+      "slot": 1
+    },
+    {
+      "name": "Marte Lunde",
+      "role": "Arrangementansvarlig",
+      "slot": 2
+    }
+  ],
+  "expected_speakers": [
+    "Astrid Solberg",
+    "Henrik Vik",
+    "Marte Lunde"
+  ],
+  "required_facts": [
+    [
+      "28",
+      "tjueåtte"
+    ],
+    [
+      "450",
+      "fire hundre og femti"
+    ],
+    [
+      "kulturhuset"
+    ],
+    [
+      "18",
+      "attende"
+    ],
+    [
+      "15",
+      "femten"
+    ],
+    [
+      "10",
+      "tiende"
+    ],
+    [
+      "mandag"
+    ],
+    [
+      "torsdag"
+    ]
+  ]
+}

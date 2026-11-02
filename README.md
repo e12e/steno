@@ -1,57 +1,87 @@
-# Lokalt Møtereferat & Transkripsjon (`mote_gui.py` og `mote_app.py`)
+# Lokalt Møtereferat & Transkripsjon (`mote_app.py` og `transcribe.py`)
 
 Helautomatisk, **100 % lokal og skyfri** løsning for transkripsjon av norske møter, taler-identifisering (hvem sa hva) og generering av strukturerte møtereferater. All lydbehandling, talegjenkjenning og tekstgenerering kjører utelukkende på din egen maskin. Ingen lydfiler eller tekster sendes til eksterne skytjenester.
 
 ---
 
-## 1. Oversikt over applikasjonene (Gammel vs. Ny App)
+## 1. Oversikt over applikasjonene
 
-Prosjektet inneholder to grafiske skrivebordsapplikasjoner (begge pakket som selvstendige enkeltfiler som automatisk installerer nødvendige avhengigheter ved første oppstart) samt et kommandolinjeverktøy:
+Prosjektet leveres både som en modulær Python-pakke (`src/mote/`), en selvstendig alt-i-ett-fil (`dist/mote_app.py` som automatisk installerer nødvendige avhengigheter ved første oppstart), og et kommandolinjeverktøy (`transcribe.py`):
 
 | Fil | Beskrivelse og bruksområde |
 | :--- | :--- |
-| **`mote_gui.py`** *(Original app)* | Klassisk skrivebords-GUI for behandling av **lydfiler** (`.wav`, `.m4a`, `.opus`, `.mp3`, `.flac`, `.ogg`) eller **eksisterende transkripsjonsfiler** (`.html`, `.json`, `.txt`, `.md`, `.srt`, `.vtt`). Støtter antall talere (`1`–`20`), valgfri modus-overstyring (**Møtereferat** vs. **Foredrag / Presentasjon**), **Stopp/Pause og gjenopptak etter krasj** via sjekkpunkter på disk, manuell kjøring av enkeltoppgaver (`Steg 1–5`), innlasting av agenda/lysbilder (`.pptx`, `.pdf`, `.docx`, `.md`, `.txt`), lagring/kopiering av kjørelogg, og eksport til Markdown (`.md`), utskriftsvennlig HTML-referat (`_referat.html`) og fargekodet HTML-transkripsjon (`_transkripsjon.html`). |
-| **`mote_app.py`** *(Ny utvidet app)* | Bygger videre på `mote_gui.py` med:<br>1. **Direkte mikrofonopptak med grov sanntids-transkripsjon (lydsjekk)**: Tar opp `16 kHz` mono PCM WAV, viser løpende dBFS-lydnivå hvert sekund (`Godt`, `Lavt`, `Stille`, `Høyt/Klipp`) og grov-transkriberer 5-sekunders utsnitt fortløpende under opptak (eller via knappen `Lydsjekk (20s)` på valgt fil) slik at du ser med én gang om lyden og mikrofonoppsettet er godt nok.<br>2. **Møtestart-guide (talestyrt og visuell)**: Veileder møteleder og deltakere gjennom en kort presentasjonsrunde ved møtestart slik at systemet låser stemme-ID til riktig navn og tittel.<br>3. **Dedikert 1-talers foredragsmodus (`Modus: Foredrag / Presentasjon`)**: Bruker nøyaktig samme transkripsjonsmotor, men skreddersyr oppsummeringen som faglige hovedpoenger (*Key Takeaways*), tematisk gjennomgang og begrepsforklaringer i stedet for vedtak og flerparts aksjonstabell. Kan velges automatisk (ved `1` taler) eller overstyres manuelt før kjøring.<br>4. **Stopp/Pause, krasj-gjenopptak og enkeltoppgaver (`Steg 1–5`)**: Lagrer sjekkpunkt etter hvert fullførte steg (`1_asr.json`, `2_align.json`, `3_diarize.json`, `4_speakers.json`) i `.mote_checkpoints/`, slik at du aldri mister arbeid og kan kjøre enkeltsteg på nytt.<br>5. **Start direkte fra transkripsjon**: Slipp inn en ferdig transkripsjon (`.html`, `.json`, `.txt`, `.md`, `.srt`, `.vtt`) for å hoppe over lydprosessering og gå rett til navnekobling eller nytt referat/foredragsnotat.<br>6. **Kontekst fra agenda, lysbilder og dokumenter**: Henter tekst og forelesernotater direkte fra PowerPoint (`.pptx`), PDF (`.pdf`), OpenDocument (`.odp`/`.odt`), Word (`.docx`) og Markdown/tekst (`.md`/`.txt`) for bedre fagbegreper i Whisper og mer treffsikkert referat. |
-| **`transcribe.py`** *(CLI-verktøy)* | Kommandolinjegrensesnitt med støtte for alle 5 steg, sjekkpunkter (`--task`, `--status`), kontekstfiler (`-c`), og grov sanntids-lydsjekk (`--live-check`). |
-| **`debug_synthetic_test.py`** *(Testverktøy)* | Genererer og kjører ende-til-ende-test på et syntetisk 4-talers møteopptak komprimert med Opus i `synthetic_test/`. |
+| **`mote_app.py`** / **`dist/mote_app.py`** *(GUI + CLI)* | Skrivebordsapp med:<br>1. **Direkte mikrofonopptak med grov sanntids-transkripsjon (lydsjekk)**: Tar opp `16 kHz` mono PCM WAV, viser løpende dBFS-lydnivå hvert sekund (`Godt`, `Lavt`, `Stille`, `Høyt/Klipp`) og grov-transkriberer 5-sekunders utsnitt fortløpende under opptak (eller via knappen `Lydsjekk (20s)` på valgt fil) slik at du ser med én gang om lyden og mikrofonoppsettet er godt nok.<br>2. **Møtestart-guide (talestyrt og visuell)**: Veileder møteleder og deltakere gjennom en kort presentasjonsrunde ved møtestart slik at systemet låser stemme-ID til riktig navn og tittel.<br>3. **Dedikert 1-talers foredragsmodus (`Modus: Foredrag / Presentasjon`)**: Bruker nøyaktig samme transkripsjonsmotor, men skreddersyr oppsummeringen som faglige hovedpoenger (*Key Takeaways*), tematisk gjennomgang og begrepsforklaringer i stedet for vedtak og flerparts aksjonstabell. Kan velges automatisk (ved `1` taler) eller overstyres manuelt før kjøring.<br>4. **Stopp/Pause, krasj-gjenopptak og enkeltoppgaver (`Steg 1–5`)**: Lagrer sjekkpunkt etter hvert fullførte steg (`1_asr.json`, `2_align.json`, `3_diarize.json`, `4_speakers.json`) i `.mote_checkpoints/`, slik at du aldri mister arbeid og kan kjøre enkeltsteg på nytt.<br>5. **Start direkte fra transkripsjon**: Slipp inn en ferdig transkripsjon (`.html`, `.json`, `.txt`, `.md`, `.srt`, `.vtt`) for å hoppe over lydprosessering og gå rett til navnekobling eller nytt referat/foredragsnotat.<br>6. **Kontekst fra agenda, lysbilder og manuelle møtenotater**: Henter tekst og forelesernotater direkte fra PowerPoint (`.pptx`), PDF (`.pdf`), OpenDocument (`.odp`/`.odt`), Word (`.docx`) og Markdown/tekst (`.md`/`.txt`) for bedre fagbegreper i Whisper og mer treffsikkert referat. |
+| **`transcribe.py`** *(CLI-verktøy)* | Kommandolinjegrensesnitt med støtte for alle 5 steg, maskinvaredeteksjon (`--profile auto`, `--check-hw`), sjekkpunkter (`--task`, `--status`), kontekstfiler (`-c`), manuelle møtenotater (`-M`) og grov sanntids-lydsjekk (`--live-check`). |
+| **`tests/e2e_benchmark.py`** *(Benchmark & E2E-test)* | Genererer og evaluerer 4 syntetiske norske møteopptak komprimert med Opus i `synthetic_test/meetings/` på tvers av ASR- og LLM-modeller. |
 
 ### Oppstart (Windows, macOS og Linux)
-Begge GUI-filene har en innebygd kryssplattform-oppstarter (`uv` med Python 3.12) som automatisk henter og setter opp Python-miljø, `ffmpeg`, `whisperx` og `ollama` lokalt ved behov:
-- **macOS / Linux**: Kjør `./mote_app.py` (eller `./mote_gui.py`) i terminalen.
+Appen har en innebygd kryssplattform-oppstarter (`uv` med Python 3.12) som automatisk henter og setter opp Python-miljø, `ffmpeg`, `whisperx` og `ollama` lokalt ved behov:
+- **macOS / Linux**: Kjør `./mote_app.py` (eller `./dist/mote_app.py`) i terminalen.
 - **Windows**: Kjør `python mote_app.py` (eller gi filen en `.cmd`-snarvei og dobbeltklikk).
 
 ---
 
-## 2. Valg av språkmodeller, opphav og lisenser
+## 2. Maskinvarekrav, Automatisk Profilvalg og Ressursbruk
 
-Løsningen kombinerer fire spesialiserte lokale AI-modeller i en tretrinns kjede (**Lyd -> Ordtidsjustert transkripsjon -> Taler-separasjon -> Møtereferat**).
+Appen har **innebygd maskinvaredeteksjon (`detect_hardware_resources`)** som ved oppstart sjekker tilgjengelig RAM, CPU-arkitektur/kjerner, eventuell NVIDIA GPU VRAM og ledig diskplass:
+- **Automatisk profilvalg (`★ Anbefalt (Auto ut fra PC/Mac)` / `--profile auto`)**: Velger automatisk beste kombinasjon av ASR-, Alignment- og Ollama-modell for maskinen din.
+- **Sanntids ressursadvarsel**: Hvis maskinen har for lite RAM (< 8 GB), lite ledig diskplass, eller du manuelt velger en modellkombinasjon som overstiger tilgjengelig minne, viser appen en tydelig **oransje/rød ressursadvarsel** med ett-klikks knapp (**«Bruk anbefalt»**) for å bytte til en trygg profil.
 
-### 2.1 Talegjenkjenning (ASR) og Ordtidsjustering (Alignment)
+Fordi **alle 5 steg kjører sekvensielt** og frigjør minne mellom hvert steg (`del model; gc.collect()`, og WhisperX-underprosessen avsluttes helt før Ollama starter i Steg 4–5), ligger **aldri** talegjenkjenning og språkmodell i minnet samtidig.
 
-| Modell | Rolle | Utvikler / Opphav | Lisens | Kilde |
+### 2.1 Maskinvaretabell – Hva kreves for å kjøre lokalt?
+
+| Nivå / Profil | Systemminne (RAM / Unified Memory) | Prosessor / GPU | Ledig diskplass | Anbefalt modelloppsett (Testvinnere) | Topp-RAM (Sekvensielt) |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Absolutt minimum**<br>*(Profil: `light`)* | **8 GB RAM** *(lukk nettleser/tunge apper under kjøring)* | Apple Silicon (`M1`+) eller moderne `x86_64` CPU (min. 4 kjerner / AVX2) | **8–10 GB** | ASR: `NbAiLab/nb-whisper-small`<br>Align: `nb-wav2vec2-300m-bokmaal`<br>LLM: `llama3.2:latest` *(3,2B)* | **~3,8 GB RAM** |
+| **Anbefalt standard**<br>*(Profil: `recommended` / `auto`)* | **12–16 GB+ RAM** *(eller 8 GB+ NVIDIA VRAM)* | Apple Silicon (`M1/M2/M3/M4`) eller PC med NVIDIA RTX / rask 8-kjerners CPU | **12–15 GB** | ASR: `NbAiLab/nb-whisper-small` *(Testvinner #1)*<br>Align: `nb-wav2vec2-300m-bokmaal`<br>LLM: `gemma4:e4b` *(Testvinner #1)* | **~6,5 GB RAM** |
+| **Alternativ #2**<br>*(Profil: `fast`)* | **16 GB+ RAM** | Apple Silicon (`M1–M4`) eller NVIDIA RTX | **15–18 GB** | ASR: `UlrikKoren/nb-whisper-large-distil-turbo-beta-ct2`<br>Align: `nb-wav2vec2-1b-bokmaal-v2`<br>LLM: `gemma4:e4b` | **~6,5 GB RAM** |
+
+> [!WARNING]
+> **Enheter som IKKE støttes eller ikke anbefales:**
+> - **Maskiner med 4 GB RAM** (f.eks. eldre kontor-PCer eller Raspberry Pi 4): Vil gå tom for minne (OOM / swap-lås). Appen viser kritisk advarsel hvis `< 7,5 GB RAM` oppdages.
+> - **Eldre CPU-er uten AVX2-instruksjonssett** (Intel før ~2014 / Haswell) eller **32-bit operativsystemer**: Støttes ikke av `PyTorch`, `CTranslate2` eller `Ollama`.
+> - **Chromebooks / nettbrett (iPad / Android)**: Appen krever fullt skrivebords-OS (**macOS 12+**, **Windows 10/11 64-bit** eller **Linux x86_64/ARM64**). På mobil/nettbrett bør man kun *ta opp* lyden og overføre filen til PC/Mac.
+
+### 2.2 Minne- og diskforbruk per steg (Anbefalt Testvinner-oppsett)
+
+| Steg | Aktiv komponent | Diskplass (nedlastet modell) | Topp-RAM under kjøring | Merknad |
 | :--- | :--- | :--- | :--- | :--- |
-| **`NbAiLab/nb-whisper-large`** *(Standard)*<br>`nb-whisper-medium`<br>`nb-whisper-small` | Norsk tale-til-tekst (bokmål, nynorsk og norske dialekter) | **Nasjonalbiblioteket (NB AI-Lab)** i Norge. Finjustert fra OpenAI Whisper på Nasjonalbibliotekets lydarkiv og Stortingets forhandlinger. | **Apache License 2.0** *(Tillater fri privat, offentlig og kommersiell bruk)* | [Hugging Face: NbAiLab/nb-whisper-large](https://huggingface.co/NbAiLab/nb-whisper-large) |
-| **`NbAiLab/nb-wav2vec2-1b-bokmaal`** | Ordtidsjustering (*Forced Alignment*) ned på millisekundnivå for hvert enkelt ord | **Nasjonalbiblioteket (NB AI-Lab)** | **Apache License 2.0** | [Hugging Face: NbAiLab/nb-wav2vec2-1b-bokmaal](https://huggingface.co/NbAiLab/nb-wav2vec2-1b-bokmaal) |
+| **Grunnmiljø** | Python 3.12 (`uv`), PyTorch, WhisperX, `ffmpeg`, Ollama | ~3,5 GB | ~0,4 GB (hvile) | Installeres automatisk i `~/.local/share/mote_transcribe` |
+| **Steg 1: ASR** | `NbAiLab/nb-whisper-small` (`CTranslate2 int8`) | ~0,9 GB | **~1,2 GB** | 2,7x raskere og mer presis enn `nb-whisper-large` i E2E-test |
+| **Steg 2: Align** | `NbAiLab/nb-wav2vec2-300m-bokmaal` (PyTorch FP32) | ~1,2 GB | **~1,5 GB** | Velges automatisk ved `small`-ASR (kutter RAM-toppen med ~70 %) |
+| **Steg 3: Pyannote** | `pyannote/speaker-diarization-community-1` | ~0,3 GB | **~1,8–2,5 GB** | Hele Python-prosessen avsluttes etter Steg 3 |
+| **Steg 4–5: LLM** | `gemma4:e4b` (`num_ctx=16384` i Ollama) | ~5,3 GB | **~5,5–6,5 GB** | 100 % treff på taler-ID og 96,7 % referatkvalitet i E2E-benchmark |
 
-### 2.2 Taler-identifisering (Speaker Diarization)
+---
+
+## 3. Valg av språkmodeller, Benchmark-vinnere, Opphav og Lisenser
+
+Alle modeller i appen er evaluert og rangert empirisk på **4 syntetiske norske møter** (se [BENCHMARK_RAPPORT.md](synthetic_test/BENCHMARK_RAPPORT.md)). Tyngre modeller som presterte dårligere eller vesentlig tregere uten kvalitetsgevinst (`NbAiLab/nb-whisper-large`, `large-v3-turbo`, `devstral:24b`, `qwen3:4b`) er fjernet fra standardvalgene til fordel for mindre, raskere og mer presise modeller.
+
+### 3.1 Talegjenkjenning (ASR) og Ordtidsjustering (Alignment)
+
+| Modell | Parametere & Disk | Rolle & Benchmark-resultat | Utvikler / Opphav | Lisens | Kilde |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **`NbAiLab/nb-whisper-small`** *(Anbefalt Testvinner #1)* | `244M` (~0,9 GB) | **Testvinner #1 (`83,47 %` ordnøyaktighet, `0,50x` RTF).** 2,7x raskere enn Large, bruker 80 % mindre diskplass og unngår repetisjonshallusinasjoner. | **Nasjonalbiblioteket (NB AI-Lab)** | **Apache 2.0** | [HF: NbAiLab/nb-whisper-small](https://huggingface.co/NbAiLab/nb-whisper-small) |
+| **`UlrikKoren/nb-whisper-large-distil-turbo-beta-ct2`** *(Alternativ #2)* | `756M` (~1,4 GB) | **Testvinner #2 (`67,68 %` ordnøyaktighet, `0,90x` RTF).** Destillert 4-lags dekoder fra `NbAiLab/nb-whisper-large-distil-turbo-beta`. | **NB AI-Lab** *(CT2 av Ulrik Koren)* | **Apache 2.0** | [HF: nb-whisper-large-distil-turbo-beta](https://huggingface.co/NbAiLab/nb-whisper-large-distil-turbo-beta) |
+| **`NbAiLab/nb-whisper-medium`** | `769M` (~1,5 GB) | Mellommodell for norsk bokmål, nynorsk og dialekter. | **Nasjonalbiblioteket (NB AI-Lab)** | **Apache 2.0** | [HF: NbAiLab/nb-whisper-medium](https://huggingface.co/NbAiLab/nb-whisper-medium) |
+| **`NbAiLab/nb-wav2vec2-300m-bokmaal`** *(Standard ved Small)*<br>`nb-wav2vec2-1b-bokmaal-v2` | `300M` (~1,2 GB)<br>`1B` (~3,6 GB) | Millisekund-presis ordtidsjustering (*Forced Alignment*). `300m` brukes automatisk sammen med `nb-whisper-small`. | **Nasjonalbiblioteket (NB AI-Lab)** | **Apache 2.0** | [HF: NbAiLab/nb-wav2vec2-300m-bokmaal](https://huggingface.co/NbAiLab/nb-wav2vec2-300m-bokmaal) |
+
+### 3.2 Taler-identifisering (Speaker Diarization)
 
 | Modell / Bibliotek | Rolle | Utvikler / Opphav | Lisens | Kilde |
 | :--- | :--- | :--- | :--- | :--- |
-| **`pyannote/speaker-diarization-3.1`** & **`pyannote/segmentation-3.0`** | Skiller ulike stemmer fra hverandre og grupperer hvem som snakker når (bruker nevrale stemme-fingeravtrykk fra *WeSpeaker ResNet34*) | **Hervé Bredin (CNRS – Centre national de la recherche scientifique, Frankrike)** | **MIT License** *(Åpen kildekode; krever engangs godkjenning av vilkår på Hugging Face ved første nedlasting)* | [Hugging Face: pyannote/speaker-diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1) |
-| **`WhisperX`** *(med `faster-whisper` / `CTranslate2`)* | Kobler sammen NB-Whisper, Wav2Vec2 og Pyannote slik at hvert enkelt ord får tildelt taler-ID (`SPEAKER_00`, `SPEAKER_01`, osv.) | **Max Bain m.fl. (University of Oxford / VGG)** og **OpenNMT** | **BSD-4-Clause** (`WhisperX`) / **MIT License** (`faster-whisper`) | [GitHub: m-bain/whisperX](https://github.com/m-bain/whisperX) |
+| **`pyannote/speaker-diarization-community-1`** / **`3.1`** | Skiller ulike stemmer fra hverandre og grupperer hvem som snakker når (bruker nevrale stemme-fingeravtrykk fra *WeSpeaker ResNet34*) | **Hervé Bredin (CNRS, Frankrike)** | **MIT / CC-BY-4.0** | [HF: pyannote/speaker-diarization-community-1](https://huggingface.co/pyannote/speaker-diarization-community-1) |
+| **`WhisperX`** *(med `faster-whisper` / `CTranslate2`)* | Kobler sammen NB-Whisper, Wav2Vec2 og Pyannote slik at hvert enkelt ord får tildelt taler-ID (`SPEAKER_00`, `SPEAKER_01`, osv.) | **Max Bain m.fl. (University of Oxford / VGG)** og **OpenNMT** | **BSD-4-Clause** / **MIT** | [GitHub: m-bain/whisperX](https://github.com/m-bain/whisperX) |
 
-### 2.3 Lokale språkmodeller (LLM via Ollama) for navnegjenkjenning og møtereferat
+### 3.3 Lokale språkmodeller (LLM via Ollama) for navnegjenkjenning og møtereferat
 
-Språkmodellen kjører lokalt gjennom **Ollama** (MIT-lisens) og utfører to oppgaver:
-1. **Automatisk navneoppslag**: Leser møtestart-introduksjonene og agendaen for å oversette anonyme koder (`SPEAKER_00`..`SPEAKER_03`) til faktiske navn og titler (f.eks. *«Kari Nordmann (Prosjektleder)»*).
-2. **Møtereferat**: Skriver et strukturert norsk møtereferat med sammendrag, gjennomgang per agendapunkt, beslutninger og aksjonspunkter.
-
-| Ollama-modell | Anbefalt bruk | Utvikler / Opphav | Lisens |
-| :--- | :--- | :--- | :--- |
-| **`gemma4:e4b`** *(Standard)* / **`gemma4:26b`** | **Anbefalt standard.** Svært god norsk språkforståelse, følger instrukser presist og skiller tenketrinn fra selve referatet. | **Google DeepMind** | **Apache License 2.0** *(Frigitt som full åpen kildekode i 2025/2026)* |
-| **`gemma3:12b`** / **`gemma3:4b`** | Godt alternativ på maskiner med 8–16 GB RAM. | **Google DeepMind** | **Gemma Terms of Use** *(Fri lokal bruk med standard bruksbegrensninger)* |
-| **`qwen2.5:7b`** / **`qwen2.5:14b`** | Sterk på strukturert JSON-uttrekk og tabeller. | **Alibaba Cloud (Qwen Team)** | **Apache License 2.0** |
-| **`llama3.1:8b`** / **`llama3.2:3b`** | Rask på eldre maskinvare, men noe svakere på norsk rettskriving enn Gemma 4. | **Meta AI** | **Llama 3 Community License** |
+| Ollama-modell | Størrelse (Disk / RAM) | Benchmark-resultat og bruksområde | Utvikler / Opphav | Lisens |
+| :--- | :--- | :--- | :--- | :--- |
+| **`gemma4:e4b`** *(Anbefalt Testvinner #1)* | ~5,3 GB disk<br>~6,5 GB RAM | **Testvinner #1 (`100 %` taler-ID på alle 4 møter, `96,65 %` referatkvalitet, ~59s/møte).** Effektiv 4,5B-arkitektur med suveren norsk språkforståelse. | **Google DeepMind** | **Apache 2.0** |
+| **`llama3.2:latest`** *(Lettvekt / 8 GB RAM)* | ~2,0 GB disk<br>~3,5 GB RAM | **Lettvektsvinner (`93,31 %` referatkvalitet, kun ~31s/møte).** Brukes automatisk i `light`-profilen på maskiner med 8 GB RAM. | **Meta AI** | **Llama 3.2 License** |
+| **`ltg/normistral-11b-thinking`** *(Valgfri Norsk 11B)* | ~6,7 GB disk<br>~9 GB RAM | Spesialtrent norsk modell fra **Universitetet i Oslo (LTG)** for maskiner med 16–32 GB+ RAM. | **UiO (LTG)** | **Apache 2.0** |
 
 ---
 
@@ -82,8 +112,8 @@ Kjøringen er delt inn i 5 atomiske steg som lagres fortløpende i `<utdatamappe
 
 | Steg | Sjekkpunktfil | Hva som gjøres |
 | :--- | :--- | :--- |
-| **1. ASR** | `1_asr.json` | Grov-transkripsjon av tale med `NbAiLab/nb-whisper-large` (inkl. faguttrykk fra agenda/lysbilder). |
-| **2. Align** | `2_align.json` | Millisekund-presis ordtidsjustering (*Forced Alignment*) med `nb-wav2vec2-1b-bokmaal`. |
+| **1. ASR** | `1_asr.json` | Grov-transkripsjon av tale med `NbAiLab/nb-whisper-small` (inkl. faguttrykk fra agenda/lysbilder). |
+| **2. Align** | `2_align.json` | Millisekund-presis ordtidsjustering (*Forced Alignment*) med `nb-wav2vec2-300m-bokmaal` (eller `1b` for større modeller). |
 | **3. Pyannote** | `3_diarize.json` | Taler-identifisering (*Speaker Diarization*) med sanntids fremdriftsprosent (`0–100 %`). Ved `1` taler hoppes Pyannote over automatisk. |
 | **4. Navn & HTML** | `4_speakers.json` + `_transkripsjon.html` | Kobler `SPEAKER_00`..`XX` til faktiske navn/roller via Ollama og bygger søkbar HTML-transkripsjon. |
 | **5. Referat/Notat** | `_referat.md` + `_referat.html` | Genererer møtereferat eller foredragsnotater med Ollama (`gemma4:e4b`). |
@@ -218,33 +248,43 @@ ffmpeg -i part_00.wav -i part_01.wav -i part_02.wav \
 
 ---
 
-## 7. Syntetisk ende-til-ende-test (`synthetic_test/`)
+## 7. Syntetiske E2E-tester og Modell-Benchmark (`synthetic_test/` og `tests/e2e_benchmark.py`)
 
-Mappen `synthetic_test/` inneholder et syntetisk 4-talers møteopptak komprimert med Opus (`syntetisk_mote_4_talere.opus`, ~324 KB, 1 min 57 sek) samt tilhørende fasit-agenda (`fasit_agenda.md`), manus (`fasit_transkripsjon.json`) og ferdiggenererte referat- og transkripsjonsfiler.
+Prosjektet har en komplett ende-til-ende benchmark-suite med **4 ulike syntetiske norske møter** i [`synthetic_test/meetings/`](synthetic_test/meetings/), hvert med generert fler-talers lyd (`.opus`), saksliste (`fasit_agenda.md`), fasit-transkripsjon (`fasit_transkripsjon.json`), fasit-referat (`fasit_referat.md`) og evalueringsskjema (`fasit_evaluering.json`):
 
-Du kan kjøre ende-til-ende-testen med:
+1. **`mote_1_sikkerhet`** (4 talere, `117,6 s`): Statusmøte Sikkerhetsplattform 2026 (OAuth2, 2FA, Q4-budsjett).
+2. **`mote_2_styremote`** (3 talere, `103,3 s`): Styremøte Tromsø Kultur- og Idrettslag (Q3-regnskap, kontingent, høstseminar).
+3. **`mote_3_kommune_helse`** (4 talere, `85,3 s`): Prosjektmøte Velferdsteknologi i Hjemmetjenesten (trygghetsalarmer, ROS, uke 46).
+4. **`mote_4_produkt_sprint`** (2 talere, `60,1 s`): Sprintplanlegging Mobilapp Versjon 2.4 (mobilpanel, WCAG 2.1 AA, lansering).
+
+Se fullstendig resultat- og rangeringsrapport i **[`synthetic_test/BENCHMARK_RAPPORT.md`](synthetic_test/BENCHMARK_RAPPORT.md)** og rådata i **[`synthetic_test/benchmark_results.json`](synthetic_test/benchmark_results.json)**.
 
 ```bash
-python3 debug_synthetic_test.py --step run
-```
+# Generer alle 4 syntetiske møter og kjør full ASR x LLM benchmark:
+python3 tests/e2e_benchmark.py --action all
 
-For å generere ny syntetisk lyd fra macOS TTS (`say`) komprimert med `libopus` før kjøring:
-
-```bash
-python3 debug_synthetic_test.py --step all
+# Kjør kun LLM-benchmark (Steg 4–5) mot eksisterende ASR/Pyannote-sjekkpunkter:
+python3 tests/e2e_benchmark.py --action llm-only
 ```
 
 ---
 
 ## 8. Kommandolinjebruk (CLI) – `transcribe.py` og `mote_app.py --cli`
 
-Den delte kjernemodulen (`mote_core.py`) eksponerer hele 5-stegs-pipelinen med sjekkpunkter direkte for kommandolinjebruk via `transcribe.py` (eller `python3 mote_app.py --cli ...`):
+Den delte kjernemodulen (`src/mote/core.py`) eksponerer hele 5-stegs-pipelinen med sjekkpunkter og maskinvaredeteksjon direkte for kommandolinjebruk via `transcribe.py` (eller `python3 mote_app.py --cli ...`):
 
 ```bash
-# Transkriber møteopptak med 4 talere og oppgitte navn (fortsetter automatisk fra sjekkpunkt ved avbrudd):
-python3 transcribe.py data/20261027_møte.wav \
+# Sjekk maskinvare, ledig RAM/disk og anbefalt modellprofil på maskinen:
+python3 transcribe.py --check-hw
+
+# Kjør med automatisk anbefalt modellprofil ut fra maskinvaren (--profile auto):
+python3 transcribe.py opptak/møte.wav --profile auto -n 4
+
+# Transkriber møteopptak med 4 talere, oppgitte navn og manuelle møtenotater (-M):
+python3 transcribe.py opptak/møte.wav \
   -n 4 \
-  --speaker-names "Kari Nordmann, Ola Hansen, Ingrid Berg, Per Johansen"
+  --speaker-names "Kari Nordmann, Ola Hansen, Ingrid Berg, Per Johansen" \
+  -M opptak/manuelle_notater.odt
 
 # 1-talers foredragsmodus med lysbilder (.pptx) og agenda (.md) som ekstra kontekst:
 python3 transcribe.py foredrag.opus -n 1 --mode foredrag -c slides.pptx -c agenda.md
@@ -253,20 +293,20 @@ python3 transcribe.py foredrag.opus -n 1 --mode foredrag -c slides.pptx -c agend
 python3 transcribe.py mote_transkripsjon.html --task only_5_notes --mode mote
 
 # Sjekk sjekkpunktstatus (Steg 1–5) for en fil uten å starte kjøring:
-python3 transcribe.py data/20261027_møte.wav --status
+python3 transcribe.py opptak/møte.wav --status
 
 # Grov sanntids-lydsjekk (dBFS + 5s grov-transkripsjon) direkte fra mikrofon i 15 sekunder:
 python3 transcribe.py --live-check --live-seconds 15
 
 # Grov lydsjekk på de første 20 sekundene av en eksisterende lydfil før full kjøring:
-python3 transcribe.py synthetic_test/syntetisk_mote_4_talere.opus --live-check --live-seconds 20
+python3 transcribe.py synthetic_test/meetings/mote_1_sikkerhet/mote_1_sikkerhet.opus --live-check --live-seconds 20
 ```
 
 ---
 
 ## 9. Testing (Doctests + CI), Linting og Statiske Typer
 
-- **Doctests (`mote_core.py` og `transcribe.py`)**: Alle rene hjelpefunksjoner, tidsformatering, transkripsjonsparsing (`.html`, `.srt`, `.vtt`, `.txt`), modusvalg, filnavnsrensing og stegplanlegging har innebygde doctests.
+- **Doctests (`src/mote/core.py`, `src/mote/cli.py` og `transcribe.py`)**: Alle rene hjelpefunksjoner, tidsformatering, transkripsjonsparsing (`.html`, `.srt`, `.vtt`, `.txt`), modusvalg, filnavnsrensing og stegplanlegging har innebygde doctests.
 - **CI- og integrasjonstester (`tests/test_cli_and_pipeline.py`)**: Kjører alle doctests automatisk via `unittest` (`load_tests`) samt tester uthenting av kontekst fra `.pptx` (inkludert foredragsnotater) og `.docx`, og sjekkpunkt-rundtur.
 - **Linting og statiske typer (`pyproject.toml`, `Makefile`)**: Konfigurert for `ruff` og `mypy`.
 - **Hvorfor ikke Cython?**: Over 99,9 % av kjøretiden tilbringes i native C/C++/Rust/Metal-kode (`ffmpeg`, `CTranslate2`/`faster-whisper`, `PyTorch`/`pyannote` og `Ollama`/`llama.cpp`). Python-koden koordinerer kun prosesser, JSON-sjekkpunkter og HTML/Markdown-formatering (<50 ms totalt). Cython ville derfor gitt <0,01 % ytelsesgevinst og samtidig ødelagt enkeltfil-portabiliteten på tvers av macOS, Windows og Linux.

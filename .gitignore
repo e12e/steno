@@ -8,3 +8,6 @@ data/**
 .ruff_cache/
 .pytest_cache/
 *.log
+synthetic_test/meetings/*/runs/
+synthetic_test/meetings/*/llm_runs/
+scripts/transcribe_*.sh

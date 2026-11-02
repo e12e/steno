@@ -353,9 +353,10 @@ def run_debug_pipeline(
     ollama_model: str,
     task_mode: str = "auto_resume",
 ) -> dict:
-    """Run mote_core.run_pipeline with debug instrumentation."""
+    """Run mote.core.run_pipeline with debug instrumentation."""
+    sys.path.insert(0, str(BASE_DIR / "src"))
     sys.path.insert(0, str(BASE_DIR))
-    import mote_core
+    from mote import core as mote_core
 
     html_name = "syntetisk_mote_4_talere_transkripsjon.html"
     notes_name = "syntetisk_mote_4_talere_referat.md"
@@ -491,7 +492,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--whisper-model",
-        default="NbAiLab/nb-whisper-large",
+        default="NbAiLab/nb-whisper-small",
         help="Whisper-modell for debug-testen (standard: %(default)s)",
     )
     parser.add_argument(
@@ -550,33 +551,16 @@ def main() -> int:
 
     if args.step == "check":
         import py_compile
-        for fname in ("mote_gui.py", "mote_app.py", "debug_synthetic_test.py"):
+        for fname in ("transcribe.py", "mote_app.py", "debug_synthetic_test.py"):
             py_compile.compile(str(BASE_DIR / fname), doraise=True)
             print(f"[CHECK] Syntaks OK: {fname}")
         return 0
 
     if args.step == "map-names":
         import html
-        import types
 
-        if "webview" not in sys.modules:
-            wv_mod = types.ModuleType("webview")
-            wv_mod.FileDialog = types.SimpleNamespace(OPEN=10, FOLDER=20, SAVE=30)
-            wv_dom = types.ModuleType("webview.dom")
-            wv_dom.DOMEventHandler = object
-            sys.modules["webview"] = wv_mod
-            sys.modules["webview.dom"] = wv_dom
-        if "static_ffmpeg" not in sys.modules:
-            sf_mod = types.ModuleType("static_ffmpeg")
-            sf_mod.add_paths = lambda weak=True: None
-            sys.modules["static_ffmpeg"] = sf_mod
-        if "markdown" not in sys.modules:
-            md_mod = types.ModuleType("markdown")
-            md_mod.markdown = lambda text, extensions=None: text
-            sys.modules["markdown"] = md_mod
-
-        sys.path.insert(0, str(BASE_DIR))
-        import mote_app
+        sys.path.insert(0, str(BASE_DIR / "src"))
+        from mote import core as mote_core
 
         html_path = TEST_DIR / "syntetisk_mote_4_talere_transkripsjon.html"
         raw = html_path.read_text(encoding="utf-8")
@@ -595,7 +579,7 @@ def main() -> int:
                     "text": html.unescape(txt),
                 }
             )
-        spk_map = mote_app.infer_speaker_names_via_api(
+        spk_map = mote_core.infer_speaker_names_via_api(
             turns,
             args.ollama_model,
             SPEAKER_HINT,
@@ -605,7 +589,7 @@ def main() -> int:
         )
         print("Mapped speakers:", spk_map)
         if any(k != v for k, v in spk_map.items()):
-            mote_app.build_transcript_html_and_text(
+            mote_core.build_transcript_html_and_text(
                 turns, spk_map, html_path, MEETING_TITLE
             )
             print("Updated HTML transcript with speaker names:", html_path)

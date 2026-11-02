@@ -161,8 +161,9 @@ class TestSyntheticE2E(unittest.TestCase):
     )
     def test_synthetic_4_speaker_meeting_e2e(self) -> None:
         base_dir = Path(__file__).resolve().parent.parent
-        opus_path = base_dir / "synthetic_test" / "syntetisk_mote_4_talere.opus"
-        agenda_path = base_dir / "synthetic_test" / "fasit_agenda.md"
+        m_dir = base_dir / "synthetic_test" / "meetings" / "mote_1_sikkerhet"
+        opus_path = m_dir / "mote_1_sikkerhet.opus"
+        agenda_path = m_dir / "fasit_agenda.md"
         self.assertTrue(opus_path.is_file(), f"Mangler {opus_path}")
 
         res = mote_core.run_pipeline(

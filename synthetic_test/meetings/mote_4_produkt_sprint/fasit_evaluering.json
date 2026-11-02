@@ -1,0 +1,52 @@
+{
+  "id": "mote_4_produkt_sprint",
+  "title": "Sprintplanlegging Mobilapp Versjon 2.4",
+  "num_speakers": 2,
+  "speaker_hint": "Jonas Lie (Produkteier), Sofie Moe (Sjefsdesigner)",
+  "speakers": [
+    {
+      "name": "Jonas Lie",
+      "role": "Produkteier",
+      "slot": 1
+    },
+    {
+      "name": "Sofie Moe",
+      "role": "Sjefsdesigner",
+      "slot": 0
+    }
+  ],
+  "expected_speakers": [
+    "Jonas Lie",
+    "Sofie Moe"
+  ],
+  "required_facts": [
+    [
+      "2.4",
+      "to punkt fire"
+    ],
+    [
+      "120",
+      "hundre og tjue"
+    ],
+    [
+      "68",
+      "sekstiåtte"
+    ],
+    [
+      "wcag",
+      "kontrast"
+    ],
+    [
+      "10",
+      "tiende"
+    ],
+    [
+      "12",
+      "tolvte"
+    ],
+    [
+      "20",
+      "tjuende"
+    ]
+  ]
+}

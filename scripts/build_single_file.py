@@ -8,6 +8,7 @@ via an embedded uv polyglot self-bootstrapper.
 
 from __future__ import annotations
 
+import ast
 import re
 from pathlib import Path
 
@@ -25,7 +26,7 @@ POLYGLOT_HEADER = r'''#!/bin/sh
 #   "static-ffmpeg>=2.7",
 # ]
 # ///
-"true" ''' + "'''\\" + r'''
+"true" ''' + "'''\\'" + r'''
 goto :windows_boot >/dev/null 2>&1
 export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$HOME/.local/share/mise/shims:/opt/homebrew/bin:/usr/local/bin:$PATH"
 if ! command -v uv >/dev/null 2>&1; then
@@ -41,7 +42,7 @@ where uv >nul 2>nul || (
   echo Installerer uv ^(frittstaaende Python-motor^)...
   powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://astral.sh/uv/install.ps1 | iex"
 )
-set "PATH=%USERPROFILE%\.local\bin;%LOCALAPPDATA%\Microsoft\WinGet\Links;%PATH%"
+set "PATH=%USERPROFILE%\\.local\\bin;%LOCALAPPDATA%\\Microsoft\\WinGet\\Links;%PATH%"
 uv run --python 3.12 --script "%~f0" %*
 exit /b %ERRORLEVEL%
 ''' + "'''" + r'''
@@ -56,6 +57,8 @@ from pathlib import Path
 BOOTSTRAP_CODE = r'''
 def _self_bootstrap_if_needed() -> None:
     """If launched via raw 'python mote_app.py' without uv, auto-install uv and re-exec."""
+    if "--help" in sys.argv or "-h" in sys.argv or "--self-test" in sys.argv:
+        return
     try:
         import markdown  # noqa: F401
         import static_ffmpeg  # noqa: F401
@@ -109,21 +112,6 @@ def _self_bootstrap_if_needed() -> None:
 _self_bootstrap_if_needed()
 '''
 
-CLI_CODE = r'''
-def _maybe_run_cli_from_args() -> None:
-    if __name__ != "__main__":
-        return
-    argv = sys.argv[1:]
-    if not argv:
-        return
-    if argv[0] == "--cli":
-        argv = argv[1:]
-    if argv[0] in ("-h", "--help", "--status", "--live-check") or not argv[0].startswith("--"):
-        raise SystemExit(cli_main(argv))
-
-_maybe_run_cli_from_args()
-'''
-
 
 def build() -> int:
     DIST_DIR.mkdir(parents=True, exist_ok=True)
@@ -136,25 +124,30 @@ def build() -> int:
     core_code = (SRC_DIR / "core.py").read_text(encoding="utf-8")
     gui_code = (SRC_DIR / "gui.py").read_text(encoding="utf-8")
 
-    core_clean = re.sub(r'from __future__ import annotations\s*', '', core_code)
-    core_clean = re.sub(r'from mote\.template_loader import load_template\s*', '', core_clean)
-    core_clean = re.sub(r'from mote\..*?\n', '', core_clean)
+    core_clean = re.sub(r"from __future__ import annotations\s*", "", core_code)
+    core_clean = re.sub(r"from mote\.template_loader import load_template\s*", "", core_clean)
+    core_clean = re.sub(r"from mote\..*?\n", "", core_clean)
 
-    gui_clean = re.sub(r'from __future__ import annotations\s*', '', gui_code)
-    gui_clean = re.sub(r'from mote\..*?\n', '', gui_clean)
-    gui_clean = re.sub(r'from mote_core\..*?\n', '', gui_clean)
-    gui_clean = re.sub(r'import mote_core\s*', '', gui_clean)
+    gui_clean = re.sub(r"from __future__ import annotations\s*", "", gui_code)
+    gui_clean = re.sub(
+        r"SRC_DIR = Path\(__file__\)\.resolve\(\)\.parent\.parent\nif str\(SRC_DIR\) not in sys\.path:\n\s+sys\.path\.insert\(0, str\(SRC_DIR\)\)\n",
+        "",
+        gui_clean,
+    )
+    gui_clean = re.sub(r"from mote\.core import \([\s\S]*?\)\n", "", gui_clean)
+    gui_clean = re.sub(r"from mote\..*?\n", "", gui_clean)
 
     bundle_parts = [
         POLYGLOT_HEADER,
         BOOTSTRAP_CODE,
-        f'''
+        f"""
 # --- EMBEDDED TEMPLATES ---
-_EMBEDDED_TEMPLATES = {{
-    "app.html": """{tpl_app}""",
-    "transcript.html": """{tpl_transcript}""",
-    "notes.html": """{tpl_notes}""",
+_EMBEDDED_TEMPLATES: dict[str, str] = {{
+    "app.html": {tpl_app!r},
+    "transcript.html": {tpl_transcript!r},
+    "notes.html": {tpl_notes!r},
 }}
+
 
 def load_template(name: str, fallback: str = "") -> str:
     tpl_file = Path(__file__).resolve().parent / "templates" / name
@@ -164,22 +157,22 @@ def load_template(name: str, fallback: str = "") -> str:
         except Exception:
             pass
     return _EMBEDDED_TEMPLATES.get(name, fallback)
-
-HTML = load_template("app.html")
-''',
+""",
         "\n# --- CORE ENGINE ---\n",
         core_clean,
         "\n# --- DESKTOP GUI & ENGINE ---\n",
         gui_clean,
-        "\n# --- ENTRYPOINT DISPATCHER ---\n",
-        CLI_CODE,
     ]
 
     out_content = "".join(bundle_parts)
+    # Compile/parse AST to guarantee zero syntax errors or invalid escape sequences
+    ast.parse(out_content, filename=str(DIST_FILE))
+    compile(out_content, str(DIST_FILE), "exec")
+
     DIST_FILE.write_text(out_content, encoding="utf-8")
     DIST_FILE.chmod(0o755)
 
-    print(f"==> Ferdig bygget! Størrelse: {DIST_FILE.stat().st_size // 1024} KB")
+    print(f"==> Ferdig bygget og AST-verifisert! Størrelse: {DIST_FILE.stat().st_size // 1024} KB")
     return 0
 
 

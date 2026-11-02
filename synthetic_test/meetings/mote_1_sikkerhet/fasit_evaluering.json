@@ -1,0 +1,61 @@
+{
+  "id": "mote_1_sikkerhet",
+  "title": "Statusmøte Sikkerhetsplattform 2026",
+  "num_speakers": 4,
+  "speaker_hint": "Kari Nordmann (Prosjektleder), Ola Hansen (Systemutvikler), Ingrid Berg (Sikkerhetsarkitekt), Per Johansen (Økonomiansvarlig)",
+  "speakers": [
+    {
+      "name": "Kari Nordmann",
+      "role": "Prosjektleder",
+      "slot": 0
+    },
+    {
+      "name": "Ola Hansen",
+      "role": "Systemutvikler",
+      "slot": 1
+    },
+    {
+      "name": "Ingrid Berg",
+      "role": "Sikkerhetsarkitekt",
+      "slot": 2
+    },
+    {
+      "name": "Per Johansen",
+      "role": "Økonomiansvarlig",
+      "slot": 3
+    }
+  ],
+  "expected_speakers": [
+    "Kari Nordmann",
+    "Ola Hansen",
+    "Ingrid Berg",
+    "Per Johansen"
+  ],
+  "required_facts": [
+    [
+      "oauth2",
+      "api"
+    ],
+    [
+      "40",
+      "førti"
+    ],
+    [
+      "tofaktor",
+      "2fa"
+    ],
+    [
+      "15",
+      "femten"
+    ],
+    [
+      "november"
+    ],
+    [
+      "fredag"
+    ],
+    [
+      "onsdag"
+    ]
+  ]
+}

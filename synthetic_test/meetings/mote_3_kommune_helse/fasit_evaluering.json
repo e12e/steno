@@ -1,0 +1,63 @@
+{
+  "id": "mote_3_kommune_helse",
+  "title": "Prosjektmøte Velferdsteknologi i Hjemmetjenesten",
+  "num_speakers": 4,
+  "speaker_hint": "Anne Lindqvist (Virksomhetsleder), Thomas Bakke (Fysioterapeut), Silje Haugen (Ergoterapeut), Lars Nygård (IT-rådgiver)",
+  "speakers": [
+    {
+      "name": "Anne Lindqvist",
+      "role": "Virksomhetsleder",
+      "slot": 0
+    },
+    {
+      "name": "Thomas Bakke",
+      "role": "Fysioterapeut",
+      "slot": 1
+    },
+    {
+      "name": "Silje Haugen",
+      "role": "Ergoterapeut",
+      "slot": 2
+    },
+    {
+      "name": "Lars Nygård",
+      "role": "IT-rådgiver",
+      "slot": 3
+    }
+  ],
+  "expected_speakers": [
+    "Anne Lindqvist",
+    "Thomas Bakke",
+    "Silje Haugen",
+    "Lars Nygård"
+  ],
+  "required_facts": [
+    [
+      "25",
+      "tjuefem"
+    ],
+    [
+      "trygghetsalarm",
+      "fallsensor"
+    ],
+    [
+      "46",
+      "førtiseks"
+    ],
+    [
+      "pasientjournal",
+      "kryptert"
+    ],
+    [
+      "13",
+      "trettende"
+    ],
+    [
+      "20",
+      "tjuende"
+    ],
+    [
+      "desember"
+    ]
+  ]
+}

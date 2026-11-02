@@ -1,0 +1,47 @@
+[
+  {
+    "speaker": "Anne Lindqvist",
+    "pause_after_ms": 450,
+    "text": "Hei og velkommen til prosjektmøte om velferdsteknologi i hjemmetjenesten, fjerde november. Jeg heter Anne Lindqvist og er virksomhetsleder. Vi starter med en kort presentasjonsrunde."
+  },
+  {
+    "speaker": "Thomas Bakke",
+    "pause_after_ms": 400,
+    "text": "Hei, jeg heter Thomas Bakke, og jeg jobber som fysioterapeut med ansvar for fallforebygging i prosjektet."
+  },
+  {
+    "speaker": "Silje Haugen",
+    "pause_after_ms": 400,
+    "text": "Jeg heter Silje Haugen, og jeg er ergoterapeut med ansvar for utplassering av digitale trygghetsalarmer."
+  },
+  {
+    "speaker": "Lars Nygård",
+    "pause_after_ms": 450,
+    "text": "Og mitt navn er Lars Nygård. Jeg er IT-rådgiver i kommunen og jobber med personvern og pasientjournal."
+  },
+  {
+    "speaker": "Anne Lindqvist",
+    "pause_after_ms": 350,
+    "text": "Takk. Silje og Thomas, hvordan har oppstarten av pilotprosjektet med trygghetsalarmer gått?"
+  },
+  {
+    "speaker": "Silje Haugen",
+    "pause_after_ms": 350,
+    "text": "Vi har nå montert digitale trygghetsalarmer hos tjuefem brukere i hjemmetjenesten. Men vi ser at nattevaktene er usikre på den nye varslingsappen, så jeg holder to opplæringsøkter i uke førtiseks."
+  },
+  {
+    "speaker": "Thomas Bakke",
+    "pause_after_ms": 350,
+    "text": "I tillegg har åtte brukere med høy fallrisiko fått ny fallsensor. Jeg gjennomfører ny funksjonskartlegging hos disse åtte brukerne innen tjuende november."
+  },
+  {
+    "speaker": "Lars Nygård",
+    "pause_after_ms": 400,
+    "text": "Fra IT sin side er kryptert overføring til pasientjournalen ferdig testet. Jeg ferdigstiller risikovurderingen og skrur på integrasjonen innen fredag trettende november."
+  },
+  {
+    "speaker": "Anne Lindqvist",
+    "pause_after_ms": 350,
+    "text": "Veldig bra. Da vedtar vi opplæring av nattevakter i uke førtiseks, og jeg sammenstiller evalueringsrapporten til kommunalsjefen innen første desember. Takk for møtet!"
+  }
+]

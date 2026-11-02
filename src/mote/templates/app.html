@@ -57,6 +57,20 @@
   }
   #prompt_banner strong { color: #0a84ff; }
 
+  #hw_resource_banner {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    border-radius: 7px; padding: 4px 10px; font-size: 11px; line-height: 1.35;
+    border: 1px solid rgba(48, 209, 88, 0.45); background: rgba(48, 209, 88, 0.08);
+  }
+  #hw_resource_banner.warning {
+    border-color: rgba(255, 159, 10, 0.85); background: rgba(255, 159, 10, 0.15);
+    font-weight: 500;
+  }
+  #hw_resource_banner.critical {
+    border-color: rgba(255, 69, 58, 0.9); background: rgba(255, 69, 58, 0.18);
+    color: #ff453a; font-weight: 600;
+  }
+
   .row { display: flex; gap: 6px; align-items: center; }
   .row label { width: 115px; flex-shrink: 0; font-weight: 500; font-size: 12px; }
   input[type="text"], input[type="password"], input[type="number"], select, textarea {
@@ -155,7 +169,8 @@
   <div class="row">
     <label>Møtetittel & Dato:</label>
     <input type="text" id="meeting_title" placeholder="F.eks. Prosjektmøte – 2026-10-29">
-    <button onclick="loadAgendaFile()" title="Last inn agenda, lysbilder (.pptx, .pdf, .odp) eller notater (.docx, .md, .txt)">+ Agenda / Lysbilder...</button>
+    <button onclick="loadAgendaFile()" title="Last inn agenda eller lysbilder (.pptx, .pdf, .odp, .docx, .md, .txt)">+ Agenda / Lysbilder...</button>
+    <button onclick="loadManualNotesFile()" title="Last inn manuelle møtenotater / referat-utkast (.odt, .docx, .pdf, .md, .txt)">+ Manuelle notater...</button>
   </div>
 
   <div class="row">
@@ -164,8 +179,9 @@
   </div>
 
   <div class="row" style="align-items: flex-start;">
-    <label style="padding-top: 4px;">Agenda / Lysbilder:</label>
-    <textarea id="agenda_text" placeholder="Valgfritt: Lim inn agenda/stikkord, eller klikk «+ Agenda / Lysbilder...» for å hente tekst fra PowerPoint (.pptx), PDF (.pdf), Word (.docx) eller Markdown (.md)..."></textarea>
+    <label style="padding-top: 4px;">Agenda / Notater:</label>
+    <textarea id="agenda_text" placeholder="Valgfritt: Agenda eller lysbilder (.pptx, .pdf, .docx, .md)..."></textarea>
+    <textarea id="manual_notes_text" placeholder="Valgfritt: Manuelle møtenotater / referat-utkast (.odt, .docx, .md, .txt) som brukes til å kvalitetssikre navn, saker og vedtak..."></textarea>
   </div>
 
   <div class="row">
@@ -201,20 +217,32 @@
 
   <div class="row">
     <label>Modeller & Språk:</label>
-    <select id="whisper_model">
-      <option value="NbAiLab/nb-whisper-large" selected>NB-Whisper Large (Anbefalt Norsk)</option>
-      <option value="large-v3-turbo">Whisper: large-v3-turbo</option>
-      <option value="large-v3">Whisper: large-v3</option>
-      <option value="NbAiLab/nb-whisper-medium">NB-Whisper Medium (Raskere)</option>
+    <select id="model_profile" onchange="onProfileChanged()" style="max-width: 190px;" title="Velg ferdig modellprofil tilpasset maskinvaren eller velg modeller manuelt">
+      <option value="auto" selected>★ Anbefalt (Auto ut fra PC/Mac)</option>
+      <option value="recommended">Profil: Testvinner #1 (Small + Gemma 4)</option>
+      <option value="fast">Profil: Alternativ #2 (Distil-Turbo + Gemma 4)</option>
+      <option value="light">Profil: Lettvekt / 8 GB RAM (Small + Llama 3.2)</option>
+      <option value="custom">Profil: Egendefinert</option>
     </select>
-    <input type="text" id="ollama_model" value="gemma4:e4b" placeholder="Ollama-modell" style="max-width: 115px;">
-    <select id="language" style="max-width: 58px;">
+    <select id="whisper_model" onchange="onManualModelChanged()">
+      <option value="NbAiLab/nb-whisper-small" selected>NB-Whisper Small (Anbefalt Testvinner – 244M)</option>
+      <option value="UlrikKoren/nb-whisper-large-distil-turbo-beta-ct2">NB-Whisper Large Distil-Turbo (756M)</option>
+      <option value="NbAiLab/nb-whisper-medium">NB-Whisper Medium (769M)</option>
+      <option value="NbAiLab/nb-whisper-large">NB-Whisper Large (1.55B – Manuell)</option>
+    </select>
+    <input type="text" id="ollama_model" value="gemma4:e4b" placeholder="Ollama-modell" style="max-width: 110px;" oninput="onManualModelChanged()">
+    <select id="language" style="max-width: 55px;">
       <option value="no" selected>NO</option>
       <option value="en">EN</option>
       <option value="sv">SV</option>
       <option value="da">DA</option>
     </select>
-    <input type="password" id="hf_token" placeholder="HF Token (hf_...)" style="max-width: 120px;">
+    <input type="password" id="hf_token" placeholder="HF Token (hf_...)" style="max-width: 110px;">
+  </div>
+
+  <div id="hw_resource_banner">
+    <span id="hw_resource_text">Sjekker maskinvare og minnekrav...</span>
+    <button id="apply_rec_btn" onclick="applyRecommendedProfile()" style="display: none; font-size: 11px; padding: 2px 8px;">Bruk anbefalt</button>
   </div>
 
   <div class="row">
@@ -266,6 +294,59 @@
   let isRecording = false;
   let recStartTime = 0;
   let recTimerInterval = null;
+  let cachedHwInfo = null;
+  let cachedProfiles = {};
+
+  function updateHardwareBanner(hw, fit) {
+    const banner = document.getElementById('hw_resource_banner');
+    const txt = document.getElementById('hw_resource_text');
+    const btn = document.getElementById('apply_rec_btn');
+    if (!banner || !txt || !fit) return;
+    banner.className = fit.level === 'critical' ? 'critical' : (fit.level === 'warning' ? 'warning' : '');
+    txt.textContent = fit.message || '';
+    if (btn) {
+      btn.style.display = (fit.level === 'critical' || fit.level === 'warning') ? 'inline-block' : 'none';
+    }
+  }
+
+  async function refreshResourceFit() {
+    const w = document.getElementById('whisper_model').value;
+    const m = document.getElementById('ollama_model').value.trim();
+    const outDir = document.getElementById('out_dir').value.trim();
+    if (window.pywebview && pywebview.api && pywebview.api.check_model_resources) {
+      const res = await pywebview.api.check_model_resources(w, m, outDir);
+      if (res) {
+        cachedHwInfo = res.hardware;
+        updateHardwareBanner(res.hardware, res.resource_fit);
+      }
+    }
+  }
+
+  function applyRecommendedProfile() {
+    const profSel = document.getElementById('model_profile');
+    if (profSel) profSel.value = 'auto';
+    onProfileChanged();
+  }
+
+  function onProfileChanged() {
+    const prof = document.getElementById('model_profile').value;
+    const wSel = document.getElementById('whisper_model');
+    const mInp = document.getElementById('ollama_model');
+    if (prof === 'auto' && cachedHwInfo) {
+      wSel.value = cachedHwInfo.recommended_whisper || 'NbAiLab/nb-whisper-small';
+      mInp.value = cachedHwInfo.recommended_ollama || 'gemma4:e4b';
+    } else if (cachedProfiles && cachedProfiles[prof]) {
+      wSel.value = cachedProfiles[prof].whisper_model;
+      mInp.value = cachedProfiles[prof].ollama_model;
+    }
+    refreshResourceFit();
+  }
+
+  function onManualModelChanged() {
+    const profSel = document.getElementById('model_profile');
+    if (profSel) profSel.value = 'custom';
+    refreshResourceFit();
+  }
 
   window.addEventListener('pywebviewready', async () => {
     const defs = await pywebview.api.get_defaults();
@@ -276,6 +357,13 @@
     document.getElementById('out_dir').value = defs.default_out_dir;
     if (defs.default_meeting_title) {
       document.getElementById('meeting_title').value = defs.default_meeting_title;
+    }
+    if (defs.profiles) cachedProfiles = defs.profiles;
+    if (defs.hardware) {
+      cachedHwInfo = defs.hardware;
+      document.getElementById('whisper_model').value = defs.hardware.recommended_whisper || 'NbAiLab/nb-whisper-small';
+      document.getElementById('ollama_model').value = defs.hardware.recommended_ollama || 'gemma4:e4b';
+      updateHardwareBanner(defs.hardware, defs.resource_fit);
     }
   });
 
@@ -408,6 +496,14 @@
     const content = await pywebview.api.pick_agenda_file();
     if (content) {
       const box = document.getElementById('agenda_text');
+      box.value = box.value.trim() ? (box.value.trim() + "\\n\\n" + content) : content;
+    }
+  }
+
+  async function loadManualNotesFile() {
+    const content = await pywebview.api.pick_agenda_file();
+    if (content) {
+      const box = document.getElementById('manual_notes_text');
       box.value = box.value.trim() ? (box.value.trim() + "\\n\\n" + content) : content;
     }
   }
@@ -608,7 +704,8 @@
       document.getElementById('meeting_title').value,
       document.getElementById('agenda_text').value,
       document.getElementById('note_mode').value,
-      taskMode
+      taskMode,
+      document.getElementById('manual_notes_text').value
     );
   }
 </script>

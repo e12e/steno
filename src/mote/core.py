@@ -379,9 +379,12 @@ def unique_filename(directory: Path, stem: str, suffix: str) -> str:
 
 
 def build_whisper_initial_prompt(
-    meeting_title: str, speaker_names_hint: str, agenda_text: str
+    meeting_title: str,
+    speaker_names_hint: str,
+    agenda_text: str,
+    manual_notes_text: str = "",
 ) -> str:
-    """Build a vocabulary-rich initial_prompt (up to 750 chars) from title, attendees, and slides/agenda.
+    """Build a vocabulary-rich initial_prompt (up to 750 chars) from title, attendees, slides/agenda, and manual notes.
 
     >>> build_whisper_initial_prompt("Statusmøte", "Kari, Ola", "Punkt 1: OAuth2")
     'Statusmøte Deltakere: Kari, Ola. Punkt 1: OAuth2'
@@ -395,7 +398,10 @@ def build_whisper_initial_prompt(
         parts.append(f"Deltakere: {speaker_names_hint.strip()}.")
     if agenda_text.strip():
         clean_ag = re.sub(r"\s+", " ", agenda_text.strip())
-        parts.append(clean_ag[:550])
+        parts.append(clean_ag[:450])
+    if manual_notes_text.strip():
+        clean_mn = re.sub(r"\s+", " ", manual_notes_text.strip())
+        parts.append(clean_mn[:450])
     return " ".join(parts).strip()[:750]
 
 
@@ -870,22 +876,320 @@ def stage_audio_input(audio_path: Path, tmp_dir: Path) -> Path:
 
 def build_runtime_env() -> dict[str, str]:
     env = os.environ.copy()
+    env["PYTHONWARNINGS"] = "ignore::UserWarning:pyannote.audio.core.io"
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUNBUFFERED"] = "1"
+    if os.name != "nt":
+        env.setdefault("LC_ALL", "en_US.UTF-8")
     extra = [
         str(LOCAL_BIN_DIR),
+        str(Path.home() / ".cache" / "mote" / "bin"),
+        str(Path.home() / ".local" / "share" / "uv" / "tools" / "whisperx" / "bin"),
         str(Path.home() / ".local" / "bin"),
         str(Path.home() / ".cargo" / "bin"),
         str(Path.home() / ".local" / "share" / "mise" / "shims"),
         "/opt/homebrew/bin",
         "/usr/local/bin",
     ]
-    if os.name == "nt":
+    if sys.platform == "darwin":
+        extra.append("/Applications/Ollama.app/Contents/Resources")
+    elif os.name == "nt":
         local_app = os.environ.get("LOCALAPPDATA", "")
         if local_app:
             extra.append(str(Path(local_app) / "Programs" / "Ollama"))
             extra.append(str(Path(local_app) / "Microsoft" / "WinGet" / "Links"))
     env["PATH"] = os.pathsep.join(extra + [env.get("PATH", "")])
-    env["PYTHONIOENCODING"] = "utf-8"
     return env
+
+
+MODEL_PROFILES: dict[str, dict[str, Any]] = {
+    "recommended": {
+        "id": "recommended",
+        "label": "Anbefalt Testvinner #1 (12–16 GB+ RAM – NB-Whisper Small + Gemma 4)",
+        "whisper_model": "NbAiLab/nb-whisper-small",
+        "ollama_model": "gemma4:e4b",
+        "min_ram_gb": 12.0,
+        "min_disk_gb": 10.0,
+        "est_peak_ram_gb": 6.5,
+        "description": (
+            "Testvinner #1 (Score 79.21): NB-Whisper Small (244M, 83.5% ord-nøyaktighet, 2.7x raskere enn Large) "
+            "+ Wav2Vec2-300M + Gemma 4 E4B (100% taler-ID, 96.7% referat)."
+        ),
+    },
+    "fast": {
+        "id": "fast",
+        "label": "Alternativ #2 (16 GB+ RAM – NB-Whisper Distil-Turbo + Gemma 4)",
+        "whisper_model": "UlrikKoren/nb-whisper-large-distil-turbo-beta-ct2",
+        "ollama_model": "gemma4:e4b",
+        "min_ram_gb": 14.0,
+        "min_disk_gb": 14.0,
+        "est_peak_ram_gb": 6.5,
+        "description": "Testvinner #2 (Score 74.30): NB-Whisper Large Distil-Turbo (756M) + Gemma 4 E4B.",
+    },
+    "light": {
+        "id": "light",
+        "label": "Lettvekt / 8 GB RAM (NB-Whisper Small + Llama 3.2 3B)",
+        "whisper_model": "NbAiLab/nb-whisper-small",
+        "ollama_model": "llama3.2:latest",
+        "min_ram_gb": 8.0,
+        "min_disk_gb": 6.0,
+        "est_peak_ram_gb": 3.8,
+        "description": "For 8 GB RAM-maskiner (Score 64.02): NB-Whisper Small + Wav2Vec2-300M + Llama 3.2 3B.",
+    },
+}
+
+
+def detect_hardware_resources(target_dir: Path | None = None) -> dict[str, Any]:
+    """Detect local RAM, CPU brand/cores, GPU VRAM, free disk space, and recommended model profile.
+
+    >>> hw = detect_hardware_resources()
+    >>> hw["ram_gb"] > 0 and hw["cpu_cores"] >= 1 and hw["recommended_profile"] in MODEL_PROFILES
+    True
+    """
+    ram_bytes = 0
+    cpu_brand = platform.processor() or platform.machine() or "Ukjent CPU"
+    cpu_cores = os.cpu_count() or 1
+    arch = platform.machine().lower()
+    is_apple_silicon = sys.platform == "darwin" and ("arm" in arch or "aarch64" in arch)
+
+    if sys.platform == "darwin":
+        try:
+            out_mem = subprocess.check_output(
+                ["/usr/sbin/sysctl", "-n", "hw.memsize"], text=True, stderr=subprocess.DEVNULL
+            ).strip()
+            ram_bytes = int(out_mem)
+        except Exception:
+            pass
+        try:
+            out_cpu = subprocess.check_output(
+                ["/usr/sbin/sysctl", "-n", "machdep.cpu.brand_string"],
+                text=True,
+                stderr=subprocess.DEVNULL,
+            ).strip()
+            if out_cpu:
+                cpu_brand = out_cpu
+        except Exception:
+            pass
+    elif os.name == "nt":
+        try:
+            import ctypes
+
+            class MEMORYSTATUSEX(ctypes.Structure):
+                _fields_ = [
+                    ("dwLength", ctypes.c_ulong),
+                    ("dwMemoryLoad", ctypes.c_ulong),
+                    ("ullTotalPhys", ctypes.c_ulonglong),
+                    ("ullAvailPhys", ctypes.c_ulonglong),
+                    ("ullTotalPageFile", ctypes.c_ulonglong),
+                    ("ullAvailPageFile", ctypes.c_ulonglong),
+                    ("ullTotalVirtual", ctypes.c_ulonglong),
+                    ("ullAvailVirtual", ctypes.c_ulonglong),
+                    ("sullAvailExtendedVirtual", ctypes.c_ulonglong),
+                ]
+
+            stat_ex = MEMORYSTATUSEX()
+            stat_ex.dwLength = ctypes.sizeof(stat_ex)
+            ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat_ex))  # type: ignore[attr-defined]
+            ram_bytes = int(stat_ex.ullTotalPhys)
+        except Exception:
+            pass
+    else:
+        try:
+            meminfo = Path("/proc/meminfo").read_text(encoding="utf-8", errors="ignore")
+            m_mem = re.search(r"MemTotal:\s+(\d+)\s+kB", meminfo)
+            if m_mem:
+                ram_bytes = int(m_mem.group(1)) * 1024
+        except Exception:
+            pass
+        try:
+            cpuinfo = Path("/proc/cpuinfo").read_text(encoding="utf-8", errors="ignore")
+            m_cpu = re.search(r"model name\s*:\s*(.+)", cpuinfo)
+            if m_cpu:
+                cpu_brand = m_cpu.group(1).strip()
+        except Exception:
+            pass
+
+    if ram_bytes <= 0:
+        ram_bytes = 8 * (1024**3)
+    ram_gb = round(ram_bytes / float(1024**3), 1)
+
+    gpu_vram_gb = 0.0
+    gpu_name = ""
+    nvidia_smi = shutil.which("nvidia-smi")
+    if nvidia_smi:
+        try:
+            nv_out = subprocess.check_output(
+                [nvidia_smi, "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"],
+                text=True,
+                stderr=subprocess.DEVNULL,
+                timeout=3,
+            ).strip()
+            if nv_out:
+                first_line = nv_out.splitlines()[0]
+                parts = [p.strip() for p in first_line.split(",")]
+                if len(parts) >= 2:
+                    gpu_name = parts[0]
+                    gpu_vram_gb = round(float(parts[1]) / 1024.0, 1)
+        except Exception:
+            pass
+
+    check_path = target_dir if (target_dir and target_dir.exists()) else Path.home()
+    try:
+        disk_free_gb = round(shutil.disk_usage(check_path).free / float(1024**3), 1)
+    except Exception:
+        disk_free_gb = 20.0
+
+    warnings: list[str] = []
+    if ram_gb < 7.5:
+        warnings.append(
+            f"KRITISK: Maskinen har kun {ram_gb:.1f} GB RAM (minimum er 8 GB RAM). "
+            "Lokale AI-modeller vil sannsynligvis gå tom for minne eller fryse maskinen."
+        )
+    elif ram_gb < 12.0:
+        warnings.append(
+            f"Begrenset minne ({ram_gb:.0f} GB RAM): Bruk profilen «Lettvekt» (nb-whisper-small + llama3.2:latest) "
+            "og lukk nettlesere/tunge programmer under kjøring."
+        )
+
+    if disk_free_gb < 6.0:
+        warnings.append(
+            f"KRITISK: Kun {disk_free_gb:.1f} GB ledig diskplass. Du bør ha minst 10–15 GB ledig for AI-modeller og lydfiler."
+        )
+    elif disk_free_gb < 14.0:
+        warnings.append(
+            f"Lite ledig diskplass ({disk_free_gb:.1f} GB): Velg lettvektsmodeller hvis modellene ikke allerede er lastet ned."
+        )
+
+    if ram_gb < 11.5:
+        rec_profile_key = "light"
+        tier = "insufficient" if ram_gb < 7.5 else "light"
+    else:
+        rec_profile_key = "recommended"
+        tier = "high" if (ram_gb >= 22.0 or gpu_vram_gb >= 10.0) else "standard"
+
+    rec_prof = MODEL_PROFILES[rec_profile_key]
+    hw_summary = f"{cpu_brand} ({cpu_cores} kjerner), {ram_gb:.0f} GB RAM"
+    if gpu_name:
+        hw_summary += f", GPU: {gpu_name} ({gpu_vram_gb:.0f} GB VRAM)"
+    hw_summary += f", {disk_free_gb:.0f} GB ledig disk"
+
+    return {
+        "ram_gb": ram_gb,
+        "cpu_brand": cpu_brand,
+        "cpu_cores": cpu_cores,
+        "arch": arch,
+        "is_apple_silicon": is_apple_silicon,
+        "gpu_name": gpu_name,
+        "gpu_vram_gb": gpu_vram_gb,
+        "disk_free_gb": disk_free_gb,
+        "tier": tier,
+        "hardware_summary": hw_summary,
+        "recommended_profile": rec_profile_key,
+        "recommended_whisper": rec_prof["whisper_model"],
+        "recommended_ollama": rec_prof["ollama_model"],
+        "recommended_label": rec_prof["label"],
+        "profiles": MODEL_PROFILES,
+        "warnings": warnings,
+    }
+
+
+def evaluate_model_resource_fit(
+    whisper_model: str,
+    ollama_model: str,
+    hw: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Estimate RAM and disk needs for (whisper_model, ollama_model) and warn if hardware is insufficient.
+
+    >>> hw_8gb = {"ram_gb": 8.0, "disk_free_gb": 50.0, "hardware_summary": "Test 8GB", "recommended_whisper": "NbAiLab/nb-whisper-small", "recommended_ollama": "qwen3:4b"}
+    >>> fit_ok = evaluate_model_resource_fit("NbAiLab/nb-whisper-small", "qwen3:4b", hw_8gb)
+    >>> fit_ok["level"]
+    'ok'
+    >>> fit_bad = evaluate_model_resource_fit("NbAiLab/nb-whisper-large", "gemma4:26b", hw_8gb)
+    >>> fit_bad["level"]
+    'critical'
+    """
+    if hw is None:
+        hw = detect_hardware_resources()
+
+    w_low = whisper_model.lower()
+    if any(k in w_low for k in ("tiny", "base", "small")):
+        est_asr_ram = 1.2
+        est_align_ram = 1.5  # uses nb-wav2vec2-300m-bokmaal
+        est_asr_disk = 2.0
+    elif any(k in w_low for k in ("distil", "turbo", "medium")):
+        est_asr_ram = 2.2
+        est_align_ram = 4.6
+        est_asr_disk = 5.2
+    else:
+        est_asr_ram = 3.4
+        est_align_ram = 4.8
+        est_asr_disk = 7.0
+
+    m_low = ollama_model.lower()
+    if any(k in m_low for k in ("26b", "27b", "30b", "32b", "devstral", "24b")):
+        est_llm_ram = 18.0
+        est_llm_disk = 15.0
+    elif any(k in m_low for k in ("11b", "12b", "14b", "normistral")):
+        est_llm_ram = 9.5
+        est_llm_disk = 7.5
+    elif any(k in m_low for k in ("e4b", "7b", "8b", "gemma4:latest")):
+        est_llm_ram = 6.5
+        est_llm_disk = 5.5
+    else:
+        # e2b, 3b, 4b (qwen3:4b, llama3.2, gemma4:e2b, gemma3:4b)
+        est_llm_ram = 4.0
+        est_llm_disk = 3.0
+
+    # Stages run sequentially, so peak RAM is the maximum across stages
+    est_peak_ram = round(max(est_asr_ram, est_align_ram, est_llm_ram), 1)
+    est_total_disk = round(est_asr_disk + est_llm_disk, 1)
+    ram_gb = float(hw.get("ram_gb", 16.0))
+    disk_free_gb = float(hw.get("disk_free_gb", 20.0))
+
+    issues: list[str] = []
+    level = "ok"
+
+    if ram_gb < 7.5:
+        level = "critical"
+        issues.append(
+            f"Maskinen har kun {ram_gb:.1f} GB RAM (minimum er 8 GB RAM). Kjøring vil sannsynligvis feile."
+        )
+    elif est_peak_ram > ram_gb * 0.88:
+        level = "critical"
+        issues.append(
+            f"Valgt modellkombinasjon krever ~{est_peak_ram:.1f} GB RAM på topp, men maskinen har kun {ram_gb:.0f} GB RAM. "
+            f"Klikk «Bruk anbefalt» ({hw.get('recommended_whisper')} + {hw.get('recommended_ollama')}) for å unngå minnekrasj."
+        )
+    elif est_peak_ram > ram_gb * 0.72:
+        level = "warning"
+        issues.append(
+            f"Valgte modeller bruker ~{est_peak_ram:.1f} GB av {ram_gb:.0f} GB RAM. Lukk nettleser og tunge apper før start, "
+            "eller velg en lettere profil."
+        )
+
+    if disk_free_gb < 5.0:
+        level = "critical"
+        issues.append(f"Kun {disk_free_gb:.1f} GB ledig diskplass (kritisk lavt).")
+
+    if issues:
+        msg = " | ".join(issues)
+    else:
+        msg = (
+            f"Maskinvare OK: {hw.get('hardware_summary')} — "
+            f"Valgte modeller bruker maks ~{est_peak_ram:.1f} GB RAM sekvensielt."
+        )
+
+    return {
+        "ok": level != "critical",
+        "level": level,
+        "est_peak_ram_gb": est_peak_ram,
+        "est_disk_gb": est_total_disk,
+        "ram_gb": ram_gb,
+        "disk_free_gb": disk_free_gb,
+        "message": msg,
+        "recommended_whisper": hw.get("recommended_whisper", "NbAiLab/nb-whisper-small"),
+        "recommended_ollama": hw.get("recommended_ollama", "gemma4:e4b"),
+    }
 
 
 def ensure_ffmpeg(env: dict[str, str], log_fn: Callable[[str], None]) -> str:
@@ -1106,11 +1410,34 @@ def infer_speaker_names_via_api(
     meeting_title: str,
     agenda_text: str,
     log_fn: Callable[[str], None],
+    manual_notes_text: str = "",
 ) -> dict[str, str]:
-    """Use Ollama to detect self-introductions (name + optional title) and map SPEAKER_XX."""
+    """Use Ollama to detect self-introductions, direct address, and roles from manual notes to map SPEAKER_XX."""
     unique_speakers = sorted({t["speaker"] for t in turns})
     if not unique_speakers:
         return {}
+
+    # Support explicit SPEAKER_XX=Name or SPEAKER_XX: Name overrides in known_names_hint
+    explicit_map: dict[str, str] = {}
+    for m_exp in re.finditer(r"(SPEAKER_\d+)\s*[=:]\s*([^,;]+)", known_names_hint):
+        spk_id = m_exp.group(1).strip()
+        spk_val = m_exp.group(2).strip()
+        if spk_id in unique_speakers and spk_val:
+            explicit_map[spk_id] = f"{spk_val} ({spk_id})" if spk_id not in spk_val else spk_val
+    if len(explicit_map) == len(unique_speakers):
+        return explicit_map
+
+    # Extract candidate first names from known_names_hint so we include turns mentioning them + adjacent turns
+    name_tokens: list[str] = []
+    for raw_part in re.split(r"[,;\n]+", known_names_hint):
+        clean_part = re.sub(r"SPEAKER_\d+\s*[=:]\s*", "", raw_part)
+        clean_part = re.sub(r"\(.*?\)", "", clean_part).strip()
+        if clean_part:
+            first_word = clean_part.split()[0].lower()
+            if len(first_word) >= 3:
+                name_tokens.append(first_word)
+                if "-" in first_word:
+                    name_tokens.extend(p for p in first_word.split("-") if len(p) >= 3)
 
     intro_keywords = (
         "heter",
@@ -1124,14 +1451,32 @@ def infer_speaker_names_via_api(
         "ansvarlig",
         "velkommen",
         "møteleder",
+        "kasserer",
+        "sekretær",
+        "referent",
+        "regnskap",
+        *name_tokens,
     )
-    sample_lines: list[str] = []
 
+    selected_indices: set[int] = set()
+    total_turns = len(turns)
+    step = max(1, total_turns // 50)
     for idx, t in enumerate(turns):
         low = t["text"].lower()
-        if idx < 110 or any(k in low for k in intro_keywords):
-            t_str = f"{format_seconds(t['start'])}–{format_seconds(t['end'])}"
-            sample_lines.append(f"[{t_str}] {t['speaker']}: {t['text']}")
+        if idx < 80 or idx % step == 0:
+            selected_indices.add(idx)
+        if any(k in low for k in intro_keywords):
+            if idx > 0:
+                selected_indices.add(idx - 1)
+            selected_indices.add(idx)
+            if idx + 1 < total_turns:
+                selected_indices.add(idx + 1)
+
+    sample_lines: list[str] = []
+    for idx in sorted(selected_indices)[:220]:
+        t = turns[idx]
+        t_str = f"{format_seconds(t['start'])}–{format_seconds(t['end'])}"
+        sample_lines.append(f"[{t_str}] {t['speaker']}: {t['text']}")
 
     context_parts: list[str] = []
     if meeting_title.strip():
@@ -1139,20 +1484,32 @@ def infer_speaker_names_via_api(
     if known_names_hint.strip():
         context_parts.append(f"Forhåndsoppgitte deltakere (tilstede): {known_names_hint.strip()}")
     if agenda_text.strip():
-        context_parts.append(f"Agenda / Lysbilder / Kontekst:\n{agenda_text.strip()[:4500]}")
+        context_parts.append(f"Agenda / Lysbilder / Kontekst:\n{agenda_text.strip()[:3500]}")
+    if manual_notes_text.strip():
+        context_parts.append(
+            f"Manuelle møtenotater / referat-utkast (bruk til å koble hvem som sier hva / har hvilken rolle):\n"
+            f"{manual_notes_text.strip()[:4500]}"
+        )
     context_str = "\n".join(context_parts) if context_parts else "Ingen forhåndsoppgitt deltakerliste."
 
     prompt = (
         "Analyser utdraget fra møtetranskripsjonen under og finn ut hvem de ulike taler-IDene "
-        f"({', '.join(unique_speakers)}) er, basert på at møteleder og deltakere presenterer seg "
-        "(navn og eventuell tittel/rolle) eller tiltaler hverandre.\n\n"
+        f"({', '.join(unique_speakers)}) er, basert på selvpresentasjon, tiltale mellom deltakerne, "
+        "og hvem som presenterer hvilke saker/roller i møtet.\n\n"
         f"{context_str}\n\n"
-        "Regler:\n"
-        "1. Returner KUN et gyldig JSON-objekt som knytter hver taler-ID til personens navn (og tittel/rolle hvis kjent).\n"
-        "2. Hvis du IKKE finner navnet til en taler-ID med sikkerhet, behold original ID, f.eks. "
-        '{"SPEAKER_00": "SPEAKER_00"}. Ikke gjett tilfeldige navn.\n'
-        '3. Eksempel på format: {"SPEAKER_00": "Ola Nordmann, Møteleder", "SPEAKER_01": "Kari Hansen, Arkitekt"}\n\n'
-        "Utdrag fra transkripsjon:\n" + "\n".join(sample_lines[:180])
+        "KRITISKE REGLER (LES NØYE FOR Å UNNGÅ Å BYTTE OM TO TALERE):\n"
+        "1. DIREKTE TILTALE: Når en taler (f.eks. SPEAKER_A) tiltaler en annen ved navn (f.eks. «Hva tenker du, Ola?» "
+        "eller «Kari, kan du...»), betyr det at SPEAKER_A IKKE er den personen – det er taleren som svarer i replikken "
+        "rett etterpå som har det navnet!\n"
+        "2. OMTALE I TREDJEPERSON: Når en taler omtaler noen ved navn i tredjeperson (f.eks. «Ola har sjekket...» "
+        "eller «Kari skal sende...»), kan den som snakker IKKE være den omtalte personen.\n"
+        "3. SAKER OG ROLLER FRA MANUELLE NOTATER: Sjekk i utdraget hvem som leder ordet, hvem som legger frem hvilke saker, "
+        "og hvem som har bestemte verv/ansvarsoppgaver nevnt i de manuelle møtenotatene.\n"
+        "4. Returner KUN et gyldig JSON-objekt som knytter hver taler-ID til personens korrekte navn (bruk eksakt stavemåte "
+        "fra deltakerlisten/notatene, f.eks. 'Kari Nordmann').\n"
+        "5. Hvis du IKKE finner navnet til en taler-ID med sikkerhet, behold original ID, f.eks. "
+        '{"SPEAKER_00": "SPEAKER_00"}. Ikke gjett tilfeldige navn.\n\n'
+        "Utdrag fra transkripsjon:\n" + "\n".join(sample_lines)
     )
 
     payload = {
@@ -1180,6 +1537,9 @@ def infer_speaker_names_via_api(
             if isinstance(parsed, dict):
                 mapping: dict[str, str] = {}
                 for spk in unique_speakers:
+                    if spk in explicit_map:
+                        mapping[spk] = explicit_map[spk]
+                        continue
                     val = str(parsed.get(spk, spk)).strip()
                     if val and val != spk:
                         mapping[spk] = f"{val} ({spk})" if spk not in val else val
@@ -1188,7 +1548,9 @@ def infer_speaker_names_via_api(
                 return mapping
     except Exception as exc:
         log_fn(f"Merk: Automatisk navnegjenkjenning hoppet over ({exc}).")
-    return {spk: spk for spk in unique_speakers}
+    base_fallback = {spk: spk for spk in unique_speakers}
+    base_fallback.update(explicit_map)
+    return base_fallback
 
 
 def _format_inline_md(text: str) -> str:
@@ -1389,7 +1751,7 @@ def build_transcript_html_and_text(
 
     speaker_count = len(speaker_color_map)
 
-    tpl = load_template("transcript.html", _FALLBACK_TRANSCRIPT_TPL)
+    tpl = load_template("transcript.html")
     html_doc = tpl.format(
         escaped_title=html.escape(title),
         total_turns=total_turns,
@@ -1407,7 +1769,7 @@ def build_notes_html(notes_md: str, notes_html_path: Path, title: str) -> None:
     """Render clean Markdown meeting notes into a printable, beautifully styled HTML document."""
     rendered_body = _render_markdown_to_html(notes_md)
 
-    tpl = load_template("notes.html", _FALLBACK_NOTES_TPL)
+    tpl = load_template("notes.html")
     html_doc = tpl.format(
         escaped_title=html.escape(title),
         rendered_body=rendered_body,
@@ -1425,6 +1787,7 @@ def generate_notes_via_api(
     agenda_text: str,
     progress_fn: Callable[[int, str], None] | None = None,
     note_mode: str = "mote",
+    manual_notes_text: str = "",
 ) -> str:
     """Use Ollama HTTP /api/chat with streaming to generate meeting minutes or lecture notes."""
     detected_list = ", ".join(sorted(set(speaker_map.values())))
@@ -1437,6 +1800,12 @@ def generate_notes_via_api(
         context_lines.append(f"Identifiserte stemmer i transkripsjonen: {detected_list}")
     if agenda_text.strip():
         context_lines.append(f"Agenda / Lysbilder / Kontekst:\n{agenda_text.strip()}")
+    if manual_notes_text.strip():
+        context_lines.append(
+            "Manuelle møtenotater / referat-utkast (AUTORITATIV FASIT for korrekte navn, stavemåter, saksnummer, "
+            "hvem som hadde ordet/ansvar i enkeltsaker, vedtak og aksjonspunkter):\n"
+            f"{manual_notes_text.strip()}"
+        )
     context_block = "\n".join(context_lines)
 
     if note_mode == "foredrag":
@@ -1467,8 +1836,11 @@ def generate_notes_via_api(
         system_prompt = (
             "Du er en profesjonell norsk møtesekretær. Du skriver kun selve møtereferatet i ren Markdown. "
             "IKKE inkluder egen tankeprosess, introduksjoner eller <think>-blokker. "
-            "Bruk korrekt norsk (bokmål), organiser referatet etter agendaen/temaene, og bruk deltakernes "
-            "faktiske navn og titler gjennom hele referatet."
+            "Bruk korrekt norsk (bokmål), organiser referatet etter agendaen/sakene, og bruk deltakernes "
+            "faktiske navn og titler gjennom hele referatet. "
+            "Hvis det er oppgitt manuelle møtenotater / referat-utkast i konteksten, skal du bruke disse som "
+            "autoritativ fasit for saksstruktur, korrekt stavemåte på navn, hvem som sto bak hvilke innspill/roller, "
+            "beslutninger og aksjonspunkter, samtidig som du beriker referatet med detaljer og tidsstempler fra transkripsjonen."
         )
         user_prompt = (
             "Lag et grundig og strukturert møtereferat basert på møtekonteksten og den tidsstemplede transkripsjonen under.\n\n"
@@ -1585,6 +1957,7 @@ def main() -> int:
             "beam_size": 5,
             "patience": 1.0,
             "length_penalty": 1.0,
+            "repetition_penalty": 1.15,
             "temperatures": [0.0, 0.2, 0.4, 0.6, 0.8, 1.0],
             "compression_ratio_threshold": 2.4,
             "log_prob_threshold": -1.0,
@@ -1621,7 +1994,14 @@ def main() -> int:
             result = json.loads(asr_json.read_text(encoding="utf-8"))
         if result.get("segments"):
             align_lang = result.get("language") or language
-            model_a, metadata = whisperx.load_align_model(language_code=align_lang, device=device)
+            align_model_name = None
+            if align_lang in ("no", "nb", "nn") and any(
+                tag in model_name.lower() for tag in ("small", "base", "tiny")
+            ):
+                align_model_name = "NbAiLab/nb-wav2vec2-300m-bokmaal"
+            model_a, metadata = whisperx.load_align_model(
+                language_code=align_lang, device=device, model_name=align_model_name
+            )
             result = whisperx.align(
                 result["segments"],
                 model_a,
@@ -1765,7 +2145,7 @@ if __name__ == "__main__":
 """
 
 
-def pick_live_whisper_model(preferred_model: str = "NbAiLab/nb-whisper-large") -> str:
+def pick_live_whisper_model(preferred_model: str = "NbAiLab/nb-whisper-small") -> str:
     """Return a cached Whisper model for fast coarse real-time transcription, preferring smaller cached models."""
     hub_dir = HF_CACHE_DIR / "hub"
     candidates = [
@@ -1773,6 +2153,7 @@ def pick_live_whisper_model(preferred_model: str = "NbAiLab/nb-whisper-large") -
         "NbAiLab/nb-whisper-base",
         "NbAiLab/nb-whisper-small",
         "NbAiLab/nb-whisper-medium",
+        "UlrikKoren/nb-whisper-large-distil-turbo-beta-ct2",
         preferred_model,
         "NbAiLab/nb-whisper-large",
     ]
@@ -1791,7 +2172,7 @@ class LiveAudioMonitor:
     def __init__(
         self,
         wav_path: Path,
-        whisper_model: str = "NbAiLab/nb-whisper-large",
+        whisper_model: str = "NbAiLab/nb-whisper-small",
         language: str = "no",
         initial_prompt: str = "",
         chunk_seconds: float = 5.0,
@@ -1977,7 +2358,7 @@ class LiveAudioMonitor:
 
 def run_live_check_on_file(
     input_path: Path,
-    whisper_model: str = "NbAiLab/nb-whisper-large",
+    whisper_model: str = "NbAiLab/nb-whisper-small",
     language: str = "no",
     chunk_seconds: float = 5.0,
     max_seconds: float = 25.0,
@@ -2165,7 +2546,7 @@ def run_pipeline(
     html_name: str = "",
     notes_name: str = "",
     notes_html_name: str = "",
-    whisper_model: str = "NbAiLab/nb-whisper-large",
+    whisper_model: str = "NbAiLab/nb-whisper-small",
     ollama_model: str = "gemma4:e4b",
     language: str = "no",
     hf_token: str = "",
@@ -2175,6 +2556,8 @@ def run_pipeline(
     meeting_title: str = "",
     agenda_text: str = "",
     context_files: list[Path] | None = None,
+    manual_notes_text: str = "",
+    manual_notes_files: list[Path] | None = None,
     note_mode: str = "auto",
     task_mode: str = "auto_resume",
     log_fn: Callable[[str], None] | None = None,
@@ -2226,6 +2609,20 @@ def run_pipeline(
                     log(f"==> Lastet kontekst fra {cf_resolved.name} ({len(extracted)} tegn)")
                     combined_agenda = f"{combined_agenda}\n\n{extracted}".strip() if combined_agenda else extracted
 
+    combined_manual_notes = manual_notes_text.strip()
+    if manual_notes_files:
+        for mf in manual_notes_files:
+            mf_resolved = resolve_moved_audio_path(mf, base_dir)
+            if mf_resolved.is_file():
+                extracted_mn = extract_context_from_file(mf_resolved)
+                if extracted_mn:
+                    log(f"==> Lastet manuelle møtenotater fra {mf_resolved.name} ({len(extracted_mn)} tegn)")
+                    combined_manual_notes = (
+                        f"{combined_manual_notes}\n\n{extracted_mn}".strip()
+                        if combined_manual_notes
+                        else extracted_mn
+                    )
+
     ckpt_dir = get_checkpoint_dir(target_out_dir, resolved_input)
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     asr_json = ckpt_dir / "1_asr.json"
@@ -2268,7 +2665,9 @@ def run_pipeline(
         ensure_ffmpeg(env, log)
         whisperx_bin = ensure_whisperx(env, log, prog)
         wx_python = get_whisperx_python(whisperx_bin)
-        initial_prompt = build_whisper_initial_prompt(meeting_title, speaker_names_hint, combined_agenda)
+        initial_prompt = build_whisper_initial_prompt(
+            meeting_title, speaker_names_hint, combined_agenda, combined_manual_notes
+        )
         if initial_prompt:
             log(f"==> Kontekst-ordliste til Whisper ({len(initial_prompt)} tegn) aktivert.")
 
@@ -2464,6 +2863,7 @@ def run_pipeline(
                 meeting_title,
                 combined_agenda,
                 log,
+                manual_notes_text=combined_manual_notes,
             )
             merged_map = dict(speaker_map)
             merged_map.update(inferred_map)
@@ -2527,6 +2927,7 @@ def run_pipeline(
             combined_agenda,
             progress_fn=prog,
             note_mode=effective_mode,
+            manual_notes_text=combined_manual_notes,
         )
         notes_path.write_text(notes_md + "\n", encoding="utf-8")
         prog(99, "Bygger HTML-utgave av referat/notater...")
@@ -2581,9 +2982,23 @@ def build_cli_parser() -> Any:
         help="Mappe for utdatafiler og .mote_checkpoints (standard: samme mappe som input_file)",
     )
     parser.add_argument(
+        "--profile",
+        choices=["auto", "light", "fast", "recommended", "custom"],
+        default="custom",
+        help=(
+            "Modellprofil: 'auto' velger anbefalt kombinasjon ut fra maskinvare (RAM/CPU/GPU), "
+            "'light' (8 GB RAM), 'fast' (Distil-Turbo + Gemma 4), 'recommended' (NB-Whisper Small + Gemma 4)"
+        ),
+    )
+    parser.add_argument(
+        "--check-hw",
+        action="store_true",
+        help="Vis oppdaget maskinvare, ressursstatus og anbefalt modellkombinasjon, og avslutt",
+    )
+    parser.add_argument(
         "-w",
         "--whisper-model",
-        default="NbAiLab/nb-whisper-large",
+        default="NbAiLab/nb-whisper-small",
         help="Whisper-modell (standard: %(default)s)",
     )
     parser.add_argument(
@@ -2641,6 +3056,19 @@ def build_cli_parser() -> Any:
         help="Sti til agenda, lysbilder eller dokument (.pptx, .pdf, .odp, .docx, .md, .txt). Kan oppgis flere ganger.",
     )
     parser.add_argument(
+        "--manual-notes",
+        default="",
+        help="Manuelle møtenotater / referat-utkast som ren tekst for å kvalitetssikre navn, saker og vedtak.",
+    )
+    parser.add_argument(
+        "-M",
+        "--manual-notes-file",
+        action="append",
+        type=Path,
+        default=[],
+        help="Sti til manuelle møtenotater / referat-utkast (.odt, .docx, .pdf, .md, .txt). Kan oppgis flere ganger.",
+    )
+    parser.add_argument(
         "--mode",
         choices=list(VALID_NOTE_MODES),
         default="auto",
@@ -2678,7 +3106,7 @@ def build_cli_parser() -> Any:
 
 def run_live_mic_check(
     duration_sec: float = 20.0,
-    whisper_model: str = "NbAiLab/nb-whisper-large",
+    whisper_model: str = "NbAiLab/nb-whisper-small",
     language: str = "no",
     initial_prompt: str = "",
 ) -> int:
@@ -2750,6 +3178,33 @@ def cli_main(argv: list[str] | None = None) -> int:
     parser = build_cli_parser()
     args = parser.parse_args(argv)
 
+    hw_info = detect_hardware_resources(args.out_dir)
+    if args.check_hw:
+        fit = evaluate_model_resource_fit(args.whisper_model, args.ollama_model, hw_info)
+        print(json.dumps({"hardware": hw_info, "resource_fit": fit}, indent=2, ensure_ascii=False))
+        return 0
+
+    if args.profile == "auto":
+        args.whisper_model = hw_info["recommended_whisper"]
+        args.ollama_model = hw_info["recommended_ollama"]
+        print(
+            f"==> [Profil: auto] Maskinvare: {hw_info['hardware_summary']}\n"
+            f"    Valgte anbefalte modeller: ASR={args.whisper_model}, LLM={args.ollama_model}",
+            flush=True,
+        )
+    elif args.profile in MODEL_PROFILES:
+        prof = MODEL_PROFILES[args.profile]
+        args.whisper_model = prof["whisper_model"]
+        args.ollama_model = prof["ollama_model"]
+        print(
+            f"==> [Profil: {args.profile}] {prof['label']} -> ASR={args.whisper_model}, LLM={args.ollama_model}",
+            flush=True,
+        )
+
+    fit_check = evaluate_model_resource_fit(args.whisper_model, args.ollama_model, hw_info)
+    if fit_check["level"] in ("critical", "warning"):
+        print(f"==> RESSURS-ADVARSEL: {fit_check['message']}", file=sys.stderr, flush=True)
+
     initial_prompt = build_whisper_initial_prompt(args.title, args.speaker_names, args.agenda)
 
     if args.live_check and args.input_file is None:
@@ -2806,6 +3261,8 @@ def cli_main(argv: list[str] | None = None) -> int:
             meeting_title=args.title,
             agenda_text=args.agenda,
             context_files=args.context_file,
+            manual_notes_text=args.manual_notes,
+            manual_notes_files=args.manual_notes_file,
             note_mode=args.mode,
             task_mode=args.task,
         )

@@ -23,21 +23,56 @@ where uv >nul 2>nul || (
   echo Installerer uv ^(frittstaaende Python-motor^)...
   powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://astral.sh/uv/install.ps1 | iex"
 )
-set "PATH=%USERPROFILE%\.local\bin;%LOCALAPPDATA%\Microsoft\WinGet\Links;%PATH%"
+set "PATH=%USERPROFILE%\\.local\\bin;%LOCALAPPDATA%\\Microsoft\\WinGet\\Links;%PATH%"
 uv run --python 3.12 --script "%~f0" %*
 exit /b %ERRORLEVEL%
 '''
-# Cross-platform GUI entrypoint for mote.
+# Cross-platform GUI & CLI entrypoint for mote.
 from __future__ import annotations
 
+import os
+import shutil
+import subprocess
 import sys
 from pathlib import Path
+
+
+def _self_bootstrap_if_needed() -> None:
+    """If launched via raw 'python3 mote_app.py' without uv, re-exec inside uv environment."""
+    if "--help" in sys.argv or "-h" in sys.argv or "--self-test" in sys.argv:
+        return
+    try:
+        import markdown  # noqa: F401
+        import static_ffmpeg  # noqa: F401
+        import webview  # noqa: F401
+        return
+    except ModuleNotFoundError:
+        pass
+
+    print("Forbereder frittstående Python-miljø via uv...")
+    search_paths = [
+        str(Path.home() / ".local" / "bin"),
+        str(Path.home() / ".cargo" / "bin"),
+        str(Path.home() / ".local" / "share" / "mise" / "shims"),
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+        os.environ.get("PATH", ""),
+    ]
+    os.environ["PATH"] = os.pathsep.join(p for p in search_paths if p)
+    uv_bin = shutil.which("uv")
+    if not uv_bin:
+        raise RuntimeError("Fant ikke 'uv'. Kjør './mote_app.py' for automatisk installasjon.")
+    cmd = [uv_bin, "run", "--python", "3.12", "--script", str(Path(__file__).resolve()), *sys.argv[1:]]
+    raise SystemExit(subprocess.call(cmd))
+
+
+_self_bootstrap_if_needed()
 
 SRC_DIR = Path(__file__).resolve().parent / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from mote.gui import main
+from mote.gui import entrypoint  # noqa: E402
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(entrypoint())

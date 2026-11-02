@@ -1,0 +1,27 @@
+[
+  {
+    "speaker": "Jonas Lie",
+    "pause_after_ms": 400,
+    "text": "Hei og velkommen til sprintplanlegging for mobilappen versjon to punkt fire, femte november. Jeg heter Jonas Lie og er produkteier."
+  },
+  {
+    "speaker": "Sofie Moe",
+    "pause_after_ms": 400,
+    "text": "Hei, jeg heter Sofie Moe, og jeg er sjefsdesigner med ansvar for brukeropplevelse og universell utforming."
+  },
+  {
+    "speaker": "Jonas Lie",
+    "pause_after_ms": 350,
+    "text": "Vi har fått inn hundre og tjue svar i brukerundersøkelsen vår. Hele sekstiåtte prosent sier at kontrollpanelet tar for mye plass på mobilskjermer. Sofie, hvordan løser vi det i versjon to punkt fire?"
+  },
+  {
+    "speaker": "Sofie Moe",
+    "pause_after_ms": 350,
+    "text": "Vi legger redigeringsfeltene i en sammenleggbar skuff som er lukket som standard på mobil, og samtidig oppgraderer vi alle tekstkontraster til WCAG to punkt en dobbel A. Jeg leverer ferdige skisser og stilark innen tirsdag tiende november."
+  },
+  {
+    "speaker": "Jonas Lie",
+    "pause_after_ms": 300,
+    "text": "Strålende, Sofie. Da vedtar vi det designet for versjon to punkt fire. Jeg oppdaterer sprinttavlen og sender ut testutgaven innen torsdag tolvte november, slik at vi er klare til lansering fredag tjuende november."
+  }
+]

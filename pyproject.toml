@@ -18,14 +18,15 @@ dev = [
 ]
 
 [project.scripts]
-mote-cli = "mote_core:cli_main"
+mote-cli = "mote.core:cli_main"
 
 [tool.pytest.ini_options]
 addopts = "--doctest-modules"
+pythonpath = ["src", "."]
 testpaths = [
-    "mote_core.py",
+    "src/mote/core.py",
     "transcribe.py",
-    "tests",
+    "tests/test_cli_and_pipeline.py",
 ]
 
 [tool.ruff]

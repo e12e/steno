@@ -1,0 +1,698 @@
+{
+  "generated_at": "2026-11-01T23:31:04",
+  "meetings_count": 4,
+  "asr_benchmark": {
+    "NbAiLab/nb-whisper-small": {
+      "meetings": {
+        "mote_1_sikkerhet": {
+          "s1_asr_sec": 34.72,
+          "s2_align_sec": 19.9,
+          "elapsed_sec": 54.63,
+          "audio_dur_sec": 117.57,
+          "rtf": 0.465,
+          "word_accuracy_pct": 78.99,
+          "turn_count": 2,
+          "align_json": "synthetic_test/meetings/mote_1_sikkerhet/runs/NbAiLab_nb-whisper-small/.mote_checkpoints/mote_1_sikkerhet/2_align.json",
+          "ckpt_dir": "synthetic_test/meetings/mote_1_sikkerhet/runs/NbAiLab_nb-whisper-small/.mote_checkpoints/mote_1_sikkerhet",
+          "run_dir": "synthetic_test/meetings/mote_1_sikkerhet/runs/NbAiLab_nb-whisper-small",
+          "diarize_json": "synthetic_test/meetings/mote_1_sikkerhet/runs/NbAiLab_nb-whisper-small/.mote_checkpoints/mote_1_sikkerhet/3_diarize.json"
+        },
+        "mote_2_styremote": {
+          "s1_asr_sec": 28.23,
+          "s2_align_sec": 18.29,
+          "elapsed_sec": 46.51,
+          "audio_dur_sec": 103.28,
+          "rtf": 0.45,
+          "word_accuracy_pct": 82.7,
+          "turn_count": 2,
+          "align_json": "synthetic_test/meetings/mote_2_styremote/runs/NbAiLab_nb-whisper-small/.mote_checkpoints/mote_2_styremote/2_align.json",
+          "ckpt_dir": "synthetic_test/meetings/mote_2_styremote/runs/NbAiLab_nb-whisper-small/.mote_checkpoints/mote_2_styremote",
+          "run_dir": "synthetic_test/meetings/mote_2_styremote/runs/NbAiLab_nb-whisper-small",
+          "diarize_json": "synthetic_test/meetings/mote_2_styremote/runs/NbAiLab_nb-whisper-small/.mote_checkpoints/mote_2_styremote/3_diarize.json"
+        },
+        "mote_3_kommune_helse": {
+          "s1_asr_sec": 25.87,
+          "s2_align_sec": 16.93,
+          "elapsed_sec": 42.81,
+          "audio_dur_sec": 85.25,
+          "rtf": 0.502,
+          "word_accuracy_pct": 92.31,
+          "turn_count": 1,
+          "align_json": "synthetic_test/meetings/mote_3_kommune_helse/runs/NbAiLab_nb-whisper-small/.mote_checkpoints/mote_3_kommune_helse/2_align.json",
+          "ckpt_dir": "synthetic_test/meetings/mote_3_kommune_helse/runs/NbAiLab_nb-whisper-small/.mote_checkpoints/mote_3_kommune_helse",
+          "run_dir": "synthetic_test/meetings/mote_3_kommune_helse/runs/NbAiLab_nb-whisper-small",
+          "diarize_json": "synthetic_test/meetings/mote_3_kommune_helse/runs/NbAiLab_nb-whisper-small/.mote_checkpoints/mote_3_kommune_helse/3_diarize.json"
+        },
+        "mote_4_produkt_sprint": {
+          "s1_asr_sec": 20.0,
+          "s2_align_sec": 15.69,
+          "elapsed_sec": 35.69,
+          "audio_dur_sec": 60.15,
+          "rtf": 0.593,
+          "word_accuracy_pct": 79.86,
+          "turn_count": 1,
+          "align_json": "synthetic_test/meetings/mote_4_produkt_sprint/runs/NbAiLab_nb-whisper-small/.mote_checkpoints/mote_4_produkt_sprint/2_align.json",
+          "ckpt_dir": "synthetic_test/meetings/mote_4_produkt_sprint/runs/NbAiLab_nb-whisper-small/.mote_checkpoints/mote_4_produkt_sprint",
+          "run_dir": "synthetic_test/meetings/mote_4_produkt_sprint/runs/NbAiLab_nb-whisper-small",
+          "diarize_json": "synthetic_test/meetings/mote_4_produkt_sprint/runs/NbAiLab_nb-whisper-small/.mote_checkpoints/mote_4_produkt_sprint/3_diarize.json"
+        }
+      },
+      "avg_word_acc": 83.47,
+      "total_sec": 179.64,
+      "avg_rtf": 0.503
+    },
+    "UlrikKoren/nb-whisper-large-distil-turbo-beta-ct2": {
+      "meetings": {
+        "mote_1_sikkerhet": {
+          "s1_asr_sec": 54.1,
+          "s2_align_sec": 44.76,
+          "elapsed_sec": 98.85,
+          "audio_dur_sec": 117.57,
+          "rtf": 0.841,
+          "word_accuracy_pct": 82.1,
+          "turn_count": 2,
+          "align_json": "synthetic_test/meetings/mote_1_sikkerhet/runs/UlrikKoren_nb-whisper-large-distil-turbo-beta-ct2/.mote_checkpoints/mote_1_sikkerhet/2_align.json",
+          "ckpt_dir": "synthetic_test/meetings/mote_1_sikkerhet/runs/UlrikKoren_nb-whisper-large-distil-turbo-beta-ct2/.mote_checkpoints/mote_1_sikkerhet",
+          "run_dir": "synthetic_test/meetings/mote_1_sikkerhet/runs/UlrikKoren_nb-whisper-large-distil-turbo-beta-ct2"
+        },
+        "mote_2_styremote": {
+          "s1_asr_sec": 40.68,
+          "s2_align_sec": 34.12,
+          "elapsed_sec": 74.79,
+          "audio_dur_sec": 103.28,
+          "rtf": 0.724,
+          "word_accuracy_pct": 58.23,
+          "turn_count": 3,
+          "align_json": "synthetic_test/meetings/mote_2_styremote/runs/UlrikKoren_nb-whisper-large-distil-turbo-beta-ct2/.mote_checkpoints/mote_2_styremote/2_align.json",
+          "ckpt_dir": "synthetic_test/meetings/mote_2_styremote/runs/UlrikKoren_nb-whisper-large-distil-turbo-beta-ct2/.mote_checkpoints/mote_2_styremote",
+          "run_dir": "synthetic_test/meetings/mote_2_styremote/runs/UlrikKoren_nb-whisper-large-distil-turbo-beta-ct2"
+        },
+        "mote_3_kommune_helse": {
+          "s1_asr_sec": 45.33,
+          "s2_align_sec": 34.58,
+          "elapsed_sec": 79.91,
+          "audio_dur_sec": 85.25,
+          "rtf": 0.937,
+          "word_accuracy_pct": 59.89,
+          "turn_count": 2,
+          "align_json": "synthetic_test/meetings/mote_3_kommune_helse/runs/UlrikKoren_nb-whisper-large-distil-turbo-beta-ct2/.mote_checkpoints/mote_3_kommune_helse/2_align.json",
+          "ckpt_dir": "synthetic_test/meetings/mote_3_kommune_helse/runs/UlrikKoren_nb-whisper-large-distil-turbo-beta-ct2/.mote_checkpoints/mote_3_kommune_helse",
+          "run_dir": "synthetic_test/meetings/mote_3_kommune_helse/runs/UlrikKoren_nb-whisper-large-distil-turbo-beta-ct2"
+        },
+        "mote_4_produkt_sprint": {
+          "s1_asr_sec": 37.13,
+          "s2_align_sec": 29.02,
+          "elapsed_sec": 66.15,
+          "audio_dur_sec": 60.15,
+          "rtf": 1.1,
+          "word_accuracy_pct": 70.5,
+          "turn_count": 1,
+          "align_json": "synthetic_test/meetings/mote_4_produkt_sprint/runs/UlrikKoren_nb-whisper-large-distil-turbo-beta-ct2/.mote_checkpoints/mote_4_produkt_sprint/2_align.json",
+          "ckpt_dir": "synthetic_test/meetings/mote_4_produkt_sprint/runs/UlrikKoren_nb-whisper-large-distil-turbo-beta-ct2/.mote_checkpoints/mote_4_produkt_sprint",
+          "run_dir": "synthetic_test/meetings/mote_4_produkt_sprint/runs/UlrikKoren_nb-whisper-large-distil-turbo-beta-ct2"
+        }
+      },
+      "avg_word_acc": 67.68,
+      "total_sec": 319.71,
+      "avg_rtf": 0.901
+    },
+    "large-v3-turbo": {
+      "meetings": {
+        "mote_1_sikkerhet": {
+          "s1_asr_sec": 65.1,
+          "s2_align_sec": 37.93,
+          "elapsed_sec": 103.03,
+          "audio_dur_sec": 117.57,
+          "rtf": 0.876,
+          "word_accuracy_pct": 67.7,
+          "turn_count": 3,
+          "align_json": "synthetic_test/meetings/mote_1_sikkerhet/runs/large-v3-turbo/.mote_checkpoints/mote_1_sikkerhet/2_align.json",
+          "ckpt_dir": "synthetic_test/meetings/mote_1_sikkerhet/runs/large-v3-turbo/.mote_checkpoints/mote_1_sikkerhet",
+          "run_dir": "synthetic_test/meetings/mote_1_sikkerhet/runs/large-v3-turbo"
+        },
+        "mote_2_styremote": {
+          "s1_asr_sec": 45.95,
+          "s2_align_sec": 34.16,
+          "elapsed_sec": 80.11,
+          "audio_dur_sec": 103.28,
+          "rtf": 0.776,
+          "word_accuracy_pct": 32.07,
+          "turn_count": 2,
+          "align_json": "synthetic_test/meetings/mote_2_styremote/runs/large-v3-turbo/.mote_checkpoints/mote_2_styremote/2_align.json",
+          "ckpt_dir": "synthetic_test/meetings/mote_2_styremote/runs/large-v3-turbo/.mote_checkpoints/mote_2_styremote",
+          "run_dir": "synthetic_test/meetings/mote_2_styremote/runs/large-v3-turbo"
+        },
+        "mote_3_kommune_helse": {
+          "s1_asr_sec": 40.7,
+          "s2_align_sec": 29.26,
+          "elapsed_sec": 69.96,
+          "audio_dur_sec": 85.25,
+          "rtf": 0.821,
+          "word_accuracy_pct": 79.67,
+          "turn_count": 1,
+          "align_json": "synthetic_test/meetings/mote_3_kommune_helse/runs/large-v3-turbo/.mote_checkpoints/mote_3_kommune_helse/2_align.json",
+          "ckpt_dir": "synthetic_test/meetings/mote_3_kommune_helse/runs/large-v3-turbo/.mote_checkpoints/mote_3_kommune_helse",
+          "run_dir": "synthetic_test/meetings/mote_3_kommune_helse/runs/large-v3-turbo"
+        },
+        "mote_4_produkt_sprint": {
+          "s1_asr_sec": 31.08,
+          "s2_align_sec": 25.18,
+          "elapsed_sec": 56.27,
+          "audio_dur_sec": 60.15,
+          "rtf": 0.935,
+          "word_accuracy_pct": 79.86,
+          "turn_count": 1,
+          "align_json": "synthetic_test/meetings/mote_4_produkt_sprint/runs/large-v3-turbo/.mote_checkpoints/mote_4_produkt_sprint/2_align.json",
+          "ckpt_dir": "synthetic_test/meetings/mote_4_produkt_sprint/runs/large-v3-turbo/.mote_checkpoints/mote_4_produkt_sprint",
+          "run_dir": "synthetic_test/meetings/mote_4_produkt_sprint/runs/large-v3-turbo"
+        }
+      },
+      "avg_word_acc": 64.83,
+      "total_sec": 309.37,
+      "avg_rtf": 0.852
+    },
+    "NbAiLab/nb-whisper-large": {
+      "meetings": {
+        "mote_1_sikkerhet": {
+          "s1_asr_sec": 136.26,
+          "s2_align_sec": 33.48,
+          "elapsed_sec": 169.74,
+          "audio_dur_sec": 117.57,
+          "rtf": 1.444,
+          "word_accuracy_pct": 82.49,
+          "turn_count": 2,
+          "align_json": "synthetic_test/meetings/mote_1_sikkerhet/runs/NbAiLab_nb-whisper-large/.mote_checkpoints/mote_1_sikkerhet/2_align.json",
+          "ckpt_dir": "synthetic_test/meetings/mote_1_sikkerhet/runs/NbAiLab_nb-whisper-large/.mote_checkpoints/mote_1_sikkerhet",
+          "run_dir": "synthetic_test/meetings/mote_1_sikkerhet/runs/NbAiLab_nb-whisper-large"
+        },
+        "mote_2_styremote": {
+          "s1_asr_sec": 91.64,
+          "s2_align_sec": 32.03,
+          "elapsed_sec": 123.67,
+          "audio_dur_sec": 103.28,
+          "rtf": 1.197,
+          "word_accuracy_pct": 76.79,
+          "turn_count": 1,
+          "align_json": "synthetic_test/meetings/mote_2_styremote/runs/NbAiLab_nb-whisper-large/.mote_checkpoints/mote_2_styremote/2_align.json",
+          "ckpt_dir": "synthetic_test/meetings/mote_2_styremote/runs/NbAiLab_nb-whisper-large/.mote_checkpoints/mote_2_styremote",
+          "run_dir": "synthetic_test/meetings/mote_2_styremote/runs/NbAiLab_nb-whisper-large"
+        },
+        "mote_3_kommune_helse": {
+          "s1_asr_sec": 76.33,
+          "s2_align_sec": 28.67,
+          "elapsed_sec": 105.0,
+          "audio_dur_sec": 85.25,
+          "rtf": 1.232,
+          "word_accuracy_pct": 28.02,
+          "turn_count": 3,
+          "align_json": "synthetic_test/meetings/mote_3_kommune_helse/runs/NbAiLab_nb-whisper-large/.mote_checkpoints/mote_3_kommune_helse/2_align.json",
+          "ckpt_dir": "synthetic_test/meetings/mote_3_kommune_helse/runs/NbAiLab_nb-whisper-large/.mote_checkpoints/mote_3_kommune_helse",
+          "run_dir": "synthetic_test/meetings/mote_3_kommune_helse/runs/NbAiLab_nb-whisper-large"
+        },
+        "mote_4_produkt_sprint": {
+          "s1_asr_sec": 65.46,
+          "s2_align_sec": 24.23,
+          "elapsed_sec": 89.69,
+          "audio_dur_sec": 60.15,
+          "rtf": 1.491,
+          "word_accuracy_pct": 78.42,
+          "turn_count": 1,
+          "align_json": "synthetic_test/meetings/mote_4_produkt_sprint/runs/NbAiLab_nb-whisper-large/.mote_checkpoints/mote_4_produkt_sprint/2_align.json",
+          "ckpt_dir": "synthetic_test/meetings/mote_4_produkt_sprint/runs/NbAiLab_nb-whisper-large/.mote_checkpoints/mote_4_produkt_sprint",
+          "run_dir": "synthetic_test/meetings/mote_4_produkt_sprint/runs/NbAiLab_nb-whisper-large"
+        }
+      },
+      "avg_word_acc": 66.43,
+      "total_sec": 488.1,
+      "avg_rtf": 1.341
+    }
+  },
+  "llm_benchmark": {
+    "llama3.2:latest": {
+      "meetings": {
+        "mote_1_sikkerhet": {
+          "s4_sec": 14.53,
+          "s5_sec": 18.96,
+          "elapsed_sec": 33.49,
+          "speaker_accuracy_pct": 0.0,
+          "speaker_map": {
+            "SPEAKER_00": "SPEAKER_00",
+            "SPEAKER_01": "SPEAKER_01",
+            "SPEAKER_02": "SPEAKER_02",
+            "SPEAKER_03": "SPEAKER_03"
+          },
+          "fact_score": 85.71,
+          "speaker_mention_score": 100.0,
+          "structure_score": 100.0,
+          "notes_total_score": 92.86
+        },
+        "mote_2_styremote": {
+          "s4_sec": 11.39,
+          "s5_sec": 19.16,
+          "elapsed_sec": 30.55,
+          "speaker_accuracy_pct": 0.0,
+          "speaker_map": {
+            "SPEAKER_00": "SPEAKER_00",
+            "SPEAKER_01": "SPEAKER_01",
+            "SPEAKER_02": "SPEAKER_02"
+          },
+          "fact_score": 75.0,
+          "speaker_mention_score": 100.0,
+          "structure_score": 100.0,
+          "notes_total_score": 87.5
+        },
+        "mote_3_kommune_helse": {
+          "s4_sec": 9.43,
+          "s5_sec": 19.95,
+          "elapsed_sec": 29.38,
+          "speaker_accuracy_pct": 0.0,
+          "speaker_map": {
+            "SPEAKER_00": "SPEAKER_00",
+            "SPEAKER_01": "SPEAKER_01",
+            "SPEAKER_02": "SPEAKER_02",
+            "SPEAKER_03": "SPEAKER_03"
+          },
+          "fact_score": 100.0,
+          "speaker_mention_score": 100.0,
+          "structure_score": 100.0,
+          "notes_total_score": 100.0
+        },
+        "mote_4_produkt_sprint": {
+          "s4_sec": 14.92,
+          "s5_sec": 18.29,
+          "elapsed_sec": 33.2,
+          "speaker_accuracy_pct": 100.0,
+          "speaker_map": {
+            "SPEAKER_00": "Jonas Lie (SPEAKER_00)",
+            "SPEAKER_01": "Sofie Moe (SPEAKER_01)"
+          },
+          "fact_score": 85.71,
+          "speaker_mention_score": 100.0,
+          "structure_score": 100.0,
+          "notes_total_score": 92.86
+        }
+      },
+      "avg_speaker_acc": 25.0,
+      "avg_notes_score": 93.31,
+      "total_sec": 126.63
+    },
+    "qwen3:4b": {
+      "meetings": {
+        "mote_1_sikkerhet": {
+          "s4_sec": 106.94,
+          "s5_sec": 251.45,
+          "elapsed_sec": 358.39,
+          "speaker_accuracy_pct": 0.0,
+          "speaker_map": {
+            "SPEAKER_00": "SPEAKER_00",
+            "SPEAKER_01": "SPEAKER_01",
+            "SPEAKER_02": "SPEAKER_02",
+            "SPEAKER_03": "SPEAKER_03"
+          },
+          "fact_score": 100.0,
+          "speaker_mention_score": 100.0,
+          "structure_score": 80.0,
+          "notes_total_score": 95.0
+        },
+        "mote_2_styremote": {
+          "s4_sec": 99.11,
+          "s5_sec": 337.74,
+          "elapsed_sec": 436.85,
+          "speaker_accuracy_pct": 0.0,
+          "speaker_map": {
+            "SPEAKER_00": "SPEAKER_00",
+            "SPEAKER_01": "SPEAKER_01",
+            "SPEAKER_02": "SPEAKER_02"
+          },
+          "fact_score": 87.5,
+          "speaker_mention_score": 100.0,
+          "structure_score": 80.0,
+          "notes_total_score": 88.75
+        },
+        "mote_3_kommune_helse": {
+          "s4_sec": 99.57,
+          "s5_sec": 360.69,
+          "elapsed_sec": 460.26,
+          "speaker_accuracy_pct": 0.0,
+          "speaker_map": {
+            "SPEAKER_00": "SPEAKER_00",
+            "SPEAKER_01": "SPEAKER_01",
+            "SPEAKER_02": "SPEAKER_02",
+            "SPEAKER_03": "SPEAKER_03"
+          },
+          "fact_score": 100.0,
+          "speaker_mention_score": 100.0,
+          "structure_score": 80.0,
+          "notes_total_score": 95.0
+        },
+        "mote_4_produkt_sprint": {
+          "s4_sec": 72.24,
+          "s5_sec": 421.65,
+          "elapsed_sec": 493.89,
+          "speaker_accuracy_pct": 0.0,
+          "speaker_map": {
+            "SPEAKER_00": "SPEAKER_00",
+            "SPEAKER_01": "SPEAKER_01"
+          },
+          "fact_score": 100.0,
+          "speaker_mention_score": 100.0,
+          "structure_score": 80.0,
+          "notes_total_score": 95.0
+        }
+      },
+      "avg_speaker_acc": 0.0,
+      "avg_notes_score": 93.44,
+      "total_sec": 1749.38
+    },
+    "gemma4:e4b": {
+      "meetings": {
+        "mote_1_sikkerhet": {
+          "s4_sec": 12.99,
+          "s5_sec": 55.73,
+          "elapsed_sec": 68.72,
+          "speaker_accuracy_pct": 100.0,
+          "speaker_map": {
+            "SPEAKER_00": "Per Johansen (SPEAKER_00)",
+            "SPEAKER_01": "Ola Hansen (SPEAKER_01)",
+            "SPEAKER_02": "Kari Nordmann (SPEAKER_02)",
+            "SPEAKER_03": "Ingrid Berg (SPEAKER_03)"
+          },
+          "fact_score": 100.0,
+          "speaker_mention_score": 100.0,
+          "structure_score": 100.0,
+          "notes_total_score": 100.0
+        },
+        "mote_2_styremote": {
+          "s4_sec": 6.53,
+          "s5_sec": 54.25,
+          "elapsed_sec": 60.78,
+          "speaker_accuracy_pct": 100.0,
+          "speaker_map": {
+            "SPEAKER_00": "Henrik Vik (SPEAKER_00)",
+            "SPEAKER_01": "Marte Lunde (SPEAKER_01)",
+            "SPEAKER_02": "Astrid Solberg (SPEAKER_02)"
+          },
+          "fact_score": 87.5,
+          "speaker_mention_score": 100.0,
+          "structure_score": 100.0,
+          "notes_total_score": 93.75
+        },
+        "mote_3_kommune_helse": {
+          "s4_sec": 9.89,
+          "s5_sec": 53.15,
+          "elapsed_sec": 63.04,
+          "speaker_accuracy_pct": 100.0,
+          "speaker_map": {
+            "SPEAKER_00": "Thomas Bakke (SPEAKER_00)",
+            "SPEAKER_01": "Lars Nygård (SPEAKER_01)",
+            "SPEAKER_02": "Anne Lindqvist (SPEAKER_02)",
+            "SPEAKER_03": "Silje Haugen (SPEAKER_03)"
+          },
+          "fact_score": 100.0,
+          "speaker_mention_score": 100.0,
+          "structure_score": 100.0,
+          "notes_total_score": 100.0
+        },
+        "mote_4_produkt_sprint": {
+          "s4_sec": 5.07,
+          "s5_sec": 38.61,
+          "elapsed_sec": 43.68,
+          "speaker_accuracy_pct": 100.0,
+          "speaker_map": {
+            "SPEAKER_00": "Jonas Lie (SPEAKER_00)",
+            "SPEAKER_01": "Sofie Moe (SPEAKER_01)"
+          },
+          "fact_score": 85.71,
+          "speaker_mention_score": 100.0,
+          "structure_score": 100.0,
+          "notes_total_score": 92.86
+        }
+      },
+      "avg_speaker_acc": 100.0,
+      "avg_notes_score": 96.65,
+      "total_sec": 236.22
+    },
+    "devstral:latest": {
+      "meetings": {
+        "mote_1_sikkerhet": {
+          "s4_sec": 120.08,
+          "s5_sec": 4306.56,
+          "elapsed_sec": 4426.65,
+          "speaker_accuracy_pct": 0.0,
+          "speaker_map": {
+            "SPEAKER_00": "SPEAKER_00",
+            "SPEAKER_01": "SPEAKER_01",
+            "SPEAKER_02": "SPEAKER_02",
+            "SPEAKER_03": "SPEAKER_03"
+          },
+          "fact_score": 100.0,
+          "speaker_mention_score": 100.0,
+          "structure_score": 100.0,
+          "notes_total_score": 100.0
+        },
+        "mote_2_styremote": {
+          "s4_sec": 120.14,
+          "s5_sec": 1365.24,
+          "elapsed_sec": 1485.38,
+          "speaker_accuracy_pct": 0.0,
+          "speaker_map": {
+            "SPEAKER_00": "SPEAKER_00",
+            "SPEAKER_01": "SPEAKER_01",
+            "SPEAKER_02": "SPEAKER_02"
+          },
+          "fact_score": 87.5,
+          "speaker_mention_score": 100.0,
+          "structure_score": 100.0,
+          "notes_total_score": 93.75
+        },
+        "mote_3_kommune_helse": {
+          "s4_sec": 120.16,
+          "s5_sec": 1176.76,
+          "elapsed_sec": 1296.92,
+          "speaker_accuracy_pct": 0.0,
+          "speaker_map": {
+            "SPEAKER_00": "SPEAKER_00",
+            "SPEAKER_01": "SPEAKER_01",
+            "SPEAKER_02": "SPEAKER_02",
+            "SPEAKER_03": "SPEAKER_03"
+          },
+          "fact_score": 100.0,
+          "speaker_mention_score": 100.0,
+          "structure_score": 100.0,
+          "notes_total_score": 100.0
+        },
+        "mote_4_produkt_sprint": {
+          "s4_sec": 120.23,
+          "s5_sec": 779.05,
+          "elapsed_sec": 899.28,
+          "speaker_accuracy_pct": 0.0,
+          "speaker_map": {
+            "SPEAKER_00": "SPEAKER_00",
+            "SPEAKER_01": "SPEAKER_01"
+          },
+          "fact_score": 71.43,
+          "speaker_mention_score": 100.0,
+          "structure_score": 100.0,
+          "notes_total_score": 85.71
+        }
+      },
+      "avg_speaker_acc": 0.0,
+      "avg_notes_score": 94.86,
+      "total_sec": 8108.23
+    }
+  },
+  "ranked_combinations": [
+    {
+      "asr_model": "NbAiLab/nb-whisper-small",
+      "llm_model": "gemma4:e4b",
+      "avg_word_acc": 83.47,
+      "avg_speaker_acc": 100.0,
+      "avg_notes_score": 96.65,
+      "asr_total_sec": 179.64,
+      "llm_total_sec": 236.22,
+      "combined_sec": 415.86,
+      "speed_score": 1.15,
+      "total_score": 79.21
+    },
+    {
+      "asr_model": "UlrikKoren/nb-whisper-large-distil-turbo-beta-ct2",
+      "llm_model": "gemma4:e4b",
+      "avg_word_acc": 67.68,
+      "avg_speaker_acc": 100.0,
+      "avg_notes_score": 96.65,
+      "asr_total_sec": 319.71,
+      "llm_total_sec": 236.22,
+      "combined_sec": 555.93,
+      "speed_score": 0.0,
+      "total_score": 74.3
+    },
+    {
+      "asr_model": "NbAiLab/nb-whisper-large",
+      "llm_model": "gemma4:e4b",
+      "avg_word_acc": 66.43,
+      "avg_speaker_acc": 100.0,
+      "avg_notes_score": 96.65,
+      "asr_total_sec": 488.1,
+      "llm_total_sec": 236.22,
+      "combined_sec": 724.32,
+      "speed_score": 0.0,
+      "total_score": 73.92
+    },
+    {
+      "asr_model": "large-v3-turbo",
+      "llm_model": "gemma4:e4b",
+      "avg_word_acc": 64.83,
+      "avg_speaker_acc": 100.0,
+      "avg_notes_score": 96.65,
+      "asr_total_sec": 309.37,
+      "llm_total_sec": 236.22,
+      "combined_sec": 545.59,
+      "speed_score": 0.0,
+      "total_score": 73.44
+    },
+    {
+      "asr_model": "NbAiLab/nb-whisper-small",
+      "llm_model": "llama3.2:latest",
+      "avg_word_acc": 83.47,
+      "avg_speaker_acc": 25.0,
+      "avg_notes_score": 93.31,
+      "asr_total_sec": 179.64,
+      "llm_total_sec": 126.63,
+      "combined_sec": 306.27,
+      "speed_score": 31.59,
+      "total_score": 64.02
+    },
+    {
+      "asr_model": "UlrikKoren/nb-whisper-large-distil-turbo-beta-ct2",
+      "llm_model": "llama3.2:latest",
+      "avg_word_acc": 67.68,
+      "avg_speaker_acc": 25.0,
+      "avg_notes_score": 93.31,
+      "asr_total_sec": 319.71,
+      "llm_total_sec": 126.63,
+      "combined_sec": 446.34,
+      "speed_score": 0.0,
+      "total_score": 54.55
+    },
+    {
+      "asr_model": "NbAiLab/nb-whisper-large",
+      "llm_model": "llama3.2:latest",
+      "avg_word_acc": 66.43,
+      "avg_speaker_acc": 25.0,
+      "avg_notes_score": 93.31,
+      "asr_total_sec": 488.1,
+      "llm_total_sec": 126.63,
+      "combined_sec": 614.73,
+      "speed_score": 0.0,
+      "total_score": 54.17
+    },
+    {
+      "asr_model": "large-v3-turbo",
+      "llm_model": "llama3.2:latest",
+      "avg_word_acc": 64.83,
+      "avg_speaker_acc": 25.0,
+      "avg_notes_score": 93.31,
+      "asr_total_sec": 309.37,
+      "llm_total_sec": 126.63,
+      "combined_sec": 436.0,
+      "speed_score": 0.0,
+      "total_score": 53.69
+    },
+    {
+      "asr_model": "NbAiLab/nb-whisper-small",
+      "llm_model": "devstral:latest",
+      "avg_word_acc": 83.47,
+      "avg_speaker_acc": 0.0,
+      "avg_notes_score": 94.86,
+      "asr_total_sec": 179.64,
+      "llm_total_sec": 8108.23,
+      "combined_sec": 8287.87,
+      "speed_score": 0.0,
+      "total_score": 53.5
+    },
+    {
+      "asr_model": "NbAiLab/nb-whisper-small",
+      "llm_model": "qwen3:4b",
+      "avg_word_acc": 83.47,
+      "avg_speaker_acc": 0.0,
+      "avg_notes_score": 93.44,
+      "asr_total_sec": 179.64,
+      "llm_total_sec": 1749.38,
+      "combined_sec": 1929.02,
+      "speed_score": 0.0,
+      "total_score": 53.07
+    },
+    {
+      "asr_model": "UlrikKoren/nb-whisper-large-distil-turbo-beta-ct2",
+      "llm_model": "devstral:latest",
+      "avg_word_acc": 67.68,
+      "avg_speaker_acc": 0.0,
+      "avg_notes_score": 94.86,
+      "asr_total_sec": 319.71,
+      "llm_total_sec": 8108.23,
+      "combined_sec": 8427.94,
+      "speed_score": 0.0,
+      "total_score": 48.76
+    },
+    {
+      "asr_model": "NbAiLab/nb-whisper-large",
+      "llm_model": "devstral:latest",
+      "avg_word_acc": 66.43,
+      "avg_speaker_acc": 0.0,
+      "avg_notes_score": 94.86,
+      "asr_total_sec": 488.1,
+      "llm_total_sec": 8108.23,
+      "combined_sec": 8596.33,
+      "speed_score": 0.0,
+      "total_score": 48.39
+    },
+    {
+      "asr_model": "UlrikKoren/nb-whisper-large-distil-turbo-beta-ct2",
+      "llm_model": "qwen3:4b",
+      "avg_word_acc": 67.68,
+      "avg_speaker_acc": 0.0,
+      "avg_notes_score": 93.44,
+      "asr_total_sec": 319.71,
+      "llm_total_sec": 1749.38,
+      "combined_sec": 2069.09,
+      "speed_score": 0.0,
+      "total_score": 48.34
+    },
+    {
+      "asr_model": "NbAiLab/nb-whisper-large",
+      "llm_model": "qwen3:4b",
+      "avg_word_acc": 66.43,
+      "avg_speaker_acc": 0.0,
+      "avg_notes_score": 93.44,
+      "asr_total_sec": 488.1,
+      "llm_total_sec": 1749.38,
+      "combined_sec": 2237.48,
+      "speed_score": 0.0,
+      "total_score": 47.96
+    },
+    {
+      "asr_model": "large-v3-turbo",
+      "llm_model": "devstral:latest",
+      "avg_word_acc": 64.83,
+      "avg_speaker_acc": 0.0,
+      "avg_notes_score": 94.86,
+      "asr_total_sec": 309.37,
+      "llm_total_sec": 8108.23,
+      "combined_sec": 8417.6,
+      "speed_score": 0.0,
+      "total_score": 47.91
+    },
+    {
+      "asr_model": "large-v3-turbo",
+      "llm_model": "qwen3:4b",
+      "avg_word_acc": 64.83,
+      "avg_speaker_acc": 0.0,
+      "avg_notes_score": 93.44,
+      "asr_total_sec": 309.37,
+      "llm_total_sec": 1749.38,
+      "combined_sec": 2058.75,
+      "speed_score": 0.0,
+      "total_score": 47.48
+    }
+  ]
+}
