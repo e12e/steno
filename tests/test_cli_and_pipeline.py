@@ -79,7 +79,7 @@ class TestGherkinBDDScenarios(unittest.TestCase):
     def test_all_gherkin_scenarios_in_feature_file(self) -> None:
         self.assertTrue(FEATURE_FILE.is_file(), f"Missing Gherkin feature file: {FEATURE_FILE}")
         scenarios = parse_gherkin_feature(FEATURE_FILE)
-        self.assertEqual(len(scenarios), 5)
+        self.assertEqual(len(scenarios), 6)
 
         for sc in scenarios:
             name = str(sc["name"])
@@ -147,6 +147,65 @@ class TestGherkinBDDScenarios(unittest.TestCase):
                 html_content = str(ctx["html_content"])
                 self.assertIn("saveUpdatedHtml()", html_content)
                 self.assertIn("Lagre HTML", html_content)
+            elif step == "Given the desktop GUI template app.html is loaded":
+                ctx["app_html"] = mote_gui._load_app_html()
+            elif step == "When inspecting the app.html layout structure":
+                self.assertTrue(bool(ctx.get("app_html")))
+            elif step == "Then advanced settings and context textareas are placed in collapsible details drawers with a live summary pill":
+                app_html = str(ctx["app_html"])
+                self.assertIn('id="advanced_settings_drawer"', app_html)
+                self.assertIn('id="context_notes_drawer"', app_html)
+                self.assertIn('id="settings_summary_pill"', app_html)
+                self.assertIn("updateSettingsSummary()", app_html)
+            elif step == "And all required pywebview DOM element IDs are preserved":
+                app_html = str(ctx["app_html"])
+                required_ids = [
+                    "dropzone",
+                    "selected-file",
+                    "rec_btn",
+                    "rec_timer",
+                    "live_level_badge",
+                    "auto_speak_guide",
+                    "live_transcribe_chk",
+                    "prompt_banner",
+                    "live_check_panel",
+                    "meeting_title",
+                    "speaker_names_hint",
+                    "agenda_text",
+                    "manual_notes_text",
+                    "min_speakers",
+                    "max_speakers",
+                    "note_mode",
+                    "out_dir",
+                    "html_name",
+                    "notes_name",
+                    "notes_html_name",
+                    "model_profile",
+                    "whisper_model",
+                    "ollama_model",
+                    "language",
+                    "hf_token",
+                    "hw_resource_banner",
+                    "hw_resource_text",
+                    "apply_rec_btn",
+                    "ckpt_bar",
+                    "ckpt_s1",
+                    "ckpt_s2",
+                    "ckpt_s3",
+                    "ckpt_s4",
+                    "ckpt_s5",
+                    "task_mode",
+                    "conflict-msg",
+                    "check_audio_btn",
+                    "stop_btn",
+                    "run_btn",
+                    "progress_label",
+                    "progress_val",
+                    "progress_bar",
+                    "log",
+                ]
+                for dom_id in required_ids:
+                    self.assertIn(f'id="{dom_id}"', app_html, f"Missing required DOM id='{dom_id}' in app.html")
             else:
                 self.fail(f"Unrecognized Gherkin step in '{name}': {step}")
 

@@ -29,3 +29,10 @@ Feature: Idiomatic CLI Argument Parsing, Unified Entrypoint Dispatch, and Pipeli
     Given a generated transcript HTML file for a 2-speaker meeting
     When inspecting the generated transcript HTML content
     Then it contains the "saveUpdatedHtml()" export function and "Lagre HTML" button
+
+  Scenario: Desktop GUI app.html uses progressive disclosure to avoid visual clutter
+    Given the desktop GUI template app.html is loaded
+    When inspecting the app.html layout structure
+    Then advanced settings and context textareas are placed in collapsible details drawers with a live summary pill
+    And all required pywebview DOM element IDs are preserved
+
