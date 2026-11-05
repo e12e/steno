@@ -79,7 +79,7 @@ class TestGherkinBDDScenarios(unittest.TestCase):
     def test_all_gherkin_scenarios_in_feature_file(self) -> None:
         self.assertTrue(FEATURE_FILE.is_file(), f"Missing Gherkin feature file: {FEATURE_FILE}")
         scenarios = parse_gherkin_feature(FEATURE_FILE)
-        self.assertEqual(len(scenarios), 6)
+        self.assertEqual(len(scenarios), 8)
 
         for sc in scenarios:
             name = str(sc["name"])
@@ -206,6 +206,51 @@ class TestGherkinBDDScenarios(unittest.TestCase):
                 ]
                 for dom_id in required_ids:
                     self.assertIn(f'id="{dom_id}"', app_html, f"Missing required DOM id='{dom_id}' in app.html")
+            elif step == 'Given the CLI parser is built with ui_lang "en" and "no"':
+                ctx["parser_en"] = mote_core.build_cli_parser(ui_lang="en")  # type: ignore[call-arg]
+                ctx["parser_no"] = mote_core.build_cli_parser(ui_lang="no")  # type: ignore[call-arg]
+            elif step == "When formatting CLI help output for both languages":
+                ctx["help_en"] = ctx["parser_en"].format_help()  # type: ignore[attr-defined]
+                ctx["help_no"] = ctx["parser_no"].format_help()  # type: ignore[attr-defined]
+            elif step == 'Then the English help text contains "100% local meeting transcription" and "--ui-lang"':
+                self.assertIn("100% local meeting transcription", str(ctx["help_en"]))
+                self.assertIn("--ui-lang", str(ctx["help_en"]))
+            elif step == 'And the Norwegian help text contains "100% lokal møtetranskripsjon" and "--ui-lang"':
+                self.assertIn("100% lokal møtetranskripsjon", str(ctx["help_no"]))
+                self.assertIn("--ui-lang", str(ctx["help_no"]))
+            elif step == 'And app.html contains the English and Norwegian UI localization toggle "setUiLanguage"':
+                app_html = mote_gui._load_app_html()
+                self.assertIn("setUiLanguage", app_html)
+                self.assertIn('id="ui_lang_select"', app_html)
+            elif step == "Given cross-platform ffmpeg microphone commands are generated for darwin, win32, and linux":
+                fn = getattr(mote_core, "build_ffmpeg_mic_record_cmd", None)
+                self.assertIsNotNone(fn, "build_ffmpeg_mic_record_cmd missing in mote.core")
+                assert callable(fn)
+                ctx["cmd_darwin"] = fn("ffmpeg", Path("/tmp/rec.wav"), platform_str="darwin", os_name="posix")
+                ctx["cmd_win32"] = fn("ffmpeg.exe", Path("C:/tmp/rec.wav"), platform_str="win32", os_name="nt")
+                ctx["cmd_linux"] = fn("ffmpeg", Path("/tmp/rec.wav"), platform_str="linux", os_name="posix")
+            elif step == "When inspecting the generated ffmpeg arguments and the www/rec release folder":
+                root_dir = Path(__file__).resolve().parent.parent
+                ctx["www_rec_index"] = root_dir / "www" / "rec" / "index.html"
+                ctx["www_rec_script"] = root_dir / "www" / "rec" / "mote_app.py"
+            elif step == 'Then darwin uses "avfoundation", win32 uses "dshow", and linux uses "pulse" or "alsa"':
+                self.assertIn("avfoundation", list(ctx["cmd_darwin"]))  # type: ignore[arg-type]
+                self.assertIn("dshow", list(ctx["cmd_win32"]))  # type: ignore[arg-type]
+                cmd_linux = list(ctx["cmd_linux"])  # type: ignore[arg-type]
+                self.assertTrue("pulse" in cmd_linux or "alsa" in cmd_linux)
+            elif step == "And www/rec/index.html and www/rec/mote_app.py exist with English documentation in The Chronicle broadsheet style":
+                idx_path = ctx["www_rec_index"]
+                scr_path = ctx["www_rec_script"]
+                assert isinstance(idx_path, Path) and isinstance(scr_path, Path)
+                self.assertTrue(idx_path.is_file(), f"Missing {idx_path}")
+                self.assertTrue(scr_path.is_file(), f"Missing {scr_path}")
+                idx_html = idx_path.read_text(encoding="utf-8")
+                self.assertIn("The Chronicle", idx_html)
+                self.assertIn("broadsheet-grid", idx_html)
+                self.assertIn("mote_app.py", idx_html)
+                self.assertIn("macOS", idx_html)
+                self.assertIn("Windows", idx_html)
+                self.assertIn("Linux", idx_html)
             else:
                 self.fail(f"Unrecognized Gherkin step in '{name}': {step}")
 
