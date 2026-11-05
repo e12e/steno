@@ -269,6 +269,8 @@ class TestGherkinBDDScenarios(unittest.TestCase):
                 self.assertIn("#!/bin/sh", head)
                 self.assertIn("# 2>nul & goto :windows_boot", head)
                 self.assertNotIn("goto :windows_boot >/dev/null", head)
+                self.assertIn("wget -qO- https://astral.sh/uv/install.sh", head)
+                self.assertIn("/etc/alpine-release", head)
             elif step == "And www/rec/install.sh installs the steno launcher into a custom prefix using /bin/sh":
                 import subprocess
 
