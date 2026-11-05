@@ -79,7 +79,7 @@ class TestGherkinBDDScenarios(unittest.TestCase):
     def test_all_gherkin_scenarios_in_feature_file(self) -> None:
         self.assertTrue(FEATURE_FILE.is_file(), f"Missing Gherkin feature file: {FEATURE_FILE}")
         scenarios = parse_gherkin_feature(FEATURE_FILE)
-        self.assertEqual(len(scenarios), 8)
+        self.assertEqual(len(scenarios), 9)
 
         for sc in scenarios:
             name = str(sc["name"])
@@ -255,6 +255,59 @@ class TestGherkinBDDScenarios(unittest.TestCase):
                 self.assertIn("macOS", idx_html)
                 self.assertIn("Windows", idx_html)
                 self.assertIn("Linux", idx_html)
+            elif step == "Given a target machine without python3 pre-installed":
+                root_dir = Path(__file__).resolve().parent.parent
+                ctx["root_dir"] = root_dir
+                ctx["dist_steno"] = root_dir / "dist" / "steno.py"
+                ctx["www_rec_dir"] = root_dir / "www" / "rec"
+            elif step == "When inspecting the polyglot header of dist/steno.py and the universal installers in www/rec":
+                dist_steno = ctx["dist_steno"]
+                assert isinstance(dist_steno, Path)
+                ctx["steno_head"] = "\n".join(dist_steno.read_text(encoding="utf-8").splitlines()[:35])
+            elif step == 'Then dist/steno.py uses "# 2>nul & goto :windows_boot" so both /bin/sh and cmd.exe boot without python3':
+                head = str(ctx["steno_head"])
+                self.assertIn("#!/bin/sh", head)
+                self.assertIn("# 2>nul & goto :windows_boot", head)
+                self.assertNotIn("goto :windows_boot >/dev/null", head)
+            elif step == "And www/rec/install.sh installs the steno launcher into a custom prefix using /bin/sh":
+                www_rec_dir = ctx["www_rec_dir"]
+                assert isinstance(www_rec_dir, Path)
+                install_sh = www_rec_dir / "install.sh"
+                self.assertTrue(install_sh.is_file(), f"Missing {install_sh}")
+                with tempfile.TemporaryDirectory() as tmp:
+                    env = os.environ.copy()
+                    env["STENO_INSTALL_DIR"] = str(Path(tmp) / "share" / "steno")
+                    env["STENO_BIN_DIR"] = str(Path(tmp) / "bin")
+                    env["STENO_SOURCE_FILE"] = str(www_rec_dir / "steno.py")
+                    env["STENO_SKIP_UV_WARMUP"] = "1"
+                    proc = subprocess.run(
+                        ["/bin/sh", str(install_sh)],
+                        env=env,
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    self.assertEqual(proc.returncode, 0, msg=f"install.sh failed: {proc.stderr}\n{proc.stdout}")
+                    installed_bin = Path(tmp) / "bin" / "steno"
+                    installed_script = Path(tmp) / "share" / "steno" / "steno.py"
+                    self.assertTrue(installed_bin.is_file(), "install.sh did not create bin/steno wrapper")
+                    self.assertTrue(installed_script.is_file(), "install.sh did not copy steno.py")
+            elif step == "And www/rec/install.ps1 and www/rec/steno.cmd provide zero-Python Windows installation and double-click launch":
+                www_rec_dir = ctx["www_rec_dir"]
+                assert isinstance(www_rec_dir, Path)
+                install_ps1 = www_rec_dir / "install.ps1"
+                steno_cmd = www_rec_dir / "steno.cmd"
+                idx_html = (www_rec_dir / "index.html").read_text(encoding="utf-8")
+                self.assertTrue(install_ps1.is_file(), f"Missing {install_ps1}")
+                self.assertTrue(steno_cmd.is_file(), f"Missing {steno_cmd}")
+                ps1_text = install_ps1.read_text(encoding="utf-8")
+                cmd_text = steno_cmd.read_text(encoding="utf-8")
+                self.assertIn("astral.sh/uv/install.ps1", ps1_text)
+                self.assertIn("steno.py", ps1_text)
+                self.assertIn("uv run --python 3.12", cmd_text)
+                self.assertIn("install.sh", idx_html)
+                self.assertIn("install.ps1", idx_html)
+                self.assertIn("steno.cmd", idx_html)
             else:
                 self.fail(f"Unrecognized Gherkin step in '{name}': {step}")
 

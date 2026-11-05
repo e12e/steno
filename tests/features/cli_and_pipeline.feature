@@ -49,4 +49,12 @@ Feature: Idiomatic CLI Argument Parsing, Unified Entrypoint Dispatch, and Pipeli
     Then darwin uses "avfoundation", win32 uses "dshow", and linux uses "pulse" or "alsa"
     And www/rec/index.html and www/rec/steno.py exist with "Steno" and "an automaton stenographer" in The Chronicle broadsheet style
 
+  Scenario: Zero-Python execution and universal installers for macOS, Linux, and Windows
+    Given a target machine without python3 pre-installed
+    When inspecting the polyglot header of dist/steno.py and the universal installers in www/rec
+    Then dist/steno.py uses "# 2>nul & goto :windows_boot" so both /bin/sh and cmd.exe boot without python3
+    And www/rec/install.sh installs the steno launcher into a custom prefix using /bin/sh
+    And www/rec/install.ps1 and www/rec/steno.cmd provide zero-Python Windows installation and double-click launch
+
+
 
