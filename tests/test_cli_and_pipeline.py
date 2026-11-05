@@ -212,10 +212,12 @@ class TestGherkinBDDScenarios(unittest.TestCase):
             elif step == "When formatting CLI help output for both languages":
                 ctx["help_en"] = ctx["parser_en"].format_help()  # type: ignore[attr-defined]
                 ctx["help_no"] = ctx["parser_no"].format_help()  # type: ignore[attr-defined]
-            elif step == 'Then the English help text contains "100% local meeting transcription" and "--ui-lang"':
+            elif step == 'Then the English help text contains "Steno - a modern annalist for your meetings - an automaton stenographer" and "100% local meeting transcription" and "--ui-lang"':
+                self.assertIn("Steno - a modern annalist for your meetings - an automaton stenographer", str(ctx["help_en"]))
                 self.assertIn("100% local meeting transcription", str(ctx["help_en"]))
                 self.assertIn("--ui-lang", str(ctx["help_en"]))
-            elif step == 'And the Norwegian help text contains "100% lokal møtetranskripsjon" and "--ui-lang"':
+            elif step == 'And the Norwegian help text contains "Steno - a modern annalist for your meetings - an automaton stenographer" and "100% lokal møtetranskripsjon" and "--ui-lang"':
+                self.assertIn("Steno - a modern annalist for your meetings - an automaton stenographer", str(ctx["help_no"]))
                 self.assertIn("100% lokal møtetranskripsjon", str(ctx["help_no"]))
                 self.assertIn("--ui-lang", str(ctx["help_no"]))
             elif step == 'And app.html contains the English and Norwegian UI localization toggle "setUiLanguage"':
@@ -232,13 +234,13 @@ class TestGherkinBDDScenarios(unittest.TestCase):
             elif step == "When inspecting the generated ffmpeg arguments and the www/rec release folder":
                 root_dir = Path(__file__).resolve().parent.parent
                 ctx["www_rec_index"] = root_dir / "www" / "rec" / "index.html"
-                ctx["www_rec_script"] = root_dir / "www" / "rec" / "mote_app.py"
+                ctx["www_rec_script"] = root_dir / "www" / "rec" / "steno.py"
             elif step == 'Then darwin uses "avfoundation", win32 uses "dshow", and linux uses "pulse" or "alsa"':
                 self.assertIn("avfoundation", list(ctx["cmd_darwin"]))  # type: ignore[arg-type]
                 self.assertIn("dshow", list(ctx["cmd_win32"]))  # type: ignore[arg-type]
                 cmd_linux = list(ctx["cmd_linux"])  # type: ignore[arg-type]
                 self.assertTrue("pulse" in cmd_linux or "alsa" in cmd_linux)
-            elif step == "And www/rec/index.html and www/rec/mote_app.py exist with English documentation in The Chronicle broadsheet style":
+            elif step == 'And www/rec/index.html and www/rec/steno.py exist with "Steno" and "an automaton stenographer" in The Chronicle broadsheet style':
                 idx_path = ctx["www_rec_index"]
                 scr_path = ctx["www_rec_script"]
                 assert isinstance(idx_path, Path) and isinstance(scr_path, Path)
@@ -247,7 +249,9 @@ class TestGherkinBDDScenarios(unittest.TestCase):
                 idx_html = idx_path.read_text(encoding="utf-8")
                 self.assertIn("The Chronicle", idx_html)
                 self.assertIn("broadsheet-grid", idx_html)
-                self.assertIn("mote_app.py", idx_html)
+                self.assertIn("steno.py", idx_html)
+                self.assertIn("a modern annalist for your meetings", idx_html.lower())
+                self.assertIn("an automaton stenographer", idx_html.lower())
                 self.assertIn("macOS", idx_html)
                 self.assertIn("Windows", idx_html)
                 self.assertIn("Linux", idx_html)
@@ -259,19 +263,20 @@ class TestAARImprovements(unittest.TestCase):
     def test_dist_single_file_is_in_sync_with_sources(self) -> None:
         from scripts import build_single_file
 
+        self.assertEqual(build_single_file.DIST_FILE.name, "steno.py")
         expected = build_single_file.generate_single_file_content()
         actual = build_single_file.DIST_FILE.read_text(encoding="utf-8")
         self.assertEqual(
             actual,
             expected,
-            "dist/mote_app.py is out of sync with src/mote/* — run scripts/build_single_file.py",
+            "dist/steno.py is out of sync with src/mote/* — run scripts/build_single_file.py",
         )
-        www_rec_script = build_single_file.ROOT_DIR / "www" / "rec" / "mote_app.py"
-        self.assertTrue(www_rec_script.is_file(), "www/rec/mote_app.py is missing")
+        www_rec_script = build_single_file.ROOT_DIR / "www" / "rec" / "steno.py"
+        self.assertTrue(www_rec_script.is_file(), "www/rec/steno.py is missing")
         self.assertEqual(
             www_rec_script.read_text(encoding="utf-8"),
             expected,
-            "www/rec/mote_app.py is out of sync with dist/mote_app.py — run scripts/build_single_file.py",
+            "www/rec/steno.py is out of sync with dist/steno.py — run scripts/build_single_file.py",
         )
 
     def test_fallback_templates_are_compact_and_not_duplicated_bloat(self) -> None:

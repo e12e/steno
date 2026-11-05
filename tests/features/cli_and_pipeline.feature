@@ -39,14 +39,14 @@ Feature: Idiomatic CLI Argument Parsing, Unified Entrypoint Dispatch, and Pipeli
   Scenario: CLI parser and desktop GUI support English and Norwegian localization
     Given the CLI parser is built with ui_lang "en" and "no"
     When formatting CLI help output for both languages
-    Then the English help text contains "100% local meeting transcription" and "--ui-lang"
-    And the Norwegian help text contains "100% lokal møtetranskripsjon" and "--ui-lang"
+    Then the English help text contains "Steno - a modern annalist for your meetings - an automaton stenographer" and "100% local meeting transcription" and "--ui-lang"
+    And the Norwegian help text contains "Steno - a modern annalist for your meetings - an automaton stenographer" and "100% lokal møtetranskripsjon" and "--ui-lang"
     And app.html contains the English and Norwegian UI localization toggle "setUiLanguage"
 
   Scenario: Cross-platform microphone capture and public release page under www/rec
     Given cross-platform ffmpeg microphone commands are generated for darwin, win32, and linux
     When inspecting the generated ffmpeg arguments and the www/rec release folder
     Then darwin uses "avfoundation", win32 uses "dshow", and linux uses "pulse" or "alsa"
-    And www/rec/index.html and www/rec/mote_app.py exist with English documentation in The Chronicle broadsheet style
+    And www/rec/index.html and www/rec/steno.py exist with "Steno" and "an automaton stenographer" in The Chronicle broadsheet style
 
 
