@@ -270,6 +270,8 @@ class TestGherkinBDDScenarios(unittest.TestCase):
                 self.assertIn("# 2>nul & goto :windows_boot", head)
                 self.assertNotIn("goto :windows_boot >/dev/null", head)
             elif step == "And www/rec/install.sh installs the steno launcher into a custom prefix using /bin/sh":
+                import subprocess
+
                 www_rec_dir = ctx["www_rec_dir"]
                 assert isinstance(www_rec_dir, Path)
                 install_sh = www_rec_dir / "install.sh"

@@ -27,7 +27,7 @@ POLYGLOT_HEADER = r'''#!/bin/sh
 # ]
 # ///
 "true" ''' + "'''\\'" + r'''
-goto :windows_boot >/dev/null 2>&1
+# 2>nul & goto :windows_boot
 export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$HOME/.local/share/mise/shims:/opt/homebrew/bin:/usr/local/bin:$PATH"
 if ! command -v uv >/dev/null 2>&1; then
   echo "Installing uv (standalone Python runtime) / Installerer uv..."

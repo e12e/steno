@@ -724,16 +724,18 @@
 
                     <div class="dispatch-card" id="download">
                         <div class="dispatch-meta">
-                            <span class="dispatch-tag">Universal Polyglot Script</span>
+                            <span class="dispatch-tag">Zero-Python Polyglot &amp; Universal Installers</span>
                             <span>macOS • Windows 11 • Linux</span>
                         </div>
                         <h3 class="dispatch-title">Single-File Distribution: <code>steno.py</code></h3>
                         <p class="dispatch-summary">
-                            Contains the embedded desktop GUI template, transcript and minutes HTML renderers, the five-stage checkpoint engine, bilingual English/Norwegian localization, and an automatic <code>uv</code> environment bootstrapper. No manual <code>pip install</code> or virtual environment setup is required.
+                            Contains the embedded desktop GUI template, transcript and minutes HTML renderers, the five-stage checkpoint engine, bilingual English/Norwegian localization, and an automatic <code>uv</code> environment bootstrapper. <strong>No pre-installed Python is required</strong>—on macOS and Linux, <code>sh steno.py</code> (or <code>install.sh</code>) provisions a standalone Python 3.12 runtime automatically; on Windows, <code>steno.cmd</code> (or <code>install.ps1</code>) does the same.
                         </p>
                         <div class="dispatch-action">
                             <a href="steno.py" download="steno.py">Download steno.py →</a>
-                            <a href="https://github.com/e12e/rec" rel="noopener">Source Repository →</a>
+                            <a href="steno.cmd" download="steno.cmd">Windows Launcher (steno.cmd) →</a>
+                            <a href="install.sh" download="install.sh">macOS / Linux Installer (install.sh) →</a>
+                            <a href="install.ps1" download="install.ps1">Windows Installer (install.ps1) →</a>
                         </div>
                     </div>
 
@@ -788,21 +790,27 @@
 
                     <p>Both the progressive-disclosure desktop interface and the command-line parser provide full localization in English (<code>en</code>) and Norwegian (<code>no</code>). Launching without arguments opens the native desktop window; passing any file or flag dispatches directly to the command-line interface.</p>
 
-                    <pre class="terminal-specimen"><code># 1. Launch the desktop GUI (macOS, Windows, or Linux)
-python3 steno.py
+                    <pre class="terminal-specimen"><code># 0. Zero-Python Universal Install (provisions standalone Python 3.12 + steno CLI)
+# macOS / Linux:
+curl -LsSf https://s.hypertekst.net/rec/install.sh | sh
+# Windows 11 (PowerShell):
+irm https://s.hypertekst.net/rec/install.ps1 | iex
+
+# 1. Or run steno.py directly without pre-installed Python (macOS / Linux / Windows)
+sh steno.py
 
 # 2. Display CLI help in English or Norwegian
-python3 steno.py --ui-lang en --help
-python3 steno.py --ui-lang no --help
+sh steno.py --ui-lang en --help
+sh steno.py --ui-lang no --help
 
 # 3. Inspect local RAM, CPU/GPU, and recommended model profile
-python3 steno.py --check-hw
+sh steno.py --check-hw
 
 # 4. Run 20-second live microphone dBFS level &amp; coarse ASR check
-python3 steno.py --live-check --live-seconds 20
+sh steno.py --live-check --live-seconds 20
 
 # 5. Transcribe a 4-speaker meeting with agenda slides and auto hardware profile
-python3 steno.py meeting.m4a --profile auto \
+sh steno.py meeting.m4a --profile auto \
   --title "Architecture Review – 2026-11-05" \
   --speaker-names "Kari Nordmann (Chair), Ola Hansen, Ingrid Berg, Per Lie" \
   -c slides.pptx -M draft_notes.docx</code></pre>
