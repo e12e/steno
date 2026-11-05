@@ -678,7 +678,7 @@ def bind_drag_and_drop(window: Any) -> None:
 def main() -> None:
     api = MoteApi()
     window = webview.create_window(
-        "Møteopptak, Transkripsjon & Referat (WhisperX + Ollama)",
+        "Steno — A modern annalist for your meetings — an automaton stenographer",
         html=HTML,
         js_api=api,
         width=820,

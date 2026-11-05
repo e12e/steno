@@ -7,7 +7,7 @@ test:
 	python3 tests/test_cli_and_pipeline.py -v
 
 lint:
-	uvx ruff check src/ scripts/ tests/ transcribe.py mote_app.py run_verification_and_data.py
+	uvx ruff check src/ scripts/ tests/ transcribe.py steno.py run_verification_and_data.py
 
 typecheck:
 	uvx mypy src/mote/core.py src/mote/cli.py transcribe.py tests/test_cli_and_pipeline.py

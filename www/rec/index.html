@@ -6,21 +6,21 @@
     <!-- MANDATORY (modern-web-guidance/dark-mode): Declare light and dark support to prevent FOUC -->
     <meta name="color-scheme" content="light dark">
     <link rel="canonical" href="https://hypertekst.net/rec/">
-    <title>Møtereferat (rec) — Local Meeting Transcription &amp; Minutes — The Chronicle</title>
-    <meta name="description" content="A single-file, strictly local desktop and command-line instrument for multi-speaker meeting recording, WhisperX transcription, Pyannote diarization, and Ollama minutes on macOS, Windows, and Linux.">
+    <title>Steno — A Modern Annalist for Your Meetings — The Chronicle</title>
+    <meta name="description" content="Steno - a modern annalist for your meetings - an automaton stenographer. Single-file local meeting transcription, Pyannote diarization, and Ollama minutes for macOS, Windows, and Linux.">
 
     <!-- Open Graph Social Sharing Cards -->
     <meta property="og:type" content="article">
     <meta property="og:site_name" content="The Chronicle">
-    <meta property="og:title" content="Møtereferat (rec) — Local Meeting Transcription &amp; Minutes">
-    <meta property="og:description" content="Single-file local meeting transcription, speaker diarization, and minutes generation for macOS, Windows, and Linux.">
+    <meta property="og:title" content="Steno — A Modern Annalist for Your Meetings — An Automaton Stenographer">
+    <meta property="og:description" content="Steno - a modern annalist for your meetings - an automaton stenographer. Single-file local meeting transcription, speaker diarization, and minutes generation for macOS, Windows, and Linux.">
     <meta property="og:url" content="https://hypertekst.net/rec/">
     <meta property="og:image" content="https://hypertekst.net/img/pica-wings-color.jpg">
 
     <!-- Twitter / X Card -->
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="Møtereferat (rec) — Local Meeting Transcription &amp; Minutes">
-    <meta name="twitter:description" content="Single-file local meeting transcription, speaker diarization, and minutes generation for macOS, Windows, and Linux.">
+    <meta name="twitter:title" content="Steno — A Modern Annalist for Your Meetings — An Automaton Stenographer">
+    <meta name="twitter:description" content="Steno - a modern annalist for your meetings - an automaton stenographer. Single-file local meeting transcription, speaker diarization, and minutes generation for macOS, Windows, and Linux.">
     <meta name="twitter:image" content="https://hypertekst.net/img/pica-wings-color.jpg">
 
     <script>
@@ -681,8 +681,8 @@
 
             <div class="masthead-lockup">
                 <p class="masthead-kicker">Working Instrument • Local Audio &amp; Language Pipeline</p>
-                <h1 class="site-title">Møtereferat (rec)</h1>
-                <p class="site-deck">A single-file, strictly local desktop and command-line utility for meeting recording, multi-speaker transcription, and minutes generation across macOS, Windows, and Linux.</p>
+                <h1 class="site-title">Steno</h1>
+                <p class="site-deck">Steno — a modern annalist for your meetings — an automaton stenographer. A single-file, strictly local desktop and command-line instrument for multi-speaker recording, transcription, and minutes across macOS, Windows, and Linux.</p>
             </div>
 
             <nav class="masthead-nav" aria-label="Primary Sections">
@@ -718,7 +718,7 @@
                     <div class="section-kicker">I. The Instrument &amp; Its Premise</div>
                     <h2>Local Transcription Without External Telemetry</h2>
 
-                    <p>Modern institutional and project meetings routinely involve sensitive deliberations, personal data, or unpublished technical work that should not be transmitted to third-party cloud transcription APIs. <code>mote_app.py</code> consolidates an entire speech-to-minutes pipeline into a single, self-bootstrapping Python file that executes exclusively on the operator’s own machine.</p>
+                    <p>Modern institutional and project meetings routinely involve sensitive deliberations, personal data, or unpublished technical work that should not be transmitted to third-party cloud transcription APIs. <strong>Steno</strong>—a modern annalist for your meetings, an automaton stenographer (<code>steno.py</code>)—consolidates an entire speech-to-minutes pipeline into a single, self-bootstrapping Python file that executes exclusively on the operator’s own machine.</p>
 
                     <p>Once model weights are cached locally, every stage—from microphone capture and voice activity detection to word-level alignment, speaker diarization, and structured minutes generation—operates offline. Neither audio waveforms nor text transcripts leave the local filesystem.</p>
 
@@ -727,12 +727,12 @@
                             <span class="dispatch-tag">Universal Polyglot Script</span>
                             <span>macOS • Windows 11 • Linux</span>
                         </div>
-                        <h3 class="dispatch-title">Single-File Distribution: <code>mote_app.py</code></h3>
+                        <h3 class="dispatch-title">Single-File Distribution: <code>steno.py</code></h3>
                         <p class="dispatch-summary">
                             Contains the embedded desktop GUI template, transcript and minutes HTML renderers, the five-stage checkpoint engine, bilingual English/Norwegian localization, and an automatic <code>uv</code> environment bootstrapper. No manual <code>pip install</code> or virtual environment setup is required.
                         </p>
                         <div class="dispatch-action">
-                            <a href="mote_app.py" download="mote_app.py">Download mote_app.py →</a>
+                            <a href="steno.py" download="steno.py">Download steno.py →</a>
                             <a href="https://github.com/e12e/rec" rel="noopener">Source Repository →</a>
                         </div>
                     </div>
@@ -784,25 +784,25 @@
                     <div class="section-kicker">III. Cross-Platform Execution &amp; Localization</div>
                     <h2>Operation on macOS, Windows, and Linux</h2>
 
-                    <p>The header of <code>mote_app.py</code> is a polyglot script valid under POSIX shells (<code>/bin/sh</code>), Windows Command Prompt / PowerShell, and direct Python invocation. On first launch, it verifies or installs Astral’s standalone <code>uv</code> binary, provisions an isolated Python 3.12 runtime with <code>pywebview</code>, <code>markdown</code>, and <code>static-ffmpeg</code>, and downloads standalone <code>whisperx</code> and <code>ollama</code> binaries on demand.</p>
+                    <p>The header of <code>steno.py</code> is a polyglot script valid under POSIX shells (<code>/bin/sh</code>), Windows Command Prompt / PowerShell, and direct Python invocation. On first launch, it verifies or installs Astral’s standalone <code>uv</code> binary, provisions an isolated Python 3.12 runtime with <code>pywebview</code>, <code>markdown</code>, and <code>static-ffmpeg</code>, and downloads standalone <code>whisperx</code> and <code>ollama</code> binaries on demand.</p>
 
                     <p>Both the progressive-disclosure desktop interface and the command-line parser provide full localization in English (<code>en</code>) and Norwegian (<code>no</code>). Launching without arguments opens the native desktop window; passing any file or flag dispatches directly to the command-line interface.</p>
 
                     <pre class="terminal-specimen"><code># 1. Launch the desktop GUI (macOS, Windows, or Linux)
-python3 mote_app.py
+python3 steno.py
 
 # 2. Display CLI help in English or Norwegian
-python3 mote_app.py --ui-lang en --help
-python3 mote_app.py --ui-lang no --help
+python3 steno.py --ui-lang en --help
+python3 steno.py --ui-lang no --help
 
 # 3. Inspect local RAM, CPU/GPU, and recommended model profile
-python3 mote_app.py --check-hw
+python3 steno.py --check-hw
 
 # 4. Run 20-second live microphone dBFS level &amp; coarse ASR check
-python3 mote_app.py --live-check --live-seconds 20
+python3 steno.py --live-check --live-seconds 20
 
 # 5. Transcribe a 4-speaker meeting with agenda slides and auto hardware profile
-python3 mote_app.py meeting.m4a --profile auto \
+python3 steno.py meeting.m4a --profile auto \
   --title "Architecture Review – 2026-11-05" \
   --speaker-names "Kari Nordmann (Chair), Ola Hansen, Ingrid Berg, Per Lie" \
   -c slides.pptx -M draft_notes.docx</code></pre>
@@ -834,7 +834,7 @@ python3 mote_app.py meeting.m4a --profile auto \
                         <tbody>
                             <tr>
                                 <th scope="row">Artifact</th>
-                                <td><a href="mote_app.py" download="mote_app.py">mote_app.py</a></td>
+                                <td><a href="steno.py" download="steno.py">steno.py</a></td>
                             </tr>
                             <tr>
                                 <th scope="row">Runtime</th>

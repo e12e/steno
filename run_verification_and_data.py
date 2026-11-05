@@ -44,7 +44,7 @@ def main() -> int:
             "scripts/",
             "tests/",
             "transcribe.py",
-            "mote_app.py",
+            "steno.py",
         ],
     )
     run_step(
@@ -59,7 +59,7 @@ def main() -> int:
             "src/mote/template_loader.py",
             "scripts/build_single_file.py",
             "transcribe.py",
-            "mote_app.py",
+            "steno.py",
             "tests/test_cli_and_pipeline.py",
         ],
     )

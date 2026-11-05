@@ -27,7 +27,7 @@ set "PATH=%USERPROFILE%\\.local\\bin;%LOCALAPPDATA%\\Microsoft\\WinGet\\Links;%P
 uv run --python 3.12 --script "%~f0" %*
 exit /b %ERRORLEVEL%
 '''
-# Cross-platform GUI & CLI entrypoint for mote.
+# Cross-platform GUI & CLI entrypoint for Steno - a modern annalist for your meetings - an automaton stenographer.
 from __future__ import annotations
 
 import os
@@ -38,7 +38,7 @@ from pathlib import Path
 
 
 def _self_bootstrap_if_needed() -> None:
-    """If launched via raw 'python3 mote_app.py' without uv, re-exec inside uv environment."""
+    """If launched via raw 'python3 steno.py' without uv, re-exec inside uv environment."""
     if any(flag in sys.argv for flag in ("-h", "--help", "--self-test", "--check-hw", "--status")):
         return
     try:
@@ -49,7 +49,7 @@ def _self_bootstrap_if_needed() -> None:
     except ModuleNotFoundError:
         pass
 
-    print("Forbereder frittstående Python-miljø via uv...")
+    print("Preparing standalone Python environment via uv / Forbereder frittstående Python-miljø via uv...")
     search_paths = [
         str(Path.home() / ".local" / "bin"),
         str(Path.home() / ".cargo" / "bin"),
@@ -61,7 +61,7 @@ def _self_bootstrap_if_needed() -> None:
     os.environ["PATH"] = os.pathsep.join(p for p in search_paths if p)
     uv_bin = shutil.which("uv")
     if not uv_bin:
-        raise RuntimeError("Fant ikke 'uv'. Kjør './mote_app.py' for automatisk installasjon.")
+        raise RuntimeError("Fant ikke 'uv'. Kjør './steno.py' for automatisk installasjon.")
     cmd = [uv_bin, "run", "--python", "3.12", "--script", str(Path(__file__).resolve()), *sys.argv[1:]]
     raise SystemExit(subprocess.call(cmd))
 

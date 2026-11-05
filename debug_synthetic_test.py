@@ -551,7 +551,7 @@ def main() -> int:
 
     if args.step == "check":
         import py_compile
-        for fname in ("transcribe.py", "mote_app.py", "debug_synthetic_test.py"):
+        for fname in ("transcribe.py", "steno.py", "debug_synthetic_test.py"):
             py_compile.compile(str(BASE_DIR / fname), doraise=True)
             print(f"[CHECK] Syntaks OK: {fname}")
         return 0

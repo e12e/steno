@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Build a single-file, zero-dependency, cross-platform runnable distribution of mote.
+"""Build a single-file, zero-dependency, cross-platform runnable distribution of Steno.
 
-Produces dist/mote_app.py which can run directly on macOS (ARM64/x86_64),
+Produces dist/steno.py which can run directly on macOS (ARM64/x86_64),
 Windows 11 (x86_64/ARM64), and Linux without manual dependency installation,
 via an embedded uv polyglot self-bootstrapper.
 """
@@ -15,7 +15,7 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parent.parent
 SRC_DIR = ROOT_DIR / "src" / "mote"
 DIST_DIR = ROOT_DIR / "dist"
-DIST_FILE = DIST_DIR / "mote_app.py"
+DIST_FILE = DIST_DIR / "steno.py"
 
 POLYGLOT_HEADER = r'''#!/bin/sh
 # /// script
@@ -46,7 +46,7 @@ set "PATH=%USERPROFILE%\\.local\\bin;%LOCALAPPDATA%\\Microsoft\\WinGet\\Links;%P
 uv run --python 3.12 --script "%~f0" %*
 exit /b %ERRORLEVEL%
 ''' + "'''" + r'''
-# Universal single-file distribution for Møteopptak, Transkripsjon & Referat (WhisperX + Ollama).
+# Universal single-file distribution for Steno - a modern annalist for your meetings - an automaton stenographer.
 # Automatically bootstrapped for macOS (ARM64/AMD64), Windows 11, and Linux.
 from __future__ import annotations
 
@@ -56,7 +56,7 @@ from pathlib import Path
 
 BOOTSTRAP_CODE = r'''
 def _self_bootstrap_if_needed() -> None:
-    """If launched via raw 'python mote_app.py' without uv, auto-install uv and re-exec."""
+    """If launched via raw 'python steno.py' without uv, auto-install uv and re-exec."""
     if any(flag in sys.argv for flag in ("-h", "--help", "--self-test", "--check-hw", "--status")):
         return
     try:
@@ -176,7 +176,7 @@ def build() -> int:
     DIST_FILE.chmod(0o755)
     www_rec_dir = ROOT_DIR / "www" / "rec"
     if www_rec_dir.is_dir():
-        www_script = www_rec_dir / "mote_app.py"
+        www_script = www_rec_dir / "steno.py"
         www_script.write_text(out_content, encoding="utf-8")
         www_script.chmod(0o755)
     print(f"==> Ferdig bygget og AST-verifisert! Størrelse: {DIST_FILE.stat().st_size // 1024} KB")

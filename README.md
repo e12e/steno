@@ -1,4 +1,6 @@
-# Lokalt Møtereferat & Transkripsjon (`mote_app.py` og `transcribe.py`)
+# Steno (`steno.py` og `transcribe.py`)
+
+**Steno - a modern annalist for your meetings - an automaton stenographer.**
 
 Helautomatisk, **100 % lokal og skyfri** løsning for transkripsjon av norske møter, taler-identifisering (hvem sa hva) og generering av strukturerte møtereferater. All lydbehandling, talegjenkjenning og tekstgenerering kjører utelukkende på din egen maskin. Ingen lydfiler eller tekster sendes til eksterne skytjenester.
 
@@ -6,18 +8,18 @@ Helautomatisk, **100 % lokal og skyfri** løsning for transkripsjon av norske m�
 
 ## 1. Oversikt over applikasjonene
 
-Prosjektet leveres både som en modulær Python-pakke (`src/mote/`), en selvstendig alt-i-ett-fil (`dist/mote_app.py` som automatisk installerer nødvendige avhengigheter ved første oppstart), og et kommandolinjeverktøy (`transcribe.py`):
+Prosjektet leveres både som en modulær Python-pakke (`src/mote/`), en selvstendig alt-i-ett-fil (`dist/steno.py` og `www/rec/steno.py` som automatisk installerer nødvendige avhengigheter ved første oppstart), og et kommandolinjeverktøy (`transcribe.py`):
 
 | Fil | Beskrivelse og bruksområde |
 | :--- | :--- |
-| **`mote_app.py`** / **`dist/mote_app.py`** *(GUI + CLI)* | Skrivebordsapp med:<br>1. **Direkte mikrofonopptak med grov sanntids-transkripsjon (lydsjekk)**: Tar opp `16 kHz` mono PCM WAV, viser løpende dBFS-lydnivå hvert sekund (`Godt`, `Lavt`, `Stille`, `Høyt/Klipp`) og grov-transkriberer 5-sekunders utsnitt fortløpende under opptak (eller via knappen `Lydsjekk (20s)` på valgt fil) slik at du ser med én gang om lyden og mikrofonoppsettet er godt nok.<br>2. **Møtestart-guide (talestyrt og visuell)**: Veileder møteleder og deltakere gjennom en kort presentasjonsrunde ved møtestart slik at systemet låser stemme-ID til riktig navn og tittel.<br>3. **Dedikert 1-talers foredragsmodus (`Modus: Foredrag / Presentasjon`)**: Bruker nøyaktig samme transkripsjonsmotor, men skreddersyr oppsummeringen som faglige hovedpoenger (*Key Takeaways*), tematisk gjennomgang og begrepsforklaringer i stedet for vedtak og flerparts aksjonstabell. Kan velges automatisk (ved `1` taler) eller overstyres manuelt før kjøring.<br>4. **Stopp/Pause, krasj-gjenopptak og enkeltoppgaver (`Steg 1–5`)**: Lagrer sjekkpunkt etter hvert fullførte steg (`1_asr.json`, `2_align.json`, `3_diarize.json`, `4_speakers.json`) i `.mote_checkpoints/`, slik at du aldri mister arbeid og kan kjøre enkeltsteg på nytt.<br>5. **Start direkte fra transkripsjon**: Slipp inn en ferdig transkripsjon (`.html`, `.json`, `.txt`, `.md`, `.srt`, `.vtt`) for å hoppe over lydprosessering og gå rett til navnekobling eller nytt referat/foredragsnotat.<br>6. **Kontekst fra agenda, lysbilder og manuelle møtenotater**: Henter tekst og forelesernotater direkte fra PowerPoint (`.pptx`), PDF (`.pdf`), OpenDocument (`.odp`/`.odt`), Word (`.docx`) og Markdown/tekst (`.md`/`.txt`) for bedre fagbegreper i Whisper og mer treffsikkert referat. |
+| **`steno.py`** / **`dist/steno.py`** *(GUI + CLI)* | Skrivebordsapp med:<br>1. **Direkte mikrofonopptak med grov sanntids-transkripsjon (lydsjekk)**: Tar opp `16 kHz` mono PCM WAV, viser løpende dBFS-lydnivå hvert sekund (`Godt`, `Lavt`, `Stille`, `Høyt/Klipp`) og grov-transkriberer 5-sekunders utsnitt fortløpende under opptak (eller via knappen `Lydsjekk (20s)` på valgt fil) slik at du ser med én gang om lyden og mikrofonoppsettet er godt nok.<br>2. **Møtestart-guide (talestyrt og visuell)**: Veileder møteleder og deltakere gjennom en kort presentasjonsrunde ved møtestart slik at systemet låser stemme-ID til riktig navn og tittel.<br>3. **Dedikert 1-talers foredragsmodus (`Modus: Foredrag / Presentasjon`)**: Bruker nøyaktig samme transkripsjonsmotor, men skreddersyr oppsummeringen som faglige hovedpoenger (*Key Takeaways*), tematisk gjennomgang og begrepsforklaringer i stedet for vedtak og flerparts aksjonstabell. Kan velges automatisk (ved `1` taler) eller overstyres manuelt før kjøring.<br>4. **Stopp/Pause, krasj-gjenopptak og enkeltoppgaver (`Steg 1–5`)**: Lagrer sjekkpunkt etter hvert fullførte steg (`1_asr.json`, `2_align.json`, `3_diarize.json`, `4_speakers.json`) i `.mote_checkpoints/`, slik at du aldri mister arbeid og kan kjøre enkeltsteg på nytt.<br>5. **Start direkte fra transkripsjon**: Slipp inn en ferdig transkripsjon (`.html`, `.json`, `.txt`, `.md`, `.srt`, `.vtt`) for å hoppe over lydprosessering og gå rett til navnekobling eller nytt referat/foredragsnotat.<br>6. **Kontekst fra agenda, lysbilder og manuelle møtenotater**: Henter tekst og forelesernotater direkte fra PowerPoint (`.pptx`), PDF (`.pdf`), OpenDocument (`.odp`/`.odt`), Word (`.docx`) og Markdown/tekst (`.md`/`.txt`) for bedre fagbegreper i Whisper og mer treffsikkert referat. |
 | **`transcribe.py`** *(CLI-verktøy)* | Kommandolinjegrensesnitt med støtte for alle 5 steg, maskinvaredeteksjon (`--profile auto`, `--check-hw`), sjekkpunkter (`--task`, `--status`), kontekstfiler (`-c`), manuelle møtenotater (`-M`) og grov sanntids-lydsjekk (`--live-check`). |
 | **`tests/e2e_benchmark.py`** *(Benchmark & E2E-test)* | Genererer og evaluerer 4 syntetiske norske møteopptak komprimert med Opus i `synthetic_test/meetings/` på tvers av ASR- og LLM-modeller. |
 
 ### Oppstart (Windows, macOS og Linux)
 Appen har en innebygd kryssplattform-oppstarter (`uv` med Python 3.12) som automatisk henter og setter opp Python-miljø, `ffmpeg`, `whisperx` og `ollama` lokalt ved behov:
-- **macOS / Linux**: Kjør `./mote_app.py` (eller `./dist/mote_app.py`) i terminalen.
-- **Windows**: Kjør `python mote_app.py` (eller gi filen en `.cmd`-snarvei og dobbeltklikk).
+- **macOS / Linux**: Kjør `./steno.py` (eller `./dist/steno.py`) i terminalen.
+- **Windows**: Kjør `python steno.py` (eller gi filen en `.cmd`-snarvei og dobbeltklikk).
 
 ---
 
@@ -87,7 +89,7 @@ Alle modeller i appen er evaluert og rangert empirisk på **4 syntetiske norske 
 
 ## 3. Arbeidsflyt: Slik gjennomfører du et møteopptak
 
-Du kan enten ta opp lyden **direkte i `mote_app.py`** på PC/Mac, eller **ta opp på mobiltelefon** og overføre lydfilen lokalt etter møtet.
+Du kan enten ta opp lyden **direkte i `steno.py`** på PC/Mac, eller **ta opp på mobiltelefon** og overføre lydfilen lokalt etter møtet.
 
 ### 3.1 Gullregelen ved møtestart (for presis taler-gjenkjenning)
 Uansett om du tar opp i appen eller på mobil, bør de første 30 sekundene av opptaket følge denne faste rutinen:
@@ -98,7 +100,7 @@ Uansett om du tar opp i appen eller på mobil, bør de første 30 sekundene av o
 
 ---
 
-### 3.2 Alternativ A: Opptak direkte i `mote_app.py`
+### 3.2 Alternativ A: Opptak direkte i `steno.py`
 1. Fyll gjerne inn **Møtetittel & Dato**, **Tilstede (Navn og tittel)** og **Agenda / Lysbilder** før møtet starter. Når du fyller inn deltakere (kommaseparert), oppdaterer appen automatisk *Min/Maks talere*.
 2. Klikk **Spill inn møte** øverst i appen.
 3. Hvis **«Vis og les opp navnerunde-guide ved opptaksstart»** er krysset av, leser maskinen opp en kort instruks før dere tar runden rundt bordet.
@@ -141,7 +143,7 @@ Klikk **«+ Agenda / Lysbilder...»** (eller dra en `.pptx`-, `.pdf`-, `.odp`-, 
   - Et møte med bare 1 deltaker er i praksis et foredrag eller en presentasjon. Velger du `1` taler (eller setter **Modus: Foredrag / Presentasjon**), bruker appen nøyaktig samme transkripsjonsmotor (og hopper over unødvendig Pyannote-separasjon ved 1 taler), men skreddersyr sluttnotatet med *Oversikt og hovedbudskap*, *Sentrale innsikter (Key Takeaways)*, *Tematisk gjennomgang*, *Viktige begreper/modeller* og *Anbefalinger* i stedet for flerparts aksjonstabell.
   - Du kan når som helst overstyre modusen før eller etter transkripsjon og kjøre *Kun Steg 5* på nytt.
 - **Kan opptak og transkribering kjøre samtidig?**
-  - **Under samme møte**: `mote_app.py` tar opp lyden med svært lav CPU-bruk (`ffmpeg` PCM WAV) og kjører WhisperX + Pyannote etter at opptaket stoppes, fordi både ordtidsjustering (Steg 2) og global taler-klynging i Pyannote (Steg 3) trenger hele lydfilen for å sammenligne stemmer på tvers av hele møtet. I tillegg unngår man at høy CPU/GPU-last og viftestøy fra Whisper under selve møtet forstyrrer mikrofonopptaket.
+  - **Under samme møte**: `steno.py` tar opp lyden med svært lav CPU-bruk (`ffmpeg` PCM WAV) og kjører WhisperX + Pyannote etter at opptaket stoppes, fordi både ordtidsjustering (Steg 2) og global taler-klynging i Pyannote (Steg 3) trenger hele lydfilen for å sammenligne stemmer på tvers av hele møtet. I tillegg unngår man at høy CPU/GPU-last og viftestøy fra Whisper under selve møtet forstyrrer mikrofonopptaket.
   - **Opptak av nytt møte mens en tidligere fil transkriberes**: Opptakskortet (`Spill inn møte`) og transkripsjonsjobben bruker uavhengige prosesser, så du kan starte et nytt mikrofonopptak selv om en bakgrunnsjobb på en tidligere fil pågår (forutsatt at maskinen ikke har hørbar viftestøy).
 
 ---
@@ -220,9 +222,9 @@ Moderne operativsystemer har innebygde «støyfilter» som er laget for videosam
 3. **Ekstern mikrofon (valgfritt)**: En rundstrålende (*omnidireksjonell / 360°*) bordmikrofon (f.eks. *Jabra Speak*, *Blue Yeti* satt i rundstrålende modus `◯`, eller en *boundary*-mikrofon) fanger opp alle rundt bordet med lik klangfarge, noe som gjør at Pyannote skiller talerne enda sikrere fra hverandre.
 
 ### 5.4 Grov sanntidstranskripsjon som lydsjekk (under opptak og på eksisterende lydfiler)
-For å slippe å oppdage etter et timeslangt møte at mikrofonen sto feil eller at *Stemmeisolasjon* filtrerte bort halve bordet, har både GUI-appen (`mote_app.py`) og kommandolinjen (`transcribe.py --live-check`) innebygd **grov sanntidstranskripsjon med dBFS-lydmåling**:
+For å slippe å oppdage etter et timeslangt møte at mikrofonen sto feil eller at *Stemmeisolasjon* filtrerte bort halve bordet, har både GUI-appen (`steno.py`) og kommandolinjen (`transcribe.py --live-check`) innebygd **grov sanntidstranskripsjon med dBFS-lydmåling**:
 
-- **Under opptak i `mote_app.py`**:
+- **Under opptak i `steno.py`**:
   1. Huk av for **«Grov sanntids-transkripsjon (lydsjekk)»** (på som standard) og trykk **Spill inn møte**.
   2. **Hvert sekund** oppdateres lydnivåindikatoren (`Lyd: -18 dBFS (Godt)`), og **hvert 5. sekund** kjøres en rask grov-transkripsjon av det siste 5-sekunders utsnittet direkte fra den voksende `.wav`-filen:
      `[00:00–00:05 | -18 dBFS (godt)] Hei, jeg heter Kari Nordmann og er prosjektleder.`
@@ -232,7 +234,7 @@ For å slippe å oppdage etter et timeslangt møte at mikrofonen sto feil eller 
      - **Stille (`< -60 dBFS`, grått)**: Feil mikrofonkilde er valgt i operativsystemet, eller mikrofonen er dempet (mute).
      - **Høyt nivå / klipping (`> -0.6 dBFS`, rødt)**: Mikrofonen overstyrer; flytt den litt lenger unna nærmeste taler.
 - **Hurtigsjekk av ferdige lydfiler (`Lydsjekk (20s)` / `--live-check`)**:
-  - Har du overført et opptak fra mobilen, kan du klikke **Lydsjekk (20s)** i `mote_app.py` (eller kjøre `python3 transcribe.py opptak.wav --live-check`) for å sjekke lydnivå og tekstgjenkjenning på de første 20 sekundene før du starter full 5-stegs kjøring.
+  - Har du overført et opptak fra mobilen, kan du klikke **Lydsjekk (20s)** i `steno.py` (eller kjøre `python3 transcribe.py opptak.wav --live-check`) for å sjekke lydnivå og tekstgjenkjenning på de første 20 sekundene før du starter full 5-stegs kjøring.
 - *Merk*: Sanntidstranskripsjonen under opptak bruker rask grådig dekoding (`beam_size=1`) på 5-sekunders biter uten taler-separasjon (Pyannote) og er kun ment som **lyd- og mikrofonsjekk**. Når du trykker **Stopp opptak** og **Start / Fortsett**, kjøres full 5-stegs høykvalitets-pipeline (full beam-search, ord-tidsjustering, Pyannote taler-ID og Ollama-referat) på hele opptaket.
 
 ---
@@ -269,9 +271,9 @@ python3 tests/e2e_benchmark.py --action llm-only
 
 ---
 
-## 8. Kommandolinjebruk (CLI) – `transcribe.py` og `mote_app.py --cli`
+## 8. Kommandolinjebruk (CLI) – `transcribe.py` og `steno.py --cli`
 
-Den delte kjernemodulen (`src/mote/core.py`) eksponerer hele 5-stegs-pipelinen med sjekkpunkter og maskinvaredeteksjon direkte for kommandolinjebruk via `transcribe.py` (eller `python3 mote_app.py --cli ...`):
+Den delte kjernemodulen (`src/mote/core.py`) eksponerer hele 5-stegs-pipelinen med sjekkpunkter og maskinvaredeteksjon direkte for kommandolinjebruk via `transcribe.py` (eller `python3 steno.py --cli ...`):
 
 ```bash
 # Sjekk maskinvare, ledig RAM/disk og anbefalt modellprofil på maskinen:

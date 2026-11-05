@@ -3165,22 +3165,25 @@ def run_pipeline(
 
 
 def build_cli_parser(ui_lang: str | None = None, argv: list[str] | None = None) -> Any:
-    """Create the command-line ArgumentParser for transcribe.py and mote_app.py --cli (English & Norwegian)."""
+    """Create the command-line ArgumentParser for steno / steno.py and transcribe.py (English & Norwegian)."""
     import argparse
 
     lang = resolve_ui_lang(ui_lang, argv if argv is not None else sys.argv[1:])
     is_en = lang == "en"
 
     parser = argparse.ArgumentParser(
-        prog="transcribe.py",
+        prog="steno",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
         description=(
             (
-                "100% local meeting transcription, speaker diarization (WhisperX + Pyannote), "
+                "Steno - a modern annalist for your meetings - an automaton stenographer.\n"
+                "100% local meeting transcription, speaker diarization (WhisperX + Pyannote),\n"
                 "and meeting minutes / lecture notes (Ollama) with stage checkpoints and crash-resume."
             )
             if is_en
             else (
-                "100% lokal møtetranskripsjon, taler-separasjon (WhisperX + Pyannote) "
+                "Steno - a modern annalist for your meetings - an automaton stenographer.\n"
+                "100% lokal møtetranskripsjon, taler-separasjon (WhisperX + Pyannote)\n"
                 "og møtereferat / foredragsnotater (Ollama) med sjekkpunkter og krasj-gjenopptak."
             )
         ),
@@ -3490,7 +3493,7 @@ def run_live_mic_check(
 
 
 def cli_main(argv: list[str] | None = None) -> int:
-    """CLI entrypoint for transcribe.py and mote_app.py."""
+    """CLI entrypoint for steno.py and transcribe.py."""
     parser = build_cli_parser(argv=argv)
     args = parser.parse_args(argv)
 
