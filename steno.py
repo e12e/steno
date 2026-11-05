@@ -10,9 +10,16 @@
 "true" '''\'
 # 2>nul & goto :windows_boot
 export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$HOME/.local/share/mise/shims:/opt/homebrew/bin:/usr/local/bin:$PATH"
+if [ -f /etc/alpine-release ] && [ ! -f /usr/lib/libstdc++.so.6 ] && command -v apk >/dev/null 2>&1; then
+  apk add --no-cache libstdc++ >/dev/null 2>&1 || true
+fi
 if ! command -v uv >/dev/null 2>&1; then
-  echo "Installerer uv (frittstaaende Python-motor)..."
-  curl -LsSf https://astral.sh/uv/install.sh | sh
+  echo "Installing uv (standalone Python runtime) / Installerer uv..."
+  if command -v curl >/dev/null 2>&1; then
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+  elif command -v wget >/dev/null 2>&1; then
+    wget -qO- https://astral.sh/uv/install.sh | sh
+  fi
   export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
 fi
 exec uv run --python 3.12 --script "$0" "$@"

@@ -29,9 +29,16 @@ POLYGLOT_HEADER = r'''#!/bin/sh
 "true" ''' + "'''\\'" + r'''
 # 2>nul & goto :windows_boot
 export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$HOME/.local/share/mise/shims:/opt/homebrew/bin:/usr/local/bin:$PATH"
+if [ -f /etc/alpine-release ] && [ ! -f /usr/lib/libstdc++.so.6 ] && command -v apk >/dev/null 2>&1; then
+  apk add --no-cache libstdc++ >/dev/null 2>&1 || true
+fi
 if ! command -v uv >/dev/null 2>&1; then
   echo "Installing uv (standalone Python runtime) / Installerer uv..."
-  curl -LsSf https://astral.sh/uv/install.sh | sh
+  if command -v curl >/dev/null 2>&1; then
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+  elif command -v wget >/dev/null 2>&1; then
+    wget -qO- https://astral.sh/uv/install.sh | sh
+  fi
   export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
 fi
 exec uv run --python 3.12 --script "$0" "$@"
@@ -95,11 +102,10 @@ def _self_bootstrap_if_needed() -> None:
                 check=True,
             )
         else:
-            subprocess.run(
-                "curl -LsSf https://astral.sh/uv/install.sh | sh",
-                shell=True,
-                check=True,
-            )
+            import urllib.request
+            with urllib.request.urlopen("https://astral.sh/uv/install.sh", timeout=30) as resp:
+                install_script = resp.read()
+            subprocess.run(["/bin/sh"], input=install_script, check=True)
         os.environ["PATH"] = str(Path.home() / ".local" / "bin") + os.pathsep + os.environ["PATH"]
         uv_bin = shutil.which("uv")
 

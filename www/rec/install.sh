@@ -51,7 +51,14 @@ if [ "$SKIP_UV_WARMUP" != "1" ]; then
     export PATH="$BIN_DIR:$HOME/.local/bin:$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
     if ! command -v uv >/dev/null 2>&1; then
         echo "==> Installing standalone uv runtime manager (no pre-installed Python required)..."
-        curl -LsSf https://astral.sh/uv/install.sh | sh
+        if [ -f /etc/alpine-release ] && [ ! -f /usr/lib/libstdc++.so.6 ] && command -v apk >/dev/null 2>&1; then
+            apk add --no-cache libstdc++ >/dev/null 2>&1 || true
+        fi
+        if command -v curl >/dev/null 2>&1; then
+            curl -LsSf https://astral.sh/uv/install.sh | sh
+        elif command -v wget >/dev/null 2>&1; then
+            wget -qO- https://astral.sh/uv/install.sh | sh
+        fi
         export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
     fi
     if command -v uv >/dev/null 2>&1; then
