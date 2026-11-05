@@ -30,7 +30,7 @@ POLYGLOT_HEADER = r'''#!/bin/sh
 goto :windows_boot >/dev/null 2>&1
 export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$HOME/.local/share/mise/shims:/opt/homebrew/bin:/usr/local/bin:$PATH"
 if ! command -v uv >/dev/null 2>&1; then
-  echo "Installerer uv (frittstaaende Python-motor)..."
+  echo "Installing uv (standalone Python runtime) / Installerer uv..."
   curl -LsSf https://astral.sh/uv/install.sh | sh
   export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
 fi
@@ -39,7 +39,7 @@ exec uv run --python 3.12 --script "$0" "$@"
 @echo off
 cls
 where uv >nul 2>nul || (
-  echo Installerer uv ^(frittstaaende Python-motor^)...
+  echo Installing uv ^(standalone Python runtime^) / Installerer uv...
   powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://astral.sh/uv/install.ps1 | iex"
 )
 set "PATH=%USERPROFILE%\\.local\\bin;%LOCALAPPDATA%\\Microsoft\\WinGet\\Links;%PATH%"
@@ -67,7 +67,7 @@ def _self_bootstrap_if_needed() -> None:
     except ModuleNotFoundError:
         pass
 
-    print("Forbereder frittstående Python-miljø via uv...")
+    print("Preparing standalone Python environment via uv / Forbereder frittstående Python-miljø via uv...")
     import os, shutil, subprocess
     search_paths = [
         str(Path.home() / ".local" / "bin"),

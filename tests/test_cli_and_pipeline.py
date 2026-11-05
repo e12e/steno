@@ -266,6 +266,13 @@ class TestAARImprovements(unittest.TestCase):
             expected,
             "dist/mote_app.py is out of sync with src/mote/* — run scripts/build_single_file.py",
         )
+        www_rec_script = build_single_file.ROOT_DIR / "www" / "rec" / "mote_app.py"
+        self.assertTrue(www_rec_script.is_file(), "www/rec/mote_app.py is missing")
+        self.assertEqual(
+            www_rec_script.read_text(encoding="utf-8"),
+            expected,
+            "www/rec/mote_app.py is out of sync with dist/mote_app.py — run scripts/build_single_file.py",
+        )
 
     def test_fallback_templates_are_compact_and_not_duplicated_bloat(self) -> None:
         self.assertLessEqual(
