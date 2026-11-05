@@ -500,12 +500,12 @@
   <div class="top-cards">
     <div id="dropzone">
       <div class="dz-text">
-        <strong>1. Lydfil eller transkripsjon</strong>
+        <strong id="lbl_step1_title">1. Lydfil eller transkripsjon</strong>
         <span id="selected-file">Slipp fil her (.m4a, .wav, .opus, .mp3, .html, .json) eller velg...</span>
       </div>
       <div class="dz-actions">
         <button id="check_audio_btn" class="btn-sm" onclick="runQuickAudioCheck()" disabled title="Kjør grov sanntidstranskripsjon og lydnivåsjekk (dBFS) på de første 20 sekundene av valgt lydfil">Lydsjekk (20s)</button>
-        <button onclick="browseAudio()">Velg fil...</button>
+        <button id="browse_audio_btn" onclick="browseAudio()">Velg fil...</button>
       </div>
     </div>
 
@@ -514,16 +514,16 @@
         <button id="rec_btn" onclick="toggleRecording()">🎙️ Spill inn møte</button>
         <span id="rec_timer">00:00</span>
         <span id="live_level_badge" class="live-badge" title="Sanntids lydnivå (dBFS) fra mikrofon">Lyd: klar</span>
-        <button class="btn-sm" onclick="speakGuide()" title="Les opp møtestart-instruks høyt">Tale-instruks</button>
+        <button id="speak_guide_btn" class="btn-sm" onclick="speakGuide()" title="Les opp møtestart-instruks høyt">Tale-instruks</button>
       </div>
       <div class="rec-options">
         <label>
           <input type="checkbox" id="auto_speak_guide" checked>
-          Les opp navnerunde-guide
+          <span id="lbl_auto_speak">Les opp navnerunde-guide</span>
         </label>
         <label title="Transkriberer grove 5-sekunders utsnitt fortløpende under opptak for å bekrefte at alle rundt bordet høres tydelig">
           <input type="checkbox" id="live_transcribe_chk" checked>
-          Sanntids-lydsjekk
+          <span id="lbl_live_chk">Sanntids-lydsjekk</span>
         </label>
       </div>
     </div>
@@ -541,11 +541,11 @@
   <div class="context-card">
     <div class="context-grid">
       <div class="field-group">
-        <label for="meeting_title">2. Møtetittel & Dato</label>
+        <label for="meeting_title" id="lbl_meeting_title">2. Møtetittel & Dato</label>
         <input type="text" id="meeting_title" placeholder="F.eks. Prosjektmøte – 2026-10-29">
       </div>
       <div class="field-group">
-        <label for="speaker_names_hint">Deltakere & Roller (setter antall talere automatisk)</label>
+        <label for="speaker_names_hint" id="lbl_speakers_hint">Deltakere & Roller (setter antall talere automatisk)</label>
         <input type="text" id="speaker_names_hint" placeholder="F.eks. Ola Nordmann (Møteleder), Kari Hansen (Arkitekt)" oninput="autoCountSpeakersFromHint()">
       </div>
     </div>
@@ -554,22 +554,22 @@
       <summary>
         <span class="summary-title">
           <span class="chevron">▶</span>
-          <span>📎 Agenda, lysbilder & manuelle møtenotater (valgfritt)</span>
+          <span id="lbl_context_drawer">📎 Agenda, lysbilder & manuelle møtenotater (valgfritt)</span>
           <span id="context_count_badge" style="font-weight: 500; color: GrayText; font-size: 11px;"></span>
         </span>
         <span style="display: inline-flex; gap: 6px;" onclick="event.stopPropagation();">
-          <button class="btn-sm" onclick="loadAgendaFile()" title="Last inn agenda eller lysbilder (.pptx, .pdf, .odp, .docx, .md, .txt)">+ Agenda / Lysbilder...</button>
-          <button class="btn-sm" onclick="loadManualNotesFile()" title="Last inn manuelle møtenotater / referat-utkast (.odt, .docx, .pdf, .md, .txt)">+ Manuelle notater...</button>
+          <button id="btn_add_agenda" class="btn-sm" onclick="loadAgendaFile()" title="Last inn agenda eller lysbilder (.pptx, .pdf, .odp, .docx, .md, .txt)">+ Agenda / Lysbilder...</button>
+          <button id="btn_add_notes" class="btn-sm" onclick="loadManualNotesFile()" title="Last inn manuelle møtenotater / referat-utkast (.odt, .docx, .pdf, .md, .txt)">+ Manuelle notater...</button>
         </span>
       </summary>
       <div class="drawer-body">
         <div class="notes-grid">
           <div class="field-group">
-            <label for="agenda_text">Agenda / Lysbilder (.pptx, .pdf, .docx, .md)</label>
+            <label for="agenda_text" id="lbl_agenda_text">Agenda / Lysbilder (.pptx, .pdf, .docx, .md)</label>
             <textarea id="agenda_text" placeholder="Lim inn saksliste eller klikk «+ Agenda / Lysbilder...»" oninput="updateSettingsSummary()"></textarea>
           </div>
           <div class="field-group">
-            <label for="manual_notes_text">Manuelle møtenotater / Fasit-utkast (.odt, .docx, .md)</label>
+            <label for="manual_notes_text" id="lbl_manual_notes_text">Manuelle møtenotater / Fasit-utkast (.odt, .docx, .md)</label>
             <textarea id="manual_notes_text" placeholder="Valgfritt: Egne notater fra møtet for å kvalitetssikre navn, saker og vedtak..." oninput="updateSettingsSummary()"></textarea>
           </div>
         </div>
@@ -580,7 +580,7 @@
   <!-- Compact Checkpoint & Hardware Status Strip -->
   <div class="status-strip">
     <div class="ckpt-bar" id="ckpt_bar">
-      <span style="font-size: 11px; font-weight: 600; color: GrayText; margin-right: 2px;">Steg:</span>
+      <span id="lbl_stages" style="font-size: 11px; font-weight: 600; color: GrayText; margin-right: 2px;">Steg:</span>
       <span class="ckpt-pill" id="ckpt_s1" onclick="selectTaskMode('only_1_asr')" title="Klikk for å kjøre kun Steg 1 (Whisper ASR)">1. ASR</span>
       <span class="ckpt-pill" id="ckpt_s2" onclick="selectTaskMode('only_2_align')" title="Klikk for å kjøre kun Steg 2 (Alignment)">2. Align</span>
       <span class="ckpt-pill" id="ckpt_s3" onclick="selectTaskMode('from_3_diarize')" title="Klikk for å kjøre fra Steg 3 (Pyannote -> Referat)">3. Pyannote</span>
@@ -588,9 +588,15 @@
       <span class="ckpt-pill" id="ckpt_s5" onclick="selectTaskMode('only_5_notes')" title="Klikk for å kjøre kun Steg 5 (Generer Referat/Notat på nytt)">5. Referat/Notat</span>
     </div>
 
-    <div id="hw_resource_banner">
-      <span id="hw_resource_text">Sjekker maskinvare...</span>
-      <button id="apply_rec_btn" class="btn-sm" onclick="applyRecommendedProfile()" style="display: none;">Bruk anbefalt</button>
+    <div style="display: inline-flex; align-items: center; gap: 8px;">
+      <div id="hw_resource_banner">
+        <span id="hw_resource_text">Sjekker maskinvare...</span>
+        <button id="apply_rec_btn" class="btn-sm" onclick="applyRecommendedProfile()" style="display: none;">Bruk anbefalt</button>
+      </div>
+      <select id="ui_lang_select" onchange="setUiLanguage(this.value)" style="max-width: 78px; padding: 2px 6px; font-size: 11px;" title="UI Language / Grensesnittspråk">
+        <option value="no" selected>🇳🇴 NO</option>
+        <option value="en">🇬🇧 EN</option>
+      </select>
     </div>
   </div>
 
@@ -599,13 +605,13 @@
     <summary>
       <span class="summary-title">
         <span class="chevron">▶</span>
-        <span>⚙️ Innstillinger, Modeller & Utdatafiler</span>
+        <span id="lbl_adv_drawer">⚙️ Innstillinger, Modeller & Utdatafiler</span>
       </span>
       <span id="settings_summary_pill">★ Anbefalt (Auto) • Auto-modus • Fortsett fra sjekkpunkt</span>
     </summary>
     <div class="drawer-body">
       <div class="row">
-        <label>Talere & Modus:</label>
+        <label id="lbl_row_speakers">Talere & Modus:</label>
         <input type="number" id="min_speakers" placeholder="Min" min="1" max="20" style="max-width: 58px;" oninput="updateSettingsSummary()">
         <input type="number" id="max_speakers" placeholder="Maks" min="1" max="20" style="max-width: 58px;" oninput="updateSettingsSummary()">
         <button class="btn-sm" onclick="setExactSpeakers(1)" title="1 taler – Foredrag / Presentasjon">1</button>
@@ -621,7 +627,7 @@
       </div>
 
       <div class="row">
-        <label>Modeller & Språk:</label>
+        <label id="lbl_row_models">Modeller & Språk:</label>
         <select id="model_profile" onchange="onProfileChanged()" style="max-width: 195px;" title="Velg ferdig modellprofil tilpasset maskinvaren eller velg modeller manuelt">
           <option value="auto" selected>★ Anbefalt (Auto ut fra PC/Mac)</option>
           <option value="recommended">Profil: Testvinner #1 (Small + Gemma 4)</option>
@@ -646,7 +652,7 @@
       </div>
 
       <div class="row">
-        <label>Steg-oppgave:</label>
+        <label id="lbl_row_task">Steg-oppgave:</label>
         <select id="task_mode" onchange="validateNames()" title="Velg om du vil fortsette fra siste sjekkpunkt, kjøre alt på nytt, eller kjøre enkeltoppgaver">
           <option value="auto_resume" selected>Fortsett fra sjekkpunkt (hopp over ferdige steg)</option>
           <option value="full_fresh">Kjør alt på nytt (Steg 1–5)</option>
@@ -661,18 +667,18 @@
       </div>
 
       <div class="row">
-        <label>Lagre i mappe:</label>
+        <label id="lbl_row_folder">Lagre i mappe:</label>
         <input type="text" id="out_dir" placeholder="Velg mappe..." oninput="validateNames()">
-        <button class="btn-sm" onclick="browseFolder()">Velg...</button>
-        <button class="btn-sm" onclick="openFinder()" title="Vis i filutforsker">Åpne</button>
+        <button id="btn_browse_folder" class="btn-sm" onclick="browseFolder()">Velg...</button>
+        <button id="btn_open_folder_row" class="btn-sm" onclick="openFinder()" title="Vis i filutforsker">Åpne</button>
       </div>
 
       <div class="row">
-        <label>Utdatafiler:</label>
+        <label id="lbl_row_outfiles">Utdatafiler:</label>
         <input type="text" id="html_name" placeholder="transkripsjon.html" oninput="validateNames()" title="HTML Transkripsjon">
         <input type="text" id="notes_name" placeholder="referat.md" oninput="validateNames()" title="Markdown Referat">
         <input type="text" id="notes_html_name" placeholder="referat.html" oninput="validateNames()" title="HTML Referat">
-        <button class="btn-sm" onclick="autoIncrementNames()" title="Foreslå nye ledige filnavn hvis du ikke vil overskrive">Ledig navn</button>
+        <button id="btn_unique_names" class="btn-sm" onclick="autoIncrementNames()" title="Foreslå nye ledige filnavn hvis du ikke vil overskrive">Ledig navn</button>
       </div>
     </div>
   </details>
@@ -701,11 +707,11 @@
   <!-- Activity Log -->
   <div class="log-container">
     <div class="log-header">
-      <span>Aktivitetslogg</span>
+      <span id="lbl_log_header">Aktivitetslogg</span>
       <span style="display: inline-flex; gap: 6px;">
-        <button class="btn-sm" onclick="openFinder()" title="Åpne utdatamappen i Finder / Utforsker">📂 Åpne mappe</button>
-        <button class="btn-sm" onclick="copyLog()" title="Kopier hele loggen til utklippstavlen">Kopier logg</button>
-        <button class="btn-sm" onclick="saveLog()" title="Lagre loggen til en .txt-fil">Lagre logg...</button>
+        <button id="btn_open_folder_log" class="btn-sm" onclick="openFinder()" title="Åpne utdatamappen i Finder / Utforsker">📂 Åpne mappe</button>
+        <button id="btn_copy_log" class="btn-sm" onclick="copyLog()" title="Kopier hele loggen til utklippstavlen">Kopier logg</button>
+        <button id="btn_save_log" class="btn-sm" onclick="saveLog()" title="Lagre loggen til en .txt-fil">Lagre logg...</button>
       </span>
     </div>
     <div id="log">Klar. Start et opptak, eller velg en lydfil (.wav/.m4a/.opus/.mp3) eller en eksisterende transkripsjonsfil (.html/.json/.txt/.srt).</div>
@@ -719,8 +725,154 @@
   let recTimerInterval = null;
   let cachedHwInfo = null;
   let cachedProfiles = {};
+  let currentUiLang = "no";
+
+  const UI_I18N = {
+    no: {
+      lbl_step1_title: "1. Lydfil eller transkripsjon",
+      selected_file_empty: "Slipp fil her (.m4a, .wav, .opus, .mp3, .html, .json) eller velg...",
+      check_audio_btn: "Lydsjekk (20s)",
+      browse_audio_btn: "Velg fil...",
+      rec_start: "🎙️ Spill inn møte",
+      rec_stop: "⏹ Stopp opptak",
+      live_ready: "Lyd: klar",
+      speak_guide_btn: "Tale-instruks",
+      lbl_auto_speak: "Les opp navnerunde-guide",
+      lbl_live_chk: "Sanntids-lydsjekk",
+      prompt_banner_html: "<strong>Møtestart-guide for god talergjenkjenning og lydsjekk:</strong><br>1. <b>Møteleder:</b> Si kort hva møtet gjelder og dagens dato.<br>2. <b>Navnerunde rundt bordet:</b> Hver deltaker sier eget navn og tittel/rolle i én hel setning. Følg med i <b>Sanntids-lydsjekk</b> under for å se at alle rundt bordet fanges opp med <i>Godt lydnivå</i> (slå av macOS «Stemmeisolasjon» hvis noen faller ut).",
+      lbl_meeting_title: "2. Møtetittel & Dato",
+      meeting_title_ph: "F.eks. Prosjektmøte – 2026-10-29",
+      lbl_speakers_hint: "Deltakere & Roller (setter antall talere automatisk)",
+      speakers_hint_ph: "F.eks. Ola Nordmann (Møteleder), Kari Hansen (Arkitekt)",
+      lbl_context_drawer: "📎 Agenda, lysbilder & manuelle møtenotater (valgfritt)",
+      btn_add_agenda: "+ Agenda / Lysbilder...",
+      btn_add_notes: "+ Manuelle notater...",
+      lbl_agenda_text: "Agenda / Lysbilder (.pptx, .pdf, .docx, .md)",
+      agenda_ph: "Lim inn saksliste eller klikk «+ Agenda / Lysbilder...»",
+      lbl_manual_notes_text: "Manuelle møtenotater / Fasit-utkast (.odt, .docx, .md)",
+      manual_notes_ph: "Valgfritt: Egne notater fra møtet for å kvalitetssikre navn, saker og vedtak...",
+      lbl_stages: "Steg:",
+      apply_rec_btn: "Bruk anbefalt",
+      lbl_adv_drawer: "⚙️ Innstillinger, Modeller & Utdatafiler",
+      lbl_row_speakers: "Talere & Modus:",
+      lbl_row_models: "Modeller & Språk:",
+      lbl_row_task: "Steg-oppgave:",
+      lbl_row_folder: "Lagre i mappe:",
+      lbl_row_outfiles: "Utdatafiler:",
+      btn_browse_folder: "Velg...",
+      btn_open_folder_row: "Åpne",
+      btn_unique_names: "Ledig navn",
+      stop_btn: "Stopp / Pause",
+      run_btn_idle: "▶ Start / Fortsett",
+      run_btn_busy: "Arbeider...",
+      progress_ready: "Klar",
+      lbl_log_header: "Aktivitetslogg",
+      btn_open_folder_log: "📂 Åpne mappe",
+      btn_copy_log: "Kopier logg",
+      btn_save_log: "Lagre logg...",
+      log_ready: "Klar. Start et opptak, eller velg en lydfil (.wav/.m4a/.opus/.mp3) eller en eksisterende transkripsjonsfil (.html/.json/.txt/.srt).",
+      ckpt_labels: ["1. ASR", "2. Align", "3. Pyannote", "4. Navn & HTML", "5. Referat/Notat"],
+      conflict_dup: "Alle tre utdatafiler må ha ulike filnavn.",
+      conflict_overwrite: "Merk: Eksisterende utdatafil oppdateres ved kjøring (eller åpne ⚙️ Innstillinger -> «Ledig navn»).",
+      auto_speakers: "Auto talere",
+      speakers_unit: "taler(e)"
+    },
+    en: {
+      lbl_step1_title: "1. Audio File or Transcript",
+      selected_file_empty: "Drop file here (.m4a, .wav, .opus, .mp3, .html, .json) or browse...",
+      check_audio_btn: "Audio Check (20s)",
+      browse_audio_btn: "Browse...",
+      rec_start: "🎙️ Record Meeting",
+      rec_stop: "⏹ Stop Recording",
+      live_ready: "Audio: ready",
+      speak_guide_btn: "Voice Guide",
+      lbl_auto_speak: "Speak round-table intro guide",
+      lbl_live_chk: "Live audio check",
+      prompt_banner_html: "<strong>Meeting Start Guide for Speaker Identification & Audio Check:</strong><br>1. <b>Meeting Chair:</b> Briefly state the meeting topic and today's date.<br>2. <b>Round-Table Intro:</b> Each participant states their full name and role in a complete sentence. Watch the <b>Live audio check</b> below to confirm everyone is captured at a <i>Good audio level</i> (disable OS Voice Isolation if anyone drops out).",
+      lbl_meeting_title: "2. Meeting Title & Date",
+      meeting_title_ph: "E.g. Project Sync – 2026-10-29",
+      lbl_speakers_hint: "Participants & Roles (auto-sets speaker count)",
+      speakers_hint_ph: "E.g. Ola Nordmann (Chair), Kari Hansen (Architect)",
+      lbl_context_drawer: "📎 Agenda, Slides & Manual Notes (optional)",
+      btn_add_agenda: "+ Agenda / Slides...",
+      btn_add_notes: "+ Manual Notes...",
+      lbl_agenda_text: "Agenda / Slides (.pptx, .pdf, .docx, .md)",
+      agenda_ph: "Paste agenda or click '+ Agenda / Slides...'",
+      lbl_manual_notes_text: "Manual Meeting Notes / Draft Minutes (.odt, .docx, .md)",
+      manual_notes_ph: "Optional: Your own notes to ground speaker names, topics, and decisions...",
+      lbl_stages: "Stage:",
+      apply_rec_btn: "Use Recommended",
+      lbl_adv_drawer: "⚙️ Settings, Models & Output Files",
+      lbl_row_speakers: "Speakers & Mode:",
+      lbl_row_models: "Models & Lang:",
+      lbl_row_task: "Stage Task:",
+      lbl_row_folder: "Output Folder:",
+      lbl_row_outfiles: "Output Files:",
+      btn_browse_folder: "Browse...",
+      btn_open_folder_row: "Open",
+      btn_unique_names: "Unique Name",
+      stop_btn: "Stop / Pause",
+      run_btn_idle: "▶ Start / Resume",
+      run_btn_busy: "Working...",
+      progress_ready: "Ready",
+      lbl_log_header: "Activity Log",
+      btn_open_folder_log: "📂 Open Folder",
+      btn_copy_log: "Copy Log",
+      btn_save_log: "Save Log...",
+      log_ready: "Ready. Start a recording, or select an audio file (.wav/.m4a/.opus/.mp3) or existing transcript (.html/.json/.txt/.srt).",
+      ckpt_labels: ["1. ASR", "2. Align", "3. Pyannote", "4. Names & HTML", "5. Minutes/Notes"],
+      conflict_dup: "All three output files must have distinct filenames.",
+      conflict_overwrite: "Note: Existing output file will be updated (or open ⚙️ Settings -> 'Unique Name').",
+      auto_speakers: "Auto speakers",
+      speakers_unit: "speaker(s)"
+    }
+  };
+
+  function setUiLanguage(lang) {
+    currentUiLang = (lang === 'en') ? 'en' : 'no';
+    const sel = document.getElementById('ui_lang_select');
+    if (sel && sel.value !== currentUiLang) sel.value = currentUiLang;
+    const d = UI_I18N[currentUiLang];
+    const textIds = [
+      'lbl_step1_title', 'check_audio_btn', 'browse_audio_btn', 'speak_guide_btn',
+      'lbl_auto_speak', 'lbl_live_chk', 'lbl_meeting_title', 'lbl_speakers_hint',
+      'lbl_context_drawer', 'btn_add_agenda', 'btn_add_notes', 'lbl_agenda_text',
+      'lbl_manual_notes_text', 'lbl_stages', 'apply_rec_btn', 'lbl_adv_drawer',
+      'lbl_row_speakers', 'lbl_row_models', 'lbl_row_task', 'lbl_row_folder',
+      'lbl_row_outfiles', 'btn_browse_folder', 'btn_open_folder_row', 'btn_unique_names',
+      'stop_btn', 'lbl_log_header', 'btn_open_folder_log', 'btn_copy_log', 'btn_save_log'
+    ];
+    for (const id of textIds) {
+      const el = document.getElementById(id);
+      if (el && d[id]) el.textContent = d[id];
+    }
+    if (!currentAudioPath) {
+      const sf = document.getElementById('selected-file');
+      if (sf) sf.textContent = d.selected_file_empty;
+    }
+    const recBtn = document.getElementById('rec_btn');
+    if (recBtn) recBtn.textContent = isRecording ? d.rec_stop : d.rec_start;
+    const runBtn = document.getElementById('run_btn');
+    if (runBtn) runBtn.textContent = isJobRunning ? d.run_btn_busy : d.run_btn_idle;
+    const pb = document.getElementById('prompt_banner');
+    if (pb) pb.innerHTML = d.prompt_banner_html;
+    document.getElementById('meeting_title').placeholder = d.meeting_title_ph;
+    document.getElementById('speaker_names_hint').placeholder = d.speakers_hint_ph;
+    document.getElementById('agenda_text').placeholder = d.agenda_ph;
+    document.getElementById('manual_notes_text').placeholder = d.manual_notes_ph;
+    const ckptIds = ['ckpt_s1', 'ckpt_s2', 'ckpt_s3', 'ckpt_s4', 'ckpt_s5'];
+    ckptIds.forEach((cid, i) => {
+      const el = document.getElementById(cid);
+      if (el) {
+        const done = el.classList.contains('done');
+        el.textContent = (done ? "✓ " : "") + d.ckpt_labels[i];
+      }
+    });
+    updateSettingsSummary();
+  }
 
   function updateSettingsSummary() {
+    const d = UI_I18N[currentUiLang] || UI_I18N.no;
     const pill = document.getElementById('settings_summary_pill');
     if (pill) {
       const wVal = document.getElementById('whisper_model').value || '';
@@ -728,11 +880,11 @@
       const mVal = document.getElementById('ollama_model').value.trim() || 'gemma4:e4b';
       const minS = document.getElementById('min_speakers').value;
       const maxS = document.getElementById('max_speakers').value;
-      const spkTxt = (minS && minS === maxS) ? `${minS} taler(e)` : ((minS || maxS) ? `${minS || '?'}-${maxS || '?'} talere` : 'Auto talere');
+      const spkTxt = (minS && minS === maxS) ? `${minS} ${d.speakers_unit}` : ((minS || maxS) ? `${minS || '?'}-${maxS || '?'} ${d.speakers_unit}` : d.auto_speakers);
       const taskSel = document.getElementById('task_mode');
       const taskTxt = taskSel && taskSel.options[taskSel.selectedIndex]
         ? taskSel.options[taskSel.selectedIndex].text.split('(')[0].trim()
-        : 'Fortsett';
+        : 'Resume';
       pill.textContent = `${shortW} + ${mVal} • ${spkTxt} • ${taskTxt}`;
     }
     const badge = document.getElementById('context_count_badge');
@@ -740,8 +892,8 @@
       const ag = document.getElementById('agenda_text').value.trim();
       const mn = document.getElementById('manual_notes_text').value.trim();
       const parts = [];
-      if (ag) parts.push(`Agenda (${ag.length} tegn)`);
-      if (mn) parts.push(`Notater (${mn.length} tegn)`);
+      if (ag) parts.push(`Agenda (${ag.length})`);
+      if (mn) parts.push(`Notes (${mn.length})`);
       badge.textContent = parts.length ? `— ${parts.join(' + ')}` : '';
     }
   }
@@ -816,6 +968,9 @@
       document.getElementById('ollama_model').value = defs.hardware.recommended_ollama || 'gemma4:e4b';
       updateHardwareBanner(defs.hardware, defs.resource_fit);
     }
+    if (defs.ui_lang) {
+      setUiLanguage(defs.ui_lang);
+    }
     updateSettingsSummary();
   });
 
@@ -861,7 +1016,7 @@
 
   function speakGuide() {
     document.getElementById('prompt_banner').style.display = 'block';
-    pywebview.api.speak_intro_prompt();
+    pywebview.api.speak_intro_prompt(currentUiLang);
   }
 
   function updateLiveLevel(lvl) {

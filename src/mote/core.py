@@ -916,6 +916,7 @@ def build_runtime_env() -> dict[str, str]:
         str(LOCAL_BIN_DIR),
         str(Path.home() / ".cache" / "mote" / "bin"),
         str(Path.home() / ".local" / "share" / "uv" / "tools" / "whisperx" / "bin"),
+        str(Path.home() / ".local" / "share" / "uv" / "tools" / "whisperx" / "Scripts"),
         str(Path.home() / ".local" / "bin"),
         str(Path.home() / ".cargo" / "bin"),
         str(Path.home() / ".local" / "share" / "mise" / "shims"),
@@ -929,8 +930,148 @@ def build_runtime_env() -> dict[str, str]:
         if local_app:
             extra.append(str(Path(local_app) / "Programs" / "Ollama"))
             extra.append(str(Path(local_app) / "Microsoft" / "WinGet" / "Links"))
+        app_data = os.environ.get("APPDATA", "")
+        if app_data:
+            extra.append(str(Path(app_data) / "uv" / "tools" / "whisperx" / "Scripts"))
     env["PATH"] = os.pathsep.join(extra + [env.get("PATH", "")])
     return env
+
+
+def resolve_ui_lang(lang_arg: str | None = None, argv: list[str] | None = None) -> str:
+    """Resolve UI/help language ('en' or 'no') from explicit argument, CLI flags, or MOTE_LANG.
+
+    >>> resolve_ui_lang("en")
+    'en'
+    >>> resolve_ui_lang("no")
+    'no'
+    >>> resolve_ui_lang(None, ["--ui-lang", "en", "--help"])
+    'en'
+    >>> resolve_ui_lang(None, ["--ui-lang=en"])
+    'en'
+    >>> resolve_ui_lang(None, ["--check-hw"])
+    'no'
+    """
+    if lang_arg:
+        low = lang_arg.strip().lower()
+        if low.startswith("en"):
+            return "en"
+        if low in ("no", "nb", "nn"):
+            return "no"
+
+    args_list = list(argv) if argv is not None else []
+    for idx, token in enumerate(args_list):
+        if token == "--ui-lang" and idx + 1 < len(args_list):
+            val = args_list[idx + 1].strip().lower()
+            if val.startswith("en"):
+                return "en"
+            return "no"
+        if token.startswith("--ui-lang="):
+            val = token.split("=", 1)[1].strip().lower()
+            if val.startswith("en"):
+                return "en"
+            return "no"
+
+    env_lang = os.environ.get("MOTE_LANG", "").strip().lower()
+    if env_lang.startswith("en"):
+        return "en"
+    return "no"
+
+
+def build_ffmpeg_mic_record_cmd(
+    ffmpeg_bin: str,
+    out_wav: Path,
+    platform_str: str | None = None,
+    os_name: str | None = None,
+    env: dict[str, str] | None = None,
+) -> list[str]:
+    """Build cross-platform 16kHz mono PCM16 ffmpeg microphone capture command for macOS, Windows, and Linux.
+
+    >>> cmd_mac = build_ffmpeg_mic_record_cmd("ffmpeg", Path("/tmp/a.wav"), platform_str="darwin", os_name="posix")
+    >>> cmd_mac[:6]
+    ['ffmpeg', '-y', '-f', 'avfoundation', '-i', ':default']
+    >>> cmd_win = build_ffmpeg_mic_record_cmd("ffmpeg.exe", Path("C:/a.wav"), platform_str="win32", os_name="nt")
+    >>> cmd_win[:6]
+    ['ffmpeg.exe', '-y', '-f', 'dshow', '-i', 'audio=default']
+    >>> cmd_lin = build_ffmpeg_mic_record_cmd("ffmpeg", Path("/tmp/a.wav"), platform_str="linux", os_name="posix")
+    >>> cmd_lin[2] == '-f' and cmd_lin[3] in ('pulse', 'alsa')
+    True
+    """
+    plat = platform_str if platform_str is not None else sys.platform
+    os_n = os_name if os_name is not None else os.name
+
+    if plat == "darwin":
+        return [
+            ffmpeg_bin,
+            "-y",
+            "-f",
+            "avfoundation",
+            "-i",
+            ":default",
+            "-ac",
+            "1",
+            "-ar",
+            "16000",
+            "-c:a",
+            "pcm_s16le",
+            str(out_wav),
+        ]
+
+    if os_n == "nt" or plat.startswith("win"):
+        dshow_input = "audio=default"
+        if os.name == "nt" and Path(ffmpeg_bin).is_file():
+            try:
+                proc = subprocess.run(
+                    [ffmpeg_bin, "-hide_banner", "-list_devices", "true", "-f", "dshow", "-i", "dummy"],
+                    env=env,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=3,
+                    check=False,
+                )
+                for line in (proc.stdout or "").splitlines():
+                    m_dev = re.search(r'"([^"]+)"\s*\(audio\)', line)
+                    if m_dev:
+                        dshow_input = f"audio={m_dev.group(1)}"
+                        break
+            except Exception:
+                pass
+        return [
+            ffmpeg_bin,
+            "-y",
+            "-f",
+            "dshow",
+            "-i",
+            dshow_input,
+            "-ac",
+            "1",
+            "-ar",
+            "16000",
+            "-c:a",
+            "pcm_s16le",
+            str(out_wav),
+        ]
+
+    linux_fmt = "pulse"
+    if sys.platform.startswith("linux") and not shutil.which("pactl") and not os.environ.get("PULSE_SERVER"):
+        linux_fmt = "alsa"
+    return [
+        ffmpeg_bin,
+        "-y",
+        "-f",
+        linux_fmt,
+        "-i",
+        "default",
+        "-ac",
+        "1",
+        "-ar",
+        "16000",
+        "-c:a",
+        "pcm_s16le",
+        str(out_wav),
+    ]
 
 
 MODEL_PROFILES: dict[str, dict[str, Any]] = {
@@ -3023,15 +3164,25 @@ def run_pipeline(
     }
 
 
-def build_cli_parser() -> Any:
-    """Create the command-line ArgumentParser for transcribe.py and mote_app.py --cli."""
+def build_cli_parser(ui_lang: str | None = None, argv: list[str] | None = None) -> Any:
+    """Create the command-line ArgumentParser for transcribe.py and mote_app.py --cli (English & Norwegian)."""
     import argparse
+
+    lang = resolve_ui_lang(ui_lang, argv if argv is not None else sys.argv[1:])
+    is_en = lang == "en"
 
     parser = argparse.ArgumentParser(
         prog="transcribe.py",
         description=(
-            "100% lokal møtetranskripsjon, taler-separasjon (WhisperX + Pyannote) "
-            "og møtereferat / foredragsnotater (Ollama) med sjekkpunkter og krasj-gjenopptak."
+            (
+                "100% local meeting transcription, speaker diarization (WhisperX + Pyannote), "
+                "and meeting minutes / lecture notes (Ollama) with stage checkpoints and crash-resume."
+            )
+            if is_en
+            else (
+                "100% lokal møtetranskripsjon, taler-separasjon (WhisperX + Pyannote) "
+                "og møtereferat / foredragsnotater (Ollama) med sjekkpunkter og krasj-gjenopptak."
+            )
         ),
     )
     parser.add_argument(
@@ -3039,80 +3190,137 @@ def build_cli_parser() -> Any:
         nargs="?",
         type=Path,
         default=None,
-        help="Sti til lydfil (.wav, .m4a, .opus, .mp3) eller eksisterende transkripsjon (.html, .json, .txt, .srt, .vtt)",
+        help=(
+            "Path to audio file (.wav, .m4a, .opus, .mp3) or existing transcript (.html, .json, .txt, .srt, .vtt)"
+            if is_en
+            else "Sti til lydfil (.wav, .m4a, .opus, .mp3) eller eksisterende transkripsjon (.html, .json, .txt, .srt, .vtt)"
+        ),
     )
     parser.add_argument(
         "-o",
         "--out-dir",
         type=Path,
         default=None,
-        help="Mappe for utdatafiler og .mote_checkpoints (standard: samme mappe som input_file)",
+        help=(
+            "Directory for output files and .mote_checkpoints (default: same folder as input_file)"
+            if is_en
+            else "Mappe for utdatafiler og .mote_checkpoints (standard: samme mappe som input_file)"
+        ),
+    )
+    parser.add_argument(
+        "--ui-lang",
+        choices=["no", "en"],
+        default=lang,
+        help=(
+            "Interface and help language: 'en' (English) or 'no' (Norwegian, default)"
+            if is_en
+            else "Språk for hjelpetekst og brukergrensesnitt: 'no' (norsk, standard) eller 'en' (engelsk)"
+        ),
     )
     parser.add_argument(
         "--profile",
         choices=["auto", "light", "fast", "recommended", "custom"],
         default="custom",
         help=(
-            "Modellprofil: 'auto' velger anbefalt kombinasjon ut fra maskinvare (RAM/CPU/GPU), "
-            "'light' (8 GB RAM), 'fast' (Distil-Turbo + Gemma 4), 'recommended' (NB-Whisper Small + Gemma 4)"
+            (
+                "Model profile: 'auto' selects recommended models from hardware (RAM/CPU/GPU), "
+                "'light' (8 GB RAM), 'fast' (Distil-Turbo + Gemma 4), 'recommended' (NB-Whisper Small + Gemma 4)"
+            )
+            if is_en
+            else (
+                "Modellprofil: 'auto' velger anbefalt kombinasjon ut fra maskinvare (RAM/CPU/GPU), "
+                "'light' (8 GB RAM), 'fast' (Distil-Turbo + Gemma 4), 'recommended' (NB-Whisper Small + Gemma 4)"
+            )
         ),
     )
     parser.add_argument(
         "--check-hw",
         action="store_true",
-        help="Vis oppdaget maskinvare, ressursstatus og anbefalt modellkombinasjon, og avslutt",
+        help=(
+            "Print detected hardware, resource fit status, and recommended model profile as JSON, then exit"
+            if is_en
+            else "Vis oppdaget maskinvare, ressursstatus og anbefalt modellkombinasjon, og avslutt"
+        ),
     )
     parser.add_argument(
         "-w",
         "--whisper-model",
         default="NbAiLab/nb-whisper-small",
-        help="Whisper-modell (standard: %(default)s)",
+        help=(
+            "Whisper ASR model (default: %(default)s)"
+            if is_en
+            else "Whisper-modell (standard: %(default)s)"
+        ),
     )
     parser.add_argument(
         "-m",
         "--ollama-model",
         default="gemma4:e4b",
-        help="Ollama-modell for navnegjenkjenning og referat (standard: %(default)s)",
+        help=(
+            "Ollama LLM model for speaker name mapping and meeting notes (default: %(default)s)"
+            if is_en
+            else "Ollama-modell for navnegjenkjenning og referat (standard: %(default)s)"
+        ),
     )
     parser.add_argument(
         "-l",
         "--language",
         default="no",
-        help="Språkkode for transkripsjon (standard: %(default)s)",
+        help=(
+            "Spoken audio language code for transcription, e.g. 'no' or 'en' (default: %(default)s)"
+            if is_en
+            else "Språkkode for transkripsjon (standard: %(default)s)"
+        ),
     )
     parser.add_argument(
         "--min-speakers",
         type=int,
         default=None,
-        help="Minimum antall talere (f.eks. 1 for foredrag eller 4 for 4-talers møte)",
+        help=(
+            "Minimum number of speakers (e.g. 1 for lecture or 4 for a 4-person meeting)"
+            if is_en
+            else "Minimum antall talere (f.eks. 1 for foredrag eller 4 for 4-talers møte)"
+        ),
     )
     parser.add_argument(
         "--max-speakers",
         type=int,
         default=None,
-        help="Maksimalt antall talere",
+        help="Maximum number of speakers" if is_en else "Maksimalt antall talere",
     )
     parser.add_argument(
         "-n",
         "--speakers",
         type=int,
         default=None,
-        help="Lås til nøyaktig N talere (setter både --min-speakers=N og --max-speakers=N)",
+        help=(
+            "Lock to exactly N speakers (sets both --min-speakers=N and --max-speakers=N)"
+            if is_en
+            else "Lås til nøyaktig N talere (setter både --min-speakers=N og --max-speakers=N)"
+        ),
     )
     parser.add_argument(
         "--speaker-names",
         default="",
-        help="Kommaseparert liste med kjente deltakere/roller (f.eks. 'Kari Nordmann (Leder), Ola Hansen')",
+        help=(
+            "Comma-separated list of known participants/roles (e.g. 'Kari Nordmann (Chair), Ola Hansen')"
+            if is_en
+            else "Kommaseparert liste med kjente deltakere/roller (f.eks. 'Kari Nordmann (Leder), Ola Hansen')"
+        ),
     )
     parser.add_argument(
         "--title",
         default="",
-        help="Møtetittel og dato (f.eks. 'Statusmøte – 2026-10-29')",
+        help=(
+            "Meeting title and date (e.g. 'Status Meeting – 2026-10-29')"
+            if is_en
+            else "Møtetittel og dato (f.eks. 'Statusmøte – 2026-10-29')"
+        ),
     )
     parser.add_argument(
         "--agenda",
         default="",
-        help="Agenda/kontekst som ren tekst",
+        help="Agenda/context as plain text" if is_en else "Agenda/kontekst som ren tekst",
     )
     parser.add_argument(
         "-c",
@@ -3120,12 +3328,20 @@ def build_cli_parser() -> Any:
         action="append",
         type=Path,
         default=[],
-        help="Sti til agenda, lysbilder eller dokument (.pptx, .pdf, .odp, .docx, .md, .txt). Kan oppgis flere ganger.",
+        help=(
+            "Path to agenda, slides, or document (.pptx, .pdf, .odp, .docx, .md, .txt). Can be passed multiple times."
+            if is_en
+            else "Sti til agenda, lysbilder eller dokument (.pptx, .pdf, .odp, .docx, .md, .txt). Kan oppgis flere ganger."
+        ),
     )
     parser.add_argument(
         "--manual-notes",
         default="",
-        help="Manuelle møtenotater / referat-utkast som ren tekst for å kvalitetssikre navn, saker og vedtak.",
+        help=(
+            "Manual meeting notes / draft minutes as plain text to verify names, topics, and decisions."
+            if is_en
+            else "Manuelle møtenotater / referat-utkast som ren tekst for å kvalitetssikre navn, saker og vedtak."
+        ),
     )
     parser.add_argument(
         "-M",
@@ -3133,55 +3349,87 @@ def build_cli_parser() -> Any:
         action="append",
         type=Path,
         default=[],
-        help="Sti til manuelle møtenotater / referat-utkast (.odt, .docx, .pdf, .md, .txt). Kan oppgis flere ganger.",
+        help=(
+            "Path to manual meeting notes / draft minutes (.odt, .docx, .pdf, .md, .txt). Can be passed multiple times."
+            if is_en
+            else "Sti til manuelle møtenotater / referat-utkast (.odt, .docx, .pdf, .md, .txt). Kan oppgis flere ganger."
+        ),
     )
     parser.add_argument(
         "--mode",
         choices=list(VALID_NOTE_MODES),
         default="auto",
-        help="Notatmodus: auto (foredrag ved 1 taler, ellers møte), mote (møtereferat), foredrag (foredragsnotater)",
+        help=(
+            "Note mode: auto (lecture if 1 speaker, else meeting), mote (meeting minutes), foredrag (lecture notes)"
+            if is_en
+            else "Notatmodus: auto (foredrag ved 1 taler, ellers møte), mote (møtereferat), foredrag (foredragsnotater)"
+        ),
     )
     parser.add_argument(
         "--task",
         choices=list(VALID_TASK_MODES),
         default="auto_resume",
-        help="Oppgavemodus / stegvalg (standard: auto_resume som fortsetter fra siste sjekkpunkt)",
+        help=(
+            "Task / stage execution mode (default: auto_resume to continue from last saved checkpoint)"
+            if is_en
+            else "Oppgavemodus / stegvalg (standard: auto_resume som fortsetter fra siste sjekkpunkt)"
+        ),
     )
     parser.add_argument(
         "--hf-token",
         default="",
-        help="Valgfri Hugging Face Read-token (ellers brukes HF_TOKEN eller ~/.cache/huggingface/token)",
+        help=(
+            "Optional Hugging Face Read token (otherwise uses HF_TOKEN or ~/.cache/huggingface/token)"
+            if is_en
+            else "Valgfri Hugging Face Read-token (ellers brukes HF_TOKEN eller ~/.cache/huggingface/token)"
+        ),
     )
     parser.add_argument(
         "--status",
         action="store_true",
-        help="Vis kun sjekkpunkt-status (Steg 1–5) for valgt fil uten å kjøre",
+        help=(
+            "Print checkpoint completion status (Stages 1–5) as JSON without running"
+            if is_en
+            else "Vis kun sjekkpunkt-status (Steg 1–5) for valgt fil uten å kjøre"
+        ),
     )
     parser.add_argument(
         "--live-check",
         action="store_true",
-        help="Kjør grov sanntids-transkripsjon og lydnivåsjekk (dBFS) på valgt lydfil eller direkte fra mikrofon",
+        help=(
+            "Run coarse real-time transcription and audio level check (dBFS) on input file or default microphone"
+            if is_en
+            else "Kjør grov sanntids-transkripsjon og lydnivåsjekk (dBFS) på valgt lydfil eller direkte fra mikrofon"
+        ),
     )
     parser.add_argument(
         "--live-seconds",
         type=float,
         default=20.0,
-        help="Varighet i sekunder for --live-check (standard: %(default)s)",
+        help=(
+            "Duration in seconds for --live-check (default: %(default)s)"
+            if is_en
+            else "Varighet i sekunder for --live-check (standard: %(default)s)"
+        ),
     )
     parser.add_argument(
         "--gui",
         action="store_true",
-        help="Åpne skrivebordsvinduet (GUI) eksplisitt",
+        help="Open the desktop GUI window explicitly" if is_en else "Åpne skrivebordsvinduet (GUI) eksplisitt",
     )
     parser.add_argument(
         "--cli",
         action="store_true",
-        help="Kjør i kommandolinjemodus (CLI)",
+        help="Run in command-line interface (CLI) mode" if is_en else "Kjør i kommandolinjemodus (CLI)",
     )
     parser.add_argument(
         "--self-test",
         action="store_true",
-        help="Kjør innebygd selvtest av maler, API og rørledning uten å åpne GUI-vindu",
+        help=(
+            "Run built-in self-test of embedded templates, API, and pipeline without opening a GUI window"
+            if is_en
+            else "Kjør innebygd selvtest av maler, API og rørledning uten å åpne GUI-vindu"
+        ),
     )
     return parser
 
@@ -3197,21 +3445,7 @@ def run_live_mic_check(
     ffmpeg_bin = ensure_ffmpeg(env, lambda msg: print(msg, flush=True))
     with tempfile.TemporaryDirectory(prefix="mote_mic_check_") as tmp_dir:
         rec_file = Path(tmp_dir) / "mic_live_check.wav"
-        if sys.platform == "darwin":
-            cmd = [
-                ffmpeg_bin, "-y", "-f", "avfoundation", "-i", ":default",
-                "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(rec_file),
-            ]
-        elif os.name == "nt":
-            cmd = [
-                ffmpeg_bin, "-y", "-f", "dshow", "-i", "audio=default",
-                "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(rec_file),
-            ]
-        else:
-            cmd = [
-                ffmpeg_bin, "-y", "-f", "pulse", "-i", "default",
-                "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(rec_file),
-            ]
+        cmd = build_ffmpeg_mic_record_cmd(ffmpeg_bin, rec_file, env=env)
 
         print(
             f"==> GROV SANNTIDS-LYDSJEKK FRA MIKROFON ({duration_sec:.0f}s – trykk Ctrl+C for å avslutte)...",
@@ -3257,7 +3491,7 @@ def run_live_mic_check(
 
 def cli_main(argv: list[str] | None = None) -> int:
     """CLI entrypoint for transcribe.py and mote_app.py."""
-    parser = build_cli_parser()
+    parser = build_cli_parser(argv=argv)
     args = parser.parse_args(argv)
 
     hw_info = detect_hardware_resources(args.out_dir)

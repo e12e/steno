@@ -174,6 +174,11 @@ def build() -> int:
     out_content = generate_single_file_content()
     DIST_FILE.write_text(out_content, encoding="utf-8")
     DIST_FILE.chmod(0o755)
+    www_rec_dir = ROOT_DIR / "www" / "rec"
+    if www_rec_dir.is_dir():
+        www_script = www_rec_dir / "mote_app.py"
+        www_script.write_text(out_content, encoding="utf-8")
+        www_script.chmod(0o755)
     print(f"==> Ferdig bygget og AST-verifisert! Størrelse: {DIST_FILE.stat().st_size // 1024} KB")
     return 0
 

@@ -24,6 +24,7 @@ from mote.core import (  # noqa: E402
     WHISPERX_STAGE_RUNNER_CODE,
     LiveAudioMonitor,
     build_cli_parser,
+    build_ffmpeg_mic_record_cmd,
     build_runtime_env,
     build_whisper_initial_prompt,
     clean_base_stem,
@@ -39,6 +40,7 @@ from mote.core import (  # noqa: E402
     is_transcript_file,
     resolve_moved_audio_path,
     resolve_speaker_bounds,
+    resolve_ui_lang,
     run_live_check_on_file,
     run_pipeline,
     unique_filename,
@@ -110,6 +112,7 @@ class MoteApi:
             "hardware": hw,
             "resource_fit": fit,
             "profiles": MODEL_PROFILES,
+            "ui_lang": resolve_ui_lang(),
         }
 
     def check_model_resources(
@@ -194,12 +197,21 @@ class MoteApi:
         self._log(f"==> Logg lagret til: {target_path}")
         return str(target_path)
 
-    def speak_intro_prompt(self) -> None:
-        """Speak the guided voice introduction prompt using local OS TTS."""
+    def speak_intro_prompt(self, ui_lang: str = "no") -> None:
+        """Speak the guided voice introduction prompt using local OS TTS (Norwegian or English)."""
+        is_en = str(ui_lang).strip().lower().startswith("en")
         prompt_text = (
-            "Opptaket er klart. "
-            "Steg en: Møteleder sier kort hva møtet gjelder og dagens dato. "
-            "Steg to: Ta en runde rundt bordet der hver deltaker sier sitt navn og sin tittel eller rolle."
+            (
+                "Recording is ready. "
+                "Step one: The meeting chair briefly states the meeting topic and today's date. "
+                "Step two: Go around the table so each participant states their full name and role in a complete sentence."
+            )
+            if is_en
+            else (
+                "Opptaket er klart. "
+                "Steg en: Møteleder sier kort hva møtet gjelder og dagens dato. "
+                "Steg to: Ta en runde rundt bordet der hver deltaker sier sitt navn og sin tittel eller rolle."
+            )
         )
         if self._tts_proc and self._tts_proc.poll() is None:
             self._tts_proc.terminate()
@@ -210,7 +222,7 @@ class MoteApi:
         elif os.name == "nt":
             ps_cmd = (
                 "Add-Type -AssemblyName System.Speech; "
-                f"(New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak('{prompt_text}')"
+                f"(New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak('{prompt_text.replace(chr(39), '')}')"
             )
             self._tts_proc = subprocess.Popen(
                 ["powershell", "-NoProfile", "-Command", ps_cmd],
@@ -218,10 +230,11 @@ class MoteApi:
                 stderr=subprocess.DEVNULL,
             )
         else:
+            voice = "en" if is_en else "no"
             if shutil.which("espeak-ng"):
-                self._tts_proc = subprocess.Popen(["espeak-ng", "-v", "no", prompt_text])
+                self._tts_proc = subprocess.Popen(["espeak-ng", "-v", voice, prompt_text])
             elif shutil.which("espeak"):
-                self._tts_proc = subprocess.Popen(["espeak", "-v", "no", prompt_text])
+                self._tts_proc = subprocess.Popen(["espeak", "-v", voice, prompt_text])
 
     def _on_live_level(self, lvl: dict[str, Any]) -> None:
         if self.window:
@@ -257,22 +270,7 @@ class MoteApi:
         out_dir.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
         rec_file = out_dir / unique_filename(out_dir, f"moteopptak_{stamp}", ".wav")
-
-        if sys.platform == "darwin":
-            cmd = [
-                ffmpeg_bin, "-y", "-f", "avfoundation", "-i", ":default",
-                "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(rec_file),
-            ]
-        elif os.name == "nt":
-            cmd = [
-                ffmpeg_bin, "-y", "-f", "dshow", "-i", "audio=default",
-                "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(rec_file),
-            ]
-        else:
-            cmd = [
-                ffmpeg_bin, "-y", "-f", "pulse", "-i", "default",
-                "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(rec_file),
-            ]
+        cmd = build_ffmpeg_mic_record_cmd(ffmpeg_bin, rec_file, env=env)
 
         try:
             self._rec_proc = subprocess.Popen(

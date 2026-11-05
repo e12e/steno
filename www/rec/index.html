@@ -1,0 +1,1038 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- MANDATORY (modern-web-guidance/dark-mode): Declare light and dark support to prevent FOUC -->
+    <meta name="color-scheme" content="light dark">
+    <link rel="canonical" href="https://hypertekst.net/rec/">
+    <title>Møtereferat (rec) — Local Meeting Transcription &amp; Minutes — The Chronicle</title>
+    <meta name="description" content="A single-file, strictly local desktop and command-line instrument for multi-speaker meeting recording, WhisperX transcription, Pyannote diarization, and Ollama minutes on macOS, Windows, and Linux.">
+
+    <!-- Open Graph Social Sharing Cards -->
+    <meta property="og:type" content="article">
+    <meta property="og:site_name" content="The Chronicle">
+    <meta property="og:title" content="Møtereferat (rec) — Local Meeting Transcription &amp; Minutes">
+    <meta property="og:description" content="Single-file local meeting transcription, speaker diarization, and minutes generation for macOS, Windows, and Linux.">
+    <meta property="og:url" content="https://hypertekst.net/rec/">
+    <meta property="og:image" content="https://hypertekst.net/img/pica-wings-color.jpg">
+
+    <!-- Twitter / X Card -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Møtereferat (rec) — Local Meeting Transcription &amp; Minutes">
+    <meta name="twitter:description" content="Single-file local meeting transcription, speaker diarization, and minutes generation for macOS, Windows, and Linux.">
+    <meta name="twitter:image" content="https://hypertekst.net/img/pica-wings-color.jpg">
+
+    <script>
+    /* Synchronous <head> theme bootstrap: prevents FOUC before first paint */
+    (function () {
+        try {
+            var t = localStorage.getItem('ht_theme') || localStorage.getItem('ht_beta_theme');
+            if (t === 'dark' || t === 'light') {
+                document.documentElement.setAttribute('data-theme', t);
+            }
+        } catch (e) {}
+    })();
+    </script>
+    <style>
+        *, *::before, *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-size: 100%;
+            font-weight: inherit;
+            vertical-align: baseline;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+        :root {
+            color-scheme: light dark;
+            --in-oklab: ;
+            --font-serif: "Georgia", "Times New Roman", "Nimbus Roman No9 L", serif;
+            --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            --font-mono: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+            --bg-canvas: #fbfaf6;
+            --bg-elevated: #f3f0e8;
+            --bg-card: #f6f3eb;
+            --bg-surface: #fbfaf6;
+            --text-primary: #181816;
+            --text-secondary: #4a4740;
+            --text-muted: #6e695f;
+            --border-strong: #181816;
+            --border-hairline: #d8d2c5;
+            --accent-primary: #6e5223;
+            --accent-secondary: #2b545c;
+            --tag-bg: #ebe6da;
+            @media (prefers-color-scheme: dark) {
+                --bg-canvas: #05070b;
+                --bg-elevated: #0b0e15;
+                --bg-card: #0e121a;
+                --bg-surface: #0b0e15;
+                --text-primary: #e6e0d4;
+                --text-secondary: #b5ad9e;
+                --text-muted: #847d70;
+                --border-strong: #a78f5c;
+                --border-hairline: #222630;
+                --accent-primary: #d4b87a;
+                --accent-secondary: #a2bfc6;
+                --tag-bg: #141923;
+            }
+            @supports (color: light-dark(white, black)) {
+                --bg-canvas: light-dark(#fbfaf6, #05070b);
+                --bg-elevated: light-dark(#f3f0e8, #0b0e15);
+                --bg-card: light-dark(#f6f3eb, #0e121a);
+                --bg-surface: light-dark(#fbfaf6, #0b0e15);
+                --text-primary: light-dark(#181816, #e6e0d4);
+                --text-secondary: light-dark(#4a4740, #b5ad9e);
+                --text-muted: light-dark(#6e695f, #847d70);
+                --border-strong: light-dark(#181816, #a78f5c);
+                --border-hairline: light-dark(#d8d2c5, #222630);
+                --accent-primary: light-dark(#6e5223, #d4b87a);
+                --accent-secondary: light-dark(#2b545c, #a2bfc6);
+                --tag-bg: light-dark(#ebe6da, #141923);
+            }
+            accent-color: var(--accent-primary);
+        }
+        @supports (background: linear-gradient(in oklab, white, black)) {
+            :root { --in-oklab: in oklab; }
+        }
+        html[data-theme="light"] { color-scheme: light; }
+        html[data-theme="dark"] { color-scheme: dark; }
+        html {
+            background-color: var(--bg-canvas);
+            color: var(--text-primary);
+            font-family: var(--font-serif);
+            font-size: 100%;
+            line-height: 1.62;
+            scroll-behavior: smooth;
+            transition: background-color 0.2s ease, color 0.2s ease;
+        }
+        body {
+            min-height: 100vh;
+            overflow-x: hidden;
+            background-color: var(--bg-canvas);
+            color: var(--text-primary);
+        }
+        a {
+            color: var(--text-primary);
+            text-decoration: underline;
+            text-decoration-color: var(--border-strong);
+            text-underline-offset: 0.18em;
+            text-decoration-thickness: 1px;
+            transition: color 0.15s ease, text-decoration-color 0.15s ease;
+        }
+        a:hover {
+            color: var(--accent-primary);
+            text-decoration-color: var(--accent-primary);
+        }
+        :focus-visible {
+            outline: 2px solid var(--accent-secondary);
+            outline-offset: 3px;
+        }
+        .nocturne-header {
+            position: relative;
+            background-color: #000000;
+            color: #ece6da;
+            width: 100%;
+            overflow: hidden;
+        }
+        .header-inner {
+            max-width: 1080px;
+            margin: 0 auto;
+            padding: 0.95rem 1.5rem 0;
+            position: relative;
+            z-index: 3;
+        }
+        .folio-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: nowrap;
+            gap: 0.75rem;
+            padding-bottom: 0.55rem;
+            border-bottom: 1px solid rgba(230, 224, 212, 0.22);
+            font-family: var(--font-sans);
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            color: #b8b0a2;
+            font-variant-numeric: tabular-nums;
+        }
+        .folio-meta {
+            display: flex;
+            align-items: center;
+            gap: 0.35rem 0.75rem;
+            flex-wrap: wrap;
+            min-width: 0;
+        }
+        .folio-meta a {
+            color: #dcd5c7;
+            text-decoration: none;
+        }
+        .folio-meta a:hover {
+            color: #d4b87a;
+            text-decoration: underline;
+        }
+        .folio-dot { color: #a78f5c; }
+        .theme-icon-btn {
+            appearance: none;
+            flex-shrink: 0;
+            margin: -0.2rem 0 -0.2rem auto;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 1.55rem;
+            height: 1.55rem;
+            padding: 0;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(230, 224, 212, 0.22);
+            border-radius: 3px;
+            color: #cfc7b8;
+            cursor: pointer;
+            transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+        }
+        .theme-icon-btn:hover {
+            background: rgba(167, 143, 92, 0.22);
+            border-color: #d4b87a;
+            color: #f5e9d0;
+        }
+        .theme-icon-btn svg {
+            width: 0.85rem;
+            height: 0.85rem;
+            display: none;
+            stroke: currentColor;
+            fill: none;
+            stroke-width: 1.75;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+        .theme-icon-btn[data-state="auto"] .icon-auto,
+        .theme-icon-btn[data-state="dark"] .icon-dark,
+        .theme-icon-btn[data-state="light"] .icon-light {
+            display: block;
+        }
+        .masthead-lockup {
+            text-align: center;
+            padding: 1.65rem 0 0.5rem;
+        }
+        .masthead-kicker {
+            font-family: var(--font-sans);
+            font-size: 0.68rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.22em;
+            color: #a78f5c;
+            margin-bottom: 0.45rem;
+        }
+        .site-title {
+            font-family: var(--font-serif);
+            font-size: clamp(2.1rem, 1.6rem + 2.4vw, 3.5rem);
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            line-height: 1.06;
+            color: #f4efe6;
+            margin-bottom: 0.55rem;
+            text-wrap: balance;
+        }
+        .site-deck {
+            font-family: var(--font-serif);
+            font-style: italic;
+            font-size: clamp(0.98rem, 0.9rem + 0.3vw, 1.18rem);
+            color: #c2baac;
+            max-width: 58ch;
+            margin: 0 auto 1.15rem;
+            line-height: 1.48;
+            text-wrap: balance;
+        }
+        .masthead-nav {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 0.4rem 1.5rem;
+            padding: 0.55rem 0;
+            border-top: 1px solid rgba(230, 224, 212, 0.16);
+            border-bottom: 1px solid rgba(230, 224, 212, 0.16);
+            font-family: var(--font-sans);
+            font-size: 0.74rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+        }
+        .masthead-nav a {
+            color: #dcd5c7;
+            text-decoration: none;
+            padding: 0.15rem 0;
+        }
+        .masthead-nav a:hover {
+            color: #d4b87a;
+            text-decoration: underline;
+            text-underline-offset: 0.25em;
+        }
+        .header-bleed {
+            width: 100%;
+            height: 3.75rem;
+            position: relative;
+            pointer-events: none;
+            background: linear-gradient(
+                to bottom var(--in-oklab),
+                #000000 0%,
+                light-dark(#121110, #020306) 22%,
+                light-dark(#3b3833, #030408) 46%,
+                light-dark(#8a847a, #040509) 70%,
+                light-dark(#dad4c8, #05070b) 88%,
+                var(--bg-canvas) 100%
+            );
+        }
+        @media (prefers-color-scheme: dark) {
+            html:not([data-theme="light"]) .header-bleed { height: 2.25rem; }
+        }
+        html[data-theme="dark"] .header-bleed { height: 2.25rem; }
+        .page-shell {
+            max-width: 1080px;
+            margin: 0 auto;
+            padding: 1.5rem 1.5rem 4.5rem;
+        }
+        .edition-banner {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            flex-wrap: wrap;
+            gap: 0.5rem 1.5rem;
+            padding-bottom: 0.6rem;
+            margin-bottom: 2.25rem;
+            border-bottom: 2px solid var(--border-strong);
+            font-family: var(--font-sans);
+            font-size: 0.72rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--text-secondary);
+        }
+        .broadsheet-grid {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 21rem;
+            gap: 3rem;
+            align-items: start;
+        }
+        .primary-column {
+            min-width: 0;
+            max-width: 65ch;
+        }
+        .secondary-ledger {
+            min-width: 0;
+            border-left: 1px solid var(--border-hairline);
+            padding-left: 2rem;
+        }
+        .section-kicker {
+            font-family: var(--font-sans);
+            font-size: 0.7rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.14em;
+            color: var(--accent-primary);
+            margin-bottom: 0.85rem;
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+        }
+        .section-kicker::after {
+            content: "";
+            flex: 1;
+            height: 1px;
+            background-color: var(--border-hairline);
+        }
+        .essay-article h2 {
+            font-size: clamp(1.35rem, 1.2rem + 0.5vw, 1.6rem);
+            font-weight: 700;
+            line-height: 1.25;
+            margin-bottom: 1.15rem;
+            letter-spacing: -0.01em;
+            text-wrap: balance;
+        }
+        .essay-article p {
+            font-size: 1.0625rem;
+            text-align: justify;
+            text-justify: inter-word;
+            text-wrap: pretty;
+            hyphens: auto;
+            -webkit-hyphens: auto;
+            text-rendering: optimizeLegibility;
+            font-variant-numeric: oldstyle-nums;
+            font-feature-settings: "liga" 1, "kern" 1;
+            widows: 2;
+            orphans: 2;
+        }
+        .essay-article p + p {
+            text-indent: 1.75em;
+            margin-top: 0;
+        }
+        .essay-article blockquote {
+            margin: 1.65rem 0;
+            padding: 0.25rem 0 0.25rem 1.35rem;
+            border-left: 2px solid var(--border-strong);
+            font-style: italic;
+            font-size: 1.04rem;
+            line-height: 1.52;
+            color: var(--text-secondary);
+            text-wrap: pretty;
+        }
+        .section-divider {
+            margin: 2.5rem 0;
+            border: 0;
+            border-top: 1px solid var(--border-hairline);
+        }
+        .dispatch-card {
+            padding: 1.25rem 1.35rem;
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-hairline);
+            border-left: 3px solid var(--border-strong);
+            margin: 1.25rem 0 1.75rem;
+        }
+        .dispatch-meta {
+            display: flex;
+            align-items: center;
+            gap: 0.65rem;
+            flex-wrap: wrap;
+            font-family: var(--font-sans);
+            font-size: 0.68rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--text-muted);
+            margin-bottom: 0.45rem;
+            font-variant-numeric: tabular-nums;
+        }
+        .dispatch-tag {
+            background-color: var(--tag-bg);
+            color: var(--accent-primary);
+            padding: 0.1rem 0.45rem;
+            border-radius: 2px;
+        }
+        .dispatch-title {
+            font-size: 1.2rem;
+            font-weight: 700;
+            line-height: 1.25;
+            margin-bottom: 0.4rem;
+        }
+        .dispatch-summary {
+            font-size: 0.94rem;
+            line-height: 1.56;
+            color: var(--text-secondary);
+            margin-bottom: 0.85rem;
+            font-family: var(--font-sans);
+        }
+        .dispatch-action {
+            font-family: var(--font-sans);
+            font-size: 0.76rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1.25rem;
+        }
+        .dispatch-action a {
+            color: var(--accent-primary);
+            text-decoration: none;
+        }
+        .dispatch-action a:hover {
+            text-decoration: underline;
+        }
+        .stage-ledger {
+            margin: 1.4rem 0 1.6rem;
+            border-top: 1px solid var(--border-hairline);
+        }
+        .stage-row {
+            padding: 0.75rem 0;
+            border-bottom: 1px solid var(--border-hairline);
+            display: grid;
+            grid-template-columns: 7.5rem minmax(0, 1fr);
+            gap: 1rem;
+            align-items: baseline;
+        }
+        .stage-code {
+            font-family: var(--font-mono);
+            font-size: 0.76rem;
+            color: var(--accent-primary);
+            font-weight: 600;
+        }
+        .stage-desc {
+            font-family: var(--font-sans);
+            font-size: 0.86rem;
+            line-height: 1.5;
+            color: var(--text-secondary);
+        }
+        .stage-desc strong {
+            color: var(--text-primary);
+            font-weight: 600;
+        }
+        pre.terminal-specimen {
+            margin: 1.15rem 0 1.4rem;
+            padding: 0.95rem 1.15rem;
+            background-color: var(--bg-elevated);
+            border: 1px solid var(--border-hairline);
+            border-left: 2px solid var(--border-strong);
+            font-family: var(--font-mono);
+            font-size: 0.78rem;
+            line-height: 1.55;
+            color: var(--text-primary);
+            overflow-x: auto;
+        }
+        code {
+            font-family: var(--font-mono);
+            font-size: 0.86em;
+            background-color: var(--bg-elevated);
+            padding: 0.1em 0.32em;
+            border-radius: 2px;
+        }
+        pre code {
+            background: none;
+            padding: 0;
+            font-size: inherit;
+        }
+        .ledger-block {
+            margin-bottom: 2.25rem;
+            padding-bottom: 1.85rem;
+            border-bottom: 1px solid var(--border-hairline);
+        }
+        .ledger-block:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+        .almanac-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-family: var(--font-sans);
+            font-size: 0.78rem;
+            font-variant-numeric: tabular-nums;
+        }
+        .almanac-table tr {
+            border-bottom: 1px solid var(--border-hairline);
+        }
+        .almanac-table tr:last-child {
+            border-bottom: none;
+        }
+        .almanac-table th {
+            text-align: left;
+            padding: 0.42rem 0.5rem 0.42rem 0;
+            color: var(--text-muted);
+            font-weight: 600;
+        }
+        .almanac-table td {
+            text-align: right;
+            padding: 0.42rem 0;
+            color: var(--text-primary);
+            font-family: var(--font-mono);
+            font-size: 0.74rem;
+        }
+        .instrument-list {
+            list-style: none;
+            display: grid;
+            gap: 1.1rem;
+        }
+        .instrument-item {
+            display: flex;
+            flex-direction: column;
+            gap: 0.2rem;
+        }
+        .instrument-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            gap: 0.5rem;
+        }
+        .instrument-name {
+            font-family: var(--font-serif);
+            font-weight: 700;
+            font-size: 0.96rem;
+        }
+        .instrument-route {
+            font-family: var(--font-mono);
+            font-size: 0.7rem;
+            color: var(--accent-secondary);
+        }
+        .instrument-desc {
+            font-family: var(--font-sans);
+            font-size: 0.78rem;
+            line-height: 1.45;
+            color: var(--text-secondary);
+        }
+        .site-footer {
+            margin-top: 3.5rem;
+            padding-top: 2rem;
+            border-top: 2px solid var(--border-strong);
+            font-family: var(--font-sans);
+            font-size: 0.82rem;
+            color: var(--text-secondary);
+        }
+        .impressum-box {
+            padding: 1.35rem 1.5rem;
+            background-color: var(--bg-elevated);
+            border: 1px solid var(--border-strong);
+            margin-bottom: 1.25rem;
+        }
+        .impressum-title {
+            font-size: 0.76rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            color: var(--text-primary);
+            padding-bottom: 0.5rem;
+            margin-bottom: 0.85rem;
+            border-bottom: 1px solid var(--border-hairline);
+        }
+        .impressum-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 0.75rem 2rem;
+            line-height: 1.5;
+        }
+        .impressum-label {
+            display: block;
+            font-size: 0.66rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-muted);
+        }
+        .colophon-note {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            font-family: var(--font-serif);
+            font-style:italic;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+        }
+        @media (max-width: 920px) {
+            .broadsheet-grid {
+                grid-template-columns: 1fr;
+                gap: 2.5rem;
+            }
+            .primary-column { max-width: 65ch; }
+            .secondary-ledger {
+                border-left: none;
+                border-top: 1px solid var(--border-hairline);
+                padding-left: 0;
+                padding-top: 2rem;
+            }
+        }
+        @media (max-width: 640px) {
+            .header-inner { padding: 0.75rem 1rem 0; }
+            .folio-bar { font-size: 0.62rem; letter-spacing: 0.08em; }
+            .folio-wire { display: none; }
+            .masthead-lockup { padding: 1.25rem 0 0.4rem; }
+            .masthead-nav { gap: 0.4rem 1rem; font-size: 0.68rem; }
+            .page-shell { padding: 1.25rem 1rem 3rem; }
+            .essay-article p { text-align: left; font-size: 1rem; }
+            .stage-row { grid-template-columns: 1fr; gap: 0.25rem; }
+            .impressum-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- ======================================================================
+         1. Nocturnal Header & Masthead
+         ====================================================================== -->
+    <header class="nocturne-header">
+        <div class="header-inner">
+            <div class="folio-bar">
+                <div class="folio-meta">
+                    <span><a href="/">The Chronicle</a></span>
+                    <span class="folio-dot" aria-hidden="true">•</span>
+                    <span>Instrument Register — Route /rec/</span>
+                    <span class="folio-dot" aria-hidden="true">•</span>
+                    <span>69° 39′ N, 18° 57′ E<span class="folio-wire"> — Tromsø</span></span>
+                </div>
+
+                <!-- Single-Icon 3-State Theme Switcher (Auto -> Dark -> Light) -->
+                <button type="button"
+                        id="theme-cycle-btn"
+                        class="theme-icon-btn"
+                        data-state="auto"
+                        aria-label="Theme: System Auto. Click to switch to Dark mode."
+                        title="Theme: System Auto (click to cycle Auto / Dark / Light)">
+                    <svg class="icon-auto" width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+                        <circle cx="12" cy="12" r="8"></circle>
+                        <path d="M12 4a8 8 0 0 0 0 16Z" fill="currentColor" stroke="none"></path>
+                    </svg>
+                    <svg class="icon-dark" width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a8.5 8.5 0 1 0 11 11Z"></path>
+                    </svg>
+                    <svg class="icon-light" width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+                        <circle cx="12" cy="12" r="4.5"></circle>
+                        <line x1="12" y1="2.5" x2="12" y2="5"></line>
+                        <line x1="12" y1="19" x2="12" y2="21.5"></line>
+                        <line x1="4.9" y1="4.9" x2="6.7" y2="6.7"></line>
+                        <line x1="17.3" y1="17.3" x2="19.1" y2="19.1"></line>
+                        <line x1="2.5" y1="12" x2="5" y2="12"></line>
+                        <line x1="19" y1="12" x2="21.5" y2="12"></line>
+                        <line x1="4.9" y1="19.1" x2="6.7" y2="17.3"></line>
+                        <line x1="17.3" y1="6.7" x2="19.1" y2="4.9"></line>
+                    </svg>
+                </button>
+            </div>
+
+            <div class="masthead-lockup">
+                <p class="masthead-kicker">Working Instrument • Local Audio &amp; Language Pipeline</p>
+                <h1 class="site-title">Møtereferat (rec)</h1>
+                <p class="site-deck">A single-file, strictly local desktop and command-line utility for meeting recording, multi-speaker transcription, and minutes generation across macOS, Windows, and Linux.</p>
+            </div>
+
+            <nav class="masthead-nav" aria-label="Primary Sections">
+                <a href="#premise">I. Premise</a>
+                <a href="#pipeline">II. Pipeline</a>
+                <a href="#platforms">III. Platforms &amp; CLI</a>
+                <a href="#benchmarks">IV. Verification</a>
+                <a href="#download">Download</a>
+            </nav>
+        </div>
+    </header>
+
+    <div class="header-bleed" aria-hidden="true"></div>
+
+    <!-- ======================================================================
+         2. Main Broadsheet Shell (2-Column Asymmetric Layout)
+         ====================================================================== -->
+    <main class="page-shell">
+
+        <div class="edition-banner">
+            <span>Technical Specification &amp; Single-File Distribution</span>
+            <span>Bilingual Interface (English &amp; Norwegian) • 2026</span>
+        </div>
+
+        <div class="broadsheet-grid">
+
+            <!-- ==============================================================
+                 Left / Primary Column (65ch Optimal Reading Measure)
+                 ============================================================== -->
+            <div class="primary-column">
+
+                <article class="essay-article" id="premise">
+                    <div class="section-kicker">I. The Instrument &amp; Its Premise</div>
+                    <h2>Local Transcription Without External Telemetry</h2>
+
+                    <p>Modern institutional and project meetings routinely involve sensitive deliberations, personal data, or unpublished technical work that should not be transmitted to third-party cloud transcription APIs. <code>mote_app.py</code> consolidates an entire speech-to-minutes pipeline into a single, self-bootstrapping Python file that executes exclusively on the operator’s own machine.</p>
+
+                    <p>Once model weights are cached locally, every stage—from microphone capture and voice activity detection to word-level alignment, speaker diarization, and structured minutes generation—operates offline. Neither audio waveforms nor text transcripts leave the local filesystem.</p>
+
+                    <div class="dispatch-card" id="download">
+                        <div class="dispatch-meta">
+                            <span class="dispatch-tag">Universal Polyglot Script</span>
+                            <span>macOS • Windows 11 • Linux</span>
+                        </div>
+                        <h3 class="dispatch-title">Single-File Distribution: <code>mote_app.py</code></h3>
+                        <p class="dispatch-summary">
+                            Contains the embedded desktop GUI template, transcript and minutes HTML renderers, the five-stage checkpoint engine, bilingual English/Norwegian localization, and an automatic <code>uv</code> environment bootstrapper. No manual <code>pip install</code> or virtual environment setup is required.
+                        </p>
+                        <div class="dispatch-action">
+                            <a href="mote_app.py" download="mote_app.py">Download mote_app.py →</a>
+                            <a href="https://github.com/e12e/rec" rel="noopener">Source Repository →</a>
+                        </div>
+                    </div>
+
+                    <hr class="section-divider" id="pipeline">
+
+                    <div class="section-kicker">II. The Five-Stage Checkpointed Pipeline</div>
+                    <h2>Crash-Resumable Stages &amp; Speaker Attribution</h2>
+
+                    <p>Long audio jobs on consumer hardware are vulnerable to memory pressure, battery depletion, or manual interruption. Rather than treating transcription and summarization as a monolithic pass, the engine writes atomic JSON checkpoints under <code>.mote_checkpoints/&lt;stem&gt;/</code> after each stage completes.</p>
+
+                    <p>If a run is paused or interrupted, re-running the same file resumes automatically from the last completed checkpoint. Operators may also re-execute individual stages—such as regenerating meeting minutes with a different language model or updated manual notes—in seconds without repeating acoustic inference.</p>
+
+                    <div class="stage-ledger" role="list" aria-label="Pipeline Stages">
+                        <div class="stage-row" role="listitem">
+                            <span class="stage-code">Stage 1 • ASR</span>
+                            <div class="stage-desc">
+                                <strong>Speech-to-Text (<code>1_asr.json</code>):</strong> Transcribes raw audio (<code>.wav</code>, <code>.m4a</code>, <code>.opus</code>, <code>.mp3</code>) via WhisperX using vocabulary hints extracted from the meeting title, participant list, and attached slide decks (<code>.pptx</code>, <code>.pdf</code>, <code>.docx</code>).
+                            </div>
+                        </div>
+                        <div class="stage-row" role="listitem">
+                            <span class="stage-code">Stage 2 • Align</span>
+                            <div class="stage-desc">
+                                <strong>Word-Level Forced Alignment (<code>2_align.json</code>):</strong> Aligns every transcribed word to exact millisecond boundaries via Wav2Vec2 (using <code>NbAiLab/nb-wav2vec2-300m-bokmaal</code> for Norwegian small/base models).
+                            </div>
+                        </div>
+                        <div class="stage-row" role="listitem">
+                            <span class="stage-code">Stage 3 • Diarize</span>
+                            <div class="stage-desc">
+                                <strong>Speaker Separation (<code>3_diarize.json</code>):</strong> Assigns words to distinct speaker clusters (<code>SPEAKER_00</code>, <code>SPEAKER_01</code>, …) via <code>pyannote/speaker-diarization-community-1</code>. Automatically bypassed when locked to a single speaker (<code>--speakers 1</code>) for lectures or keynotes.
+                            </div>
+                        </div>
+                        <div class="stage-row" role="listitem">
+                            <span class="stage-code">Stage 4 • Names</span>
+                            <div class="stage-desc">
+                                <strong>Identity Mapping &amp; Interactive HTML (<code>4_speakers.json</code>):</strong> Resolves speaker IDs to participant names using round-table introductions, direct address rules, and manual notes. Emits a searchable HTML transcript with browser-side speaker renaming and one-click HTML re-export.
+                            </div>
+                        </div>
+                        <div class="stage-row" role="listitem">
+                            <span class="stage-code">Stage 5 • Notes</span>
+                            <div class="stage-desc">
+                                <strong>Minutes &amp; Lecture Summaries (<code>_referat.md</code> / <code>.html</code>):</strong> Streams structured Markdown and printable HTML via a managed local Ollama instance, switching automatically between multi-speaker meeting minutes (with action tables) and single-speaker lecture notes.
+                            </div>
+                        </div>
+                    </div>
+
+                    <hr class="section-divider" id="platforms">
+
+                    <div class="section-kicker">III. Cross-Platform Execution &amp; Localization</div>
+                    <h2>Operation on macOS, Windows, and Linux</h2>
+
+                    <p>The header of <code>mote_app.py</code> is a polyglot script valid under POSIX shells (<code>/bin/sh</code>), Windows Command Prompt / PowerShell, and direct Python invocation. On first launch, it verifies or installs Astral’s standalone <code>uv</code> binary, provisions an isolated Python 3.12 runtime with <code>pywebview</code>, <code>markdown</code>, and <code>static-ffmpeg</code>, and downloads standalone <code>whisperx</code> and <code>ollama</code> binaries on demand.</p>
+
+                    <p>Both the progressive-disclosure desktop interface and the command-line parser provide full localization in English (<code>en</code>) and Norwegian (<code>no</code>). Launching without arguments opens the native desktop window; passing any file or flag dispatches directly to the command-line interface.</p>
+
+                    <pre class="terminal-specimen"><code># 1. Launch the desktop GUI (macOS, Windows, or Linux)
+python3 mote_app.py
+
+# 2. Display CLI help in English or Norwegian
+python3 mote_app.py --ui-lang en --help
+python3 mote_app.py --ui-lang no --help
+
+# 3. Inspect local RAM, CPU/GPU, and recommended model profile
+python3 mote_app.py --check-hw
+
+# 4. Run 20-second live microphone dBFS level &amp; coarse ASR check
+python3 mote_app.py --live-check --live-seconds 20
+
+# 5. Transcribe a 4-speaker meeting with agenda slides and auto hardware profile
+python3 mote_app.py meeting.m4a --profile auto \
+  --title "Architecture Review – 2026-11-05" \
+  --speaker-names "Kari Nordmann (Chair), Ola Hansen, Ingrid Berg, Per Lie" \
+  -c slides.pptx -M draft_notes.docx</code></pre>
+
+                    <hr class="section-divider" id="benchmarks">
+
+                    <div class="section-kicker">IV. Empirical Verification &amp; Hardware Profiles</div>
+                    <h2>Synthetic Four-Speaker Benchmark</h2>
+
+                    <p>To prevent memory exhaustion on 8 GB and 16 GB laptops while maintaining word accuracy on Norwegian and English speech, models run sequentially rather than concurrently. WhisperX and alignment models are explicitly unloaded and garbage-collected before Pyannote or Ollama is initialized.</p>
+
+                    <blockquote>
+                        “Across twenty evaluated ASR and LLM combinations on a synthetic four-speaker benchmark suite, pairing a compact 244M acoustic model with a 300M phoneme aligner and a 4B local reasoning model outperformed models six times larger while running nearly three times faster.”
+                    </blockquote>
+
+                    <p>Before starting a job, the application evaluates available system RAM and disk space against the peak sequential memory requirement of the selected model pair, warning the operator if a lighter profile is required.</p>
+                </article>
+
+            </div>
+
+            <!-- ==============================================================
+                 Right / Secondary Ledger (Register, Platforms & Profiles)
+                 ============================================================== -->
+            <aside class="secondary-ledger" aria-label="Technical Register and Platform Specifications">
+
+                <section class="ledger-block" aria-labelledby="heading-register">
+                    <h2 class="section-kicker" id="heading-register">Instrument Register</h2>
+                    <table class="almanac-table">
+                        <tbody>
+                            <tr>
+                                <th scope="row">Artifact</th>
+                                <td><a href="mote_app.py" download="mote_app.py">mote_app.py</a></td>
+                            </tr>
+                            <tr>
+                                <th scope="row">Runtime</th>
+                                <td>Python 3.12 (via uv)</td>
+                            </tr>
+                            <tr>
+                                <th scope="row">UI Languages</th>
+                                <td>English (en) &amp; Norsk (no)</td>
+                            </tr>
+                            <tr>
+                                <th scope="row">ASR Engine</th>
+                                <td>WhisperX + Wav2Vec2</td>
+                            </tr>
+                            <tr>
+                                <th scope="row">Diarization</th>
+                                <td>Pyannote Community-1</td>
+                            </tr>
+                            <tr>
+                                <th scope="row">LLM Engine</th>
+                                <td>Ollama (Local HTTP)</td>
+                            </tr>
+                            <tr>
+                                <th scope="row">Telemetry</th>
+                                <td>None (100% Offline)</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </section>
+
+                <section class="ledger-block" aria-labelledby="heading-platforms">
+                    <h2 class="section-kicker" id="heading-platforms">Platform Support</h2>
+                    <ul class="instrument-list">
+                        <li class="instrument-item">
+                            <div class="instrument-header">
+                                <span class="instrument-name">macOS (ARM64 &amp; Intel)</span>
+                                <span class="instrument-route">darwin</span>
+                            </div>
+                            <p class="instrument-desc">Native Cocoa WebKit window via <code>pywebview</code>, <code>avfoundation</code> 16 kHz mic capture, and <code>say</code> voice guide.</p>
+                        </li>
+
+                        <li class="instrument-item">
+                            <div class="instrument-header">
+                                <span class="instrument-name">Windows 11 (x64 &amp; ARM64)</span>
+                                <span class="instrument-route">win32</span>
+                            </div>
+                            <p class="instrument-desc">Edge WebView2 window, automatic DirectShow (<code>dshow</code>) audio device probing, PowerShell <code>System.Speech</code> TTS, and CUDA/CPU inference.</p>
+                        </li>
+
+                        <li class="instrument-item">
+                            <div class="instrument-header">
+                                <span class="instrument-name">Linux (x86_64 &amp; AArch64)</span>
+                                <span class="instrument-route">linux</span>
+                            </div>
+                            <p class="instrument-desc">GTK/Qt WebKit window, PulseAudio/PipeWire (<code>pulse</code>) with ALSA fallback, <code>espeak-ng</code> voice guide, and CUDA/CPU inference.</p>
+                        </li>
+                    </ul>
+                </section>
+
+                <section class="ledger-block" aria-labelledby="heading-profiles">
+                    <h2 class="section-kicker" id="heading-profiles">Hardware Profiles</h2>
+                    <table class="almanac-table">
+                        <tbody>
+                            <tr>
+                                <th scope="row">recommended</th>
+                                <td>12–16 GB+ RAM (~6.5 GB peak)</td>
+                            </tr>
+                            <tr>
+                                <th scope="row">ASR + LLM</th>
+                                <td>nb-whisper-small + gemma4:e4b</td>
+                            </tr>
+                            <tr>
+                                <th scope="row">fast</th>
+                                <td>16 GB+ RAM (~6.5 GB peak)</td>
+                            </tr>
+                            <tr>
+                                <th scope="row">ASR + LLM</th>
+                                <td>distil-turbo + gemma4:e4b</td>
+                            </tr>
+                            <tr>
+                                <th scope="row">light</th>
+                                <td>8 GB RAM (~3.8 GB peak)</td>
+                            </tr>
+                            <tr>
+                                <th scope="row">ASR + LLM</th>
+                                <td>nb-whisper-small + llama3.2</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </section>
+
+                <section class="ledger-block" aria-labelledby="heading-formats">
+                    <h2 class="section-kicker" id="heading-formats">Accepted Formats</h2>
+                    <table class="almanac-table">
+                        <tbody>
+                            <tr>
+                                <th scope="row">Audio Input</th>
+                                <td>.wav .m4a .opus .mp3</td>
+                            </tr>
+                            <tr>
+                                <th scope="row">Transcript Input</th>
+                                <td>.html .json .srt .vtt .txt</td>
+                            </tr>
+                            <tr>
+                                <th scope="row">Context / Slides</th>
+                                <td>.pptx .pdf .odp .docx .odt .md</td>
+                            </tr>
+                            <tr>
+                                <th scope="row">Outputs</th>
+                                <td>.html (Transcript) + .md/.html</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </section>
+
+            </aside>
+
+        </div>
+
+        <!-- ==================================================================
+             3. Colophon & Impressum Footer
+             ================================================================== -->
+        <footer class="site-footer" id="colophon">
+            <div class="impressum-box">
+                <div class="impressum-title">The Impressum &amp; External Wire</div>
+                <div class="impressum-grid">
+                    <div>
+                        <span class="impressum-label">Publication</span>
+                        <a href="/">The Chronicle — Hypertekst</a>
+                    </div>
+                    <div>
+                        <span class="impressum-label">Instrument Route</span>
+                        <a href="/rec/">hypertekst.net/rec/</a>
+                    </div>
+                    <div>
+                        <span class="impressum-label">Source Repository</span>
+                        <a href="https://github.com/e12e/rec" rel="noopener">github.com/e12e/rec</a>
+                    </div>
+                    <div>
+                        <span class="impressum-label">Correspondence</span>
+                        <a href="mailto:gazette@s.hypertekst.net">gazette@s.hypertekst.net</a>
+                    </div>
+                </div>
+            </div>
+            <div class="colophon-note">
+                <span>Typeset in classic Georgia serif. Published from Tromsø, Norway.</span>
+                <span>Printed and issued at the digital press.</span>
+            </div>
+        </footer>
+
+    </main>
+
+    <!-- Single-Icon 3-State Theme Cycle -->
+    <script>
+    (function () {
+        const root = document.documentElement;
+        const cycleBtn = document.getElementById('theme-cycle-btn');
+        const darkMql = window.matchMedia('(prefers-color-scheme: dark)');
+
+        const ORDER = ['auto', 'dark', 'light'];
+        const LABELS = {
+            auto: 'Theme: System Auto (click for Dark)',
+            dark: 'Theme: Dark (click for Light)',
+            light: 'Theme: Light (click for Auto)'
+        };
+
+        let currentTheme = 'auto';
+        try {
+            const saved = localStorage.getItem('ht_theme') || localStorage.getItem('ht_beta_theme');
+            if (ORDER.indexOf(saved) !== -1) {
+                currentTheme = saved;
+            }
+        } catch (e) {}
+
+        function applyState() {
+            if (currentTheme === 'auto') {
+                root.removeAttribute('data-theme');
+            } else if (currentTheme === 'dark') {
+                root.setAttribute('data-theme', 'dark');
+            } else {
+                root.setAttribute('data-theme', 'light');
+            }
+            cycleBtn.setAttribute('data-state', currentTheme);
+            cycleBtn.setAttribute('title', LABELS[currentTheme]);
+            cycleBtn.setAttribute('aria-label', LABELS[currentTheme]);
+        }
+
+        cycleBtn.addEventListener('click', function () {
+            const nextIdx = (ORDER.indexOf(currentTheme) + 1) % ORDER.length;
+            currentTheme = ORDER[nextIdx];
+            try {
+                localStorage.setItem('ht_theme', currentTheme);
+            } catch (e) {}
+            applyState();
+        });
+
+        darkMql.addEventListener('change', applyState);
+        applyState();
+    })();
+    </script>
+</body>
+</html>
