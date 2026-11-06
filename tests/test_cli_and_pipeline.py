@@ -249,7 +249,7 @@ class TestGherkinBDDScenarios(unittest.TestCase):
                 idx_html = idx_path.read_text(encoding="utf-8")
                 self.assertIn("The Chronicle", idx_html)
                 self.assertIn("broadsheet-grid", idx_html)
-                self.assertIn("steno.py", idx_html)
+                self.assertIn("steno.com", idx_html)
                 self.assertIn("a modern annalist for your meetings", idx_html.lower())
                 self.assertIn("an automaton stenographer", idx_html.lower())
                 self.assertIn("macOS", idx_html)
@@ -309,9 +309,11 @@ class TestGherkinBDDScenarios(unittest.TestCase):
                 self.assertIn("astral.sh/uv/install.ps1", ps1_text)
                 self.assertIn("steno.py", ps1_text)
                 self.assertIn("uv run --python 3.12", cmd_text)
-                self.assertIn("install.sh", idx_html)
-                self.assertIn("install.ps1", idx_html)
-                self.assertIn("steno.cmd", idx_html)
+                self.assertIn('href="steno.com"', idx_html)
+                self.assertNotIn('download="install.sh"', idx_html)
+                self.assertNotIn('download="install.ps1"', idx_html)
+                self.assertNotIn('download="steno.cmd"', idx_html)
+                self.assertNotIn('download="steno.py"', idx_html)
             elif step == "Given the Cosmopolitan APE binary dist/steno.com and www/rec/steno.com":
                 root_dir = Path(__file__).resolve().parent.parent
                 ctx["dist_com"] = root_dir / "dist" / "steno.com"
