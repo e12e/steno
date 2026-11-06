@@ -492,9 +492,137 @@
     border: 1px solid var(--card-border);
     min-height: 80px;
   }
+
+  /* --- Top App Menubar & Uninstall Confirmation Modal --- */
+  .app-menubar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 2px 4px 4px 4px;
+    border-bottom: 1px solid var(--card-border);
+    font-size: 12px;
+    position: relative;
+  }
+  .menubar-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .brand-pill {
+    font-weight: 700;
+    font-size: 12px;
+    letter-spacing: 0.01em;
+  }
+  .brand-sub {
+    color: GrayText;
+    font-size: 11px;
+  }
+  .menu-dropdown-wrap {
+    position: relative;
+  }
+  .menu-dropdown {
+    display: none;
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    min-width: 240px;
+    background: Canvas;
+    color: CanvasText;
+    border: 1px solid var(--card-border);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+    padding: 4px;
+    z-index: 1000;
+  }
+  .menu-dropdown.open {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .menu-item {
+    text-align: left;
+    background: transparent;
+    border: none;
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    color: CanvasText;
+  }
+  .menu-item:hover {
+    background: var(--subtle-bg);
+  }
+  .menu-item.danger-item {
+    color: #ef4444;
+  }
+  .menu-sep {
+    height: 1px;
+    background: var(--card-border);
+    margin: 3px 0;
+  }
+  dialog#uninstall_modal {
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    padding: 18px 20px;
+    max-width: 430px;
+    background: Canvas;
+    color: CanvasText;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.3);
+  }
+  dialog#uninstall_modal::backdrop {
+    background: rgba(0, 0, 0, 0.45);
+  }
+  .modal-title {
+    margin: 0 0 8px 0;
+    font-size: 15px;
+    font-weight: 700;
+  }
+  .modal-body {
+    margin: 0 0 16px 0;
+    font-size: 12.5px;
+    line-height: 1.45;
+    color: CanvasText;
+  }
+  .modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
 </style>
 </head>
 <body>
+
+  <!-- Top File Menu Bar -->
+  <nav class="app-menubar" aria-label="Application Menu">
+    <div class="menubar-left">
+      <div class="menu-dropdown-wrap">
+        <button id="file_menu_btn" class="btn-sm" onclick="toggleFileMenu(event)" aria-haspopup="true" aria-expanded="false">Fil ▾</button>
+        <div id="file_menu_dropdown" class="menu-dropdown" role="menu">
+          <button id="menu_open_btn" class="menu-item" role="menuitem" onclick="closeFileMenu(); browseAudio();">Velg lydfil / transkripsjon...</button>
+          <button id="menu_folder_btn" class="menu-item" role="menuitem" onclick="closeFileMenu(); openFinder();">Åpne utdatamappe</button>
+          <div class="menu-sep"></div>
+          <button id="menu_install_btn" class="menu-item" role="menuitem" onclick="closeFileMenu(); installStenoShortcut();">Installer snarvei (Skrivebord / CLI)</button>
+          <button id="menu_uninstall_btn" class="menu-item danger-item" role="menuitem" onclick="closeFileMenu(); openUninstallDialog();">Avinstaller Steno og fjern mellomlagrede filer...</button>
+        </div>
+      </div>
+      <span class="brand-pill">Steno</span>
+      <span id="lbl_brand_sub" class="brand-sub">A modern annalist for your meetings — an automaton stenographer</span>
+    </div>
+  </nav>
+
+  <!-- Uninstall Confirmation Y/N Dialog -->
+  <dialog id="uninstall_modal" aria-labelledby="uninstall_modal_title">
+    <h3 class="modal-title" id="uninstall_modal_title">Avinstaller Steno?</h3>
+    <p class="modal-body" id="uninstall_modal_body">
+      Er du sikker på at du vil avinstallere Steno og slette alle mellomlagrede filer, kjøremiljøer, modeller og snarveier (<code>~/.local/share/steno</code> og <code>~/.local/share/mote_transcribe</code>)?<br><br>
+      <strong>Dine møteopptak, transkripsjoner og referater slettes ikke.</strong>
+    </p>
+    <div class="modal-actions">
+      <button id="confirm_uninstall_no_btn" onclick="closeUninstallDialog()">Nei, avbryt</button>
+      <button id="confirm_uninstall_yes_btn" class="danger" onclick="confirmUninstallYes()">Ja, avinstaller</button>
+    </div>
+  </dialog>
 
   <!-- ZONE 1: Audio Input & Live Recording -->
   <div class="top-cards">
@@ -775,7 +903,16 @@
       conflict_dup: "Alle tre utdatafiler må ha ulike filnavn.",
       conflict_overwrite: "Merk: Eksisterende utdatafil oppdateres ved kjøring (eller åpne ⚙️ Innstillinger -> «Ledig navn»).",
       auto_speakers: "Auto talere",
-      speakers_unit: "taler(e)"
+      speakers_unit: "taler(e)",
+      file_menu_btn: "Fil ▾",
+      menu_open_btn: "Velg lydfil / transkripsjon...",
+      menu_folder_btn: "Åpne utdatamappe",
+      menu_install_btn: "Installer snarvei (Skrivebord / CLI)",
+      menu_uninstall_btn: "Avinstaller Steno og fjern mellomlagrede filer...",
+      uninstall_modal_title: "Avinstaller Steno?",
+      uninstall_modal_body_html: "Er du sikker på at du vil avinstallere Steno og slette alle mellomlagrede filer, kjøremiljøer, modeller og snarveier (<code>~/.local/share/steno</code> og <code>~/.local/share/mote_transcribe</code>)?<br><br><strong>Dine møteopptak, transkripsjoner og referater slettes ikke.</strong>",
+      confirm_uninstall_no_btn: "Nei, avbryt",
+      confirm_uninstall_yes_btn: "Ja, avinstaller"
     },
     en: {
       lbl_step1_title: "1. Audio File or Transcript",
@@ -824,7 +961,16 @@
       conflict_dup: "All three output files must have distinct filenames.",
       conflict_overwrite: "Note: Existing output file will be updated (or open ⚙️ Settings -> 'Unique Name').",
       auto_speakers: "Auto speakers",
-      speakers_unit: "speaker(s)"
+      speakers_unit: "speaker(s)",
+      file_menu_btn: "File ▾",
+      menu_open_btn: "Open Audio / Transcript...",
+      menu_folder_btn: "Open Output Folder",
+      menu_install_btn: "Install Shortcut (Desktop / CLI)",
+      menu_uninstall_btn: "Uninstall Steno & Remove Cached Files...",
+      uninstall_modal_title: "Uninstall Steno?",
+      uninstall_modal_body_html: "Are you sure you want to uninstall Steno and remove all cached files, runtime environments, models, and shortcuts (<code>~/.local/share/steno</code> and <code>~/.local/share/mote_transcribe</code>)?<br><br><strong>Your meeting recordings, transcripts, and minutes will NOT be deleted.</strong>",
+      confirm_uninstall_no_btn: "No, Cancel",
+      confirm_uninstall_yes_btn: "Yes, Uninstall"
     }
   };
 
@@ -840,12 +986,16 @@
       'lbl_manual_notes_text', 'lbl_stages', 'apply_rec_btn', 'lbl_adv_drawer',
       'lbl_row_speakers', 'lbl_row_models', 'lbl_row_task', 'lbl_row_folder',
       'lbl_row_outfiles', 'btn_browse_folder', 'btn_open_folder_row', 'btn_unique_names',
-      'stop_btn', 'lbl_log_header', 'btn_open_folder_log', 'btn_copy_log', 'btn_save_log'
+      'stop_btn', 'lbl_log_header', 'btn_open_folder_log', 'btn_copy_log', 'btn_save_log',
+      'file_menu_btn', 'menu_open_btn', 'menu_folder_btn', 'menu_install_btn', 'menu_uninstall_btn',
+      'uninstall_modal_title', 'confirm_uninstall_no_btn', 'confirm_uninstall_yes_btn'
     ];
     for (const id of textIds) {
       const el = document.getElementById(id);
       if (el && d[id]) el.textContent = d[id];
     }
+    const umBody = document.getElementById('uninstall_modal_body');
+    if (umBody && d.uninstall_modal_body_html) umBody.innerHTML = d.uninstall_modal_body_html;
     if (!currentAudioPath) {
       const sf = document.getElementById('selected-file');
       if (sf) sf.textContent = d.selected_file_empty;
@@ -1258,6 +1408,57 @@
 
   function openFinder() {
     pywebview.api.reveal_in_finder(document.getElementById('out_dir').value);
+  }
+
+  function toggleFileMenu(e) {
+    if (e) e.stopPropagation();
+    const dd = document.getElementById('file_menu_dropdown');
+    const btn = document.getElementById('file_menu_btn');
+    const isOpen = dd.classList.toggle('open');
+    if (btn) btn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+  }
+
+  function closeFileMenu() {
+    const dd = document.getElementById('file_menu_dropdown');
+    const btn = document.getElementById('file_menu_btn');
+    if (dd) dd.classList.remove('open');
+    if (btn) btn.setAttribute('aria-expanded', 'false');
+  }
+
+  document.addEventListener('click', () => closeFileMenu());
+
+  async function installStenoShortcut() {
+    if (window.pywebview && pywebview.api && pywebview.api.install_app) {
+      await pywebview.api.install_app(currentUiLang);
+    }
+  }
+
+  function openUninstallDialog() {
+    const dlg = document.getElementById('uninstall_modal');
+    if (dlg && typeof dlg.showModal === 'function') {
+      dlg.showModal();
+    } else if (dlg) {
+      dlg.setAttribute('open', 'open');
+    }
+  }
+
+  function closeUninstallDialog() {
+    const dlg = document.getElementById('uninstall_modal');
+    if (dlg && typeof dlg.close === 'function') {
+      dlg.close();
+    } else if (dlg) {
+      dlg.removeAttribute('open');
+    }
+  }
+
+  async function confirmUninstallYes() {
+    closeUninstallDialog();
+    if (window.pywebview && pywebview.api && pywebview.api.uninstall_app) {
+      const res = await pywebview.api.uninstall_app(currentUiLang);
+      if (res && res.message) {
+        appendLog("==> " + res.message);
+      }
+    }
   }
 
   async function copyLog() {

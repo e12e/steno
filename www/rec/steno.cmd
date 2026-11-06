@@ -12,12 +12,12 @@ if not exist "%STENO_PY%" (
 )
 
 if not exist "%STENO_PY%" (
-    echo Downloading steno.py / Laster ned steno.py...
-    powershell -NoProfile -ExecutionPolicy Bypass -Command "New-Item -ItemType Directory -Force -Path '%LOCALAPPDATA%\Steno' | Out-Null; irm https://s.hypertekst.net/rec/steno.py -OutFile '%LOCALAPPDATA%\Steno\steno.py'"
+    echo Downloading steno.py...
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "New-Item -ItemType Directory -Force -Path '%LOCALAPPDATA%\Steno' | Out-Null; irm https://hypertekst.net/steno/steno.py -OutFile '%LOCALAPPDATA%\Steno\steno.py'"
 )
 
 where uv >nul 2>nul || (
-    echo Installing uv ^(standalone Python runtime^) / Installerer uv...
+    echo Installing uv ^(standalone Python runtime^)...
     powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://astral.sh/uv/install.ps1 | iex"
 )
 

@@ -2,11 +2,11 @@
 # Steno - a modern annalist for your meetings - an automaton stenographer.
 #
 # Usage (PowerShell):
-#   irm https://s.hypertekst.net/rec/install.ps1 | iex
+#   irm https://hypertekst.net/steno/install.ps1 | iex
 
 $ErrorActionPreference = "Stop"
 
-$StenoUrl = if ($env:STENO_URL) { $env:STENO_URL } else { "https://s.hypertekst.net/rec/steno.py" }
+$StenoUrl = if ($env:STENO_URL) { $env:STENO_URL } else { "https://hypertekst.net/steno/steno.py" }
 $InstallDir = if ($env:STENO_INSTALL_DIR) { $env:STENO_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA "Steno" }
 $BinDir = if ($env:STENO_BIN_DIR) { $env:STENO_BIN_DIR } else { Join-Path $env:USERPROFILE ".local\bin" }
 

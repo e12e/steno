@@ -1074,6 +1074,204 @@ def build_ffmpeg_mic_record_cmd(
     ]
 
 
+def _resolve_steno_install_paths(
+    target_root: Path | None = None,
+    platform_str: str | None = None,
+) -> dict[str, Path]:
+    """Return canonical installation, cache, launcher, and desktop shortcut paths for Steno."""
+    plat = platform_str if platform_str is not None else sys.platform
+    root = target_root.resolve() if target_root is not None else Path.home()
+
+    if plat.startswith("win") and target_root is None:
+        local_appdata = Path(os.environ.get("LOCALAPPDATA", str(root / "AppData" / "Local")))
+        roaming_appdata = Path(os.environ.get("APPDATA", str(root / "AppData" / "Roaming")))
+        app_dir = local_appdata / "Steno"
+        mote_cache_dir = root / ".local" / "share" / "mote_transcribe"
+        cache_dir = local_appdata / "Steno" / "cache"
+        bin_dir = root / ".local" / "bin"
+        launcher_path = bin_dir / "steno.cmd"
+        desktop_entry = roaming_appdata / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Steno.cmd"
+    else:
+        app_dir = root / ".local" / "share" / "steno"
+        mote_cache_dir = root / ".local" / "share" / "mote_transcribe"
+        cache_dir = root / ".cache" / "steno"
+        bin_dir = root / ".local" / "bin"
+        launcher_path = bin_dir / ("steno.cmd" if plat.startswith("win") else "steno")
+        if plat == "darwin":
+            desktop_entry = root / "Applications" / "Steno.app"
+        elif plat.startswith("win"):
+            desktop_entry = root / "StartMenu" / "Steno.cmd"
+        else:
+            desktop_entry = root / ".local" / "share" / "applications" / "steno.desktop"
+
+    return {
+        "root": root,
+        "app_dir": app_dir,
+        "mote_cache_dir": mote_cache_dir,
+        "cache_dir": cache_dir,
+        "bin_dir": bin_dir,
+        "launcher_path": launcher_path,
+        "desktop_entry": desktop_entry,
+    }
+
+
+def install_steno_app(
+    source_script: Path | None = None,
+    target_root: Path | None = None,
+    platform_str: str | None = None,
+) -> dict[str, Any]:
+    """Install Steno into the user's local app directory with CLI launcher and desktop shortcut.
+
+    >>> with tempfile.TemporaryDirectory() as d:
+    ...     res = install_steno_app(target_root=Path(d), platform_str="linux")
+    ...     res["ok"] and Path(res["launcher_path"]).is_file() and Path(res["desktop_entry"]).is_file()
+    True
+    """
+    plat = platform_str if platform_str is not None else sys.platform
+    paths = _resolve_steno_install_paths(target_root=target_root, platform_str=plat)
+    app_dir = paths["app_dir"]
+    bin_dir = paths["bin_dir"]
+    launcher_path = paths["launcher_path"]
+    desktop_entry = paths["desktop_entry"]
+
+    app_dir.mkdir(parents=True, exist_ok=True)
+    bin_dir.mkdir(parents=True, exist_ok=True)
+
+    target_py = app_dir / "steno.py"
+    candidates: list[Path] = []
+    if source_script is not None:
+        candidates.append(Path(source_script))
+    this_file = Path(__file__).resolve()
+    candidates.extend([
+        this_file.parent.parent.parent / "dist" / "steno.py",
+        this_file.parent.parent.parent / "www" / "rec" / "steno.py",
+        this_file.parent.parent.parent / "steno.py",
+        this_file,
+    ])
+    chosen_src = next((c for c in candidates if c.is_file()), this_file)
+    if chosen_src.resolve() != target_py.resolve():
+        shutil.copyfile(chosen_src, target_py)
+    target_py.chmod(0o755)
+
+    if plat.startswith("win"):
+        cmd_body = (
+            "@echo off\r\n"
+            'set "PATH=%USERPROFILE%\\.local\\bin;%LOCALAPPDATA%\\Microsoft\\WinGet\\Links;%PATH%"\r\n'
+            f'uv run --python 3.12 --script "{target_py}" %*\r\n'
+        )
+        launcher_path.write_text(cmd_body, encoding="utf-8")
+        desktop_entry.parent.mkdir(parents=True, exist_ok=True)
+        desktop_entry.write_text(cmd_body, encoding="utf-8")
+    else:
+        sh_body = f'#!/bin/sh\nexec /bin/sh "{target_py}" "$@"\n'
+        launcher_path.write_text(sh_body, encoding="utf-8")
+        launcher_path.chmod(0o755)
+
+        if plat == "darwin":
+            macos_dir = desktop_entry / "Contents" / "MacOS"
+            macos_dir.mkdir(parents=True, exist_ok=True)
+            info_plist = desktop_entry / "Contents" / "Info.plist"
+            info_plist.write_text(
+                '<?xml version="1.0" encoding="UTF-8"?>\n'
+                '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
+                '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
+                '<plist version="1.0"><dict>\n'
+                "  <key>CFBundleName</key><string>Steno</string>\n"
+                "  <key>CFBundleDisplayName</key><string>Steno</string>\n"
+                "  <key>CFBundleIdentifier</key><string>net.hypertekst.steno</string>\n"
+                "  <key>CFBundleVersion</key><string>0.2.0</string>\n"
+                "  <key>CFBundlePackageType</key><string>APPL</string>\n"
+                "  <key>CFBundleExecutable</key><string>Steno</string>\n"
+                "</dict></plist>\n",
+                encoding="utf-8",
+            )
+            app_exec = macos_dir / "Steno"
+            app_exec.write_text(sh_body, encoding="utf-8")
+            app_exec.chmod(0o755)
+        else:
+            desktop_entry.parent.mkdir(parents=True, exist_ok=True)
+            desktop_entry.write_text(
+                "[Desktop Entry]\n"
+                "Type=Application\n"
+                "Name=Steno\n"
+                "Comment=Steno - a modern annalist for your meetings - an automaton stenographer\n"
+                f'Exec=/bin/sh "{target_py}"\n'
+                "Terminal=false\n"
+                "Categories=AudioVideo;Audio;Office;Utility;\n",
+                encoding="utf-8",
+            )
+            desktop_entry.chmod(0o755)
+
+    return {
+        "ok": True,
+        "app_dir": str(app_dir),
+        "installed_script": str(target_py),
+        "launcher_path": str(launcher_path),
+        "desktop_entry": str(desktop_entry),
+        "message_en": f"Installed Steno to {app_dir} (launcher: {launcher_path}).",
+        "message_no": f"Installerte Steno i {app_dir} (snarvei: {launcher_path}).",
+    }
+
+
+def uninstall_steno_app(
+    target_root: Path | None = None,
+    platform_str: str | None = None,
+) -> dict[str, Any]:
+    """Remove Steno cached runtime directories, model caches, CLI launchers, and desktop shortcuts.
+
+    Never deletes user meeting recordings, transcripts, or .mote_checkpoints folders.
+
+    >>> with tempfile.TemporaryDirectory() as d:
+    ...     _ = install_steno_app(target_root=Path(d), platform_str="linux")
+    ...     out = uninstall_steno_app(target_root=Path(d), platform_str="linux")
+    ...     out["ok"] and len(out["removed_paths"]) >= 2
+    True
+    """
+    plat = platform_str if platform_str is not None else sys.platform
+    paths = _resolve_steno_install_paths(target_root=target_root, platform_str=plat)
+    removed: list[str] = []
+
+    for dir_key in ("app_dir", "mote_cache_dir", "cache_dir"):
+        dpath = paths[dir_key]
+        if dpath.exists():
+            shutil.rmtree(dpath, ignore_errors=True)
+            removed.append(str(dpath))
+
+    desktop_entry = paths["desktop_entry"]
+    if desktop_entry.is_dir():
+        shutil.rmtree(desktop_entry, ignore_errors=True)
+        removed.append(str(desktop_entry))
+    elif desktop_entry.exists():
+        try:
+            desktop_entry.unlink()
+            removed.append(str(desktop_entry))
+        except OSError:
+            pass
+
+    bin_dir = paths["bin_dir"]
+    for launcher_name in ("steno", "steno.com", "steno.cmd", "steno.py"):
+        cand = bin_dir / launcher_name
+        if cand.exists():
+            try:
+                cand.unlink()
+                removed.append(str(cand))
+            except OSError:
+                pass
+
+    return {
+        "ok": True,
+        "removed_paths": removed,
+        "message_en": (
+            f"Uninstalled Steno and removed {len(removed)} cached location(s). "
+            "Your meeting audio and transcript files were not touched."
+        ),
+        "message_no": (
+            f"Avinstallerte Steno og fjernet {len(removed)} mellomlagrede plassering(er). "
+            "Dine møteopptak og referater ble ikke rørt."
+        ),
+    }
+
+
 MODEL_PROFILES: dict[str, dict[str, Any]] = {
     "recommended": {
         "id": "recommended",
@@ -3434,6 +3632,34 @@ def build_cli_parser(ui_lang: str | None = None, argv: list[str] | None = None) 
             else "Kjør innebygd selvtest av maler, API og rørledning uten å åpne GUI-vindu"
         ),
     )
+    parser.add_argument(
+        "--install",
+        action="store_true",
+        help=(
+            "Install Steno into ~/.local/share/steno with CLI launcher and desktop application shortcut"
+            if is_en
+            else "Installer Steno i ~/.local/share/steno med CLI-kommando og skrivebordssnarvei"
+        ),
+    )
+    parser.add_argument(
+        "--uninstall",
+        action="store_true",
+        help=(
+            "Uninstall Steno and remove cached runtime environments, models, and shortcuts"
+            if is_en
+            else "Avinstaller Steno og fjern mellomlagrede kjøremiljøer, modeller og snarveier"
+        ),
+    )
+    parser.add_argument(
+        "-y",
+        "--yes",
+        action="store_true",
+        help=(
+            "Automatic yes to prompts (e.g. confirm --uninstall without interactive prompt)"
+            if is_en
+            else "Bekreft automatisk uten spørsmål (f.eks. ved --uninstall)"
+        ),
+    )
     return parser
 
 
@@ -3496,6 +3722,30 @@ def cli_main(argv: list[str] | None = None) -> int:
     """CLI entrypoint for steno.py and transcribe.py."""
     parser = build_cli_parser(argv=argv)
     args = parser.parse_args(argv)
+    is_en = resolve_ui_lang(getattr(args, "ui_lang", None), argv) == "en"
+
+    if getattr(args, "install", False):
+        res = install_steno_app()
+        print(res["message_en"] if is_en else res["message_no"], flush=True)
+        return 0
+
+    if getattr(args, "uninstall", False):
+        if not getattr(args, "yes", False):
+            prompt = (
+                "Are you sure you want to uninstall Steno and remove all cached files? [y/N]: "
+                if is_en
+                else "Er du sikker på at du vil avinstallere Steno og slette alle mellomlagrede filer? [j/N]: "
+            )
+            try:
+                ans = input(prompt).strip().lower()
+            except EOFError:
+                ans = "n"
+            if ans not in ("y", "yes", "j", "ja"):
+                print("Uninstall cancelled." if is_en else "Avinstallering avbrutt.", flush=True)
+                return 0
+        res = uninstall_steno_app()
+        print(res["message_en"] if is_en else res["message_no"], flush=True)
+        return 0
 
     hw_info = detect_hardware_resources(args.out_dir)
     if args.check_hw:

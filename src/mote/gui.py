@@ -36,6 +36,7 @@ from mote.core import (  # noqa: E402
     get_checkpoint_dir,
     get_checkpoint_status_dict,
     get_initial_hf_token,
+    install_steno_app,
     is_diarization_cached,
     is_transcript_file,
     resolve_moved_audio_path,
@@ -43,6 +44,7 @@ from mote.core import (  # noqa: E402
     resolve_ui_lang,
     run_live_check_on_file,
     run_pipeline,
+    uninstall_steno_app,
     unique_filename,
 )
 from mote.template_loader import load_template  # noqa: E402
@@ -196,6 +198,32 @@ class MoteApi:
         target_path.write_text(content + "\n", encoding="utf-8")
         self._log(f"==> Logg lagret til: {target_path}")
         return str(target_path)
+
+    def install_app(self, ui_lang: str = "no") -> dict[str, Any]:
+        """Install Steno into the user's local app directory with CLI and desktop shortcuts."""
+        is_en = str(ui_lang).strip().lower().startswith("en")
+        res = install_steno_app()
+        msg = res["message_en"] if is_en else res["message_no"]
+        self._log(f"==> {msg}")
+        return {"ok": True, "message": msg, **res}
+
+    def uninstall_app(self, ui_lang: str = "no") -> dict[str, Any]:
+        """Shutdown child processes, remove all cached Steno runtime/model directories and shortcuts, and close window."""
+        is_en = str(ui_lang).strip().lower().startswith("en")
+        self.shutdown_children()
+        res = uninstall_steno_app()
+        msg = res["message_en"] if is_en else res["message_no"]
+        self._log(f"==> {msg}")
+        if self.window:
+            def _close_later() -> None:
+                time.sleep(0.8)
+                try:
+                    if self.window:
+                        self.window.destroy()
+                except Exception:
+                    pass
+            threading.Thread(target=_close_later, daemon=True).start()
+        return {"ok": True, "message": msg, **res}
 
     def speak_intro_prompt(self, ui_lang: str = "no") -> None:
         """Speak the guided voice introduction prompt using local OS TTS (Norwegian or English)."""
@@ -676,6 +704,10 @@ def bind_drag_and_drop(window: Any) -> None:
 
 
 def main() -> None:
+    try:
+        install_steno_app()
+    except Exception:
+        pass
     api = MoteApi()
     window = webview.create_window(
         "Steno — A modern annalist for your meetings — an automaton stenographer",
@@ -689,6 +721,32 @@ def main() -> None:
         window.events.closed += api.shutdown_children
     except Exception:
         pass
+
+    app_menu = None
+    try:
+        from webview.menu import Menu, MenuAction, MenuSeparator  # type: ignore[import-not-found]
+
+        app_menu = [
+            Menu(
+                "File",
+                [
+                    MenuAction("Open Audio / Transcript...", lambda: window.evaluate_js("browseAudio()")),
+                    MenuAction("Open Output Folder", lambda: window.evaluate_js("openFinder()")),
+                    MenuSeparator(),
+                    MenuAction("Install Shortcut", lambda: window.evaluate_js("installStenoShortcut()")),
+                    MenuAction("Uninstall Steno...", lambda: window.evaluate_js("openUninstallDialog()")),
+                ],
+            )
+        ]
+    except Exception:
+        app_menu = None
+
+    if app_menu:
+        try:
+            webview.start(bind_drag_and_drop, window, menu=app_menu)
+            return
+        except TypeError:
+            pass
     webview.start(bind_drag_and_drop, window)
 
 

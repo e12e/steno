@@ -5,23 +5,27 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <!-- MANDATORY (modern-web-guidance/dark-mode): Declare light and dark support to prevent FOUC -->
     <meta name="color-scheme" content="light dark">
-    <link rel="canonical" href="https://hypertekst.net/rec/">
+    <link rel="canonical" href="https://hypertekst.net/steno/">
+    <link rel="icon" type="image/svg+xml" href="steno-logo.svg">
     <title>Steno — A Modern Annalist for Your Meetings — The Chronicle</title>
-    <meta name="description" content="Steno - a modern annalist for your meetings - an automaton stenographer. Single-file local meeting transcription, Pyannote diarization, and Ollama minutes for macOS, Windows, and Linux.">
+    <meta name="description" content="Steno — a modern annalist for your meetings — an automaton stenographer. Single-file local meeting transcription, speaker diarization, and structured minutes for macOS, Windows, and Linux.">
 
     <!-- Open Graph Social Sharing Cards -->
     <meta property="og:type" content="article">
     <meta property="og:site_name" content="The Chronicle">
     <meta property="og:title" content="Steno — A Modern Annalist for Your Meetings — An Automaton Stenographer">
-    <meta property="og:description" content="Steno - a modern annalist for your meetings - an automaton stenographer. Single-file local meeting transcription, speaker diarization, and minutes generation for macOS, Windows, and Linux.">
-    <meta property="og:url" content="https://hypertekst.net/rec/">
-    <meta property="og:image" content="https://hypertekst.net/img/pica-wings-color.jpg">
+    <meta property="og:description" content="Steno — a modern annalist for your meetings — an automaton stenographer. Single-file local apparatus for multi-speaker meeting transcription, speaker diarization, and structured minutes on macOS, Windows, and Linux.">
+    <meta property="og:url" content="https://hypertekst.net/steno/">
+    <meta property="og:image" content="https://hypertekst.net/steno/steno-logo-dark.png">
+    <meta property="og:image:width" content="512">
+    <meta property="og:image:height" content="512">
+    <meta property="og:image:alt" content="Steno 1843 Automaton Stenographer 28-tooth Babbage seal with acoustic signal wave.">
 
     <!-- Twitter / X Card -->
-    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:card" content="summary">
     <meta name="twitter:title" content="Steno — A Modern Annalist for Your Meetings — An Automaton Stenographer">
-    <meta name="twitter:description" content="Steno - a modern annalist for your meetings - an automaton stenographer. Single-file local meeting transcription, speaker diarization, and minutes generation for macOS, Windows, and Linux.">
-    <meta name="twitter:image" content="https://hypertekst.net/img/pica-wings-color.jpg">
+    <meta name="twitter:description" content="Steno — a modern annalist for your meetings — an automaton stenographer. Single-file local apparatus for multi-speaker meeting transcription, speaker diarization, and structured minutes on macOS, Windows, and Linux.">
+    <meta name="twitter:image" content="https://hypertekst.net/steno/steno-logo-dark.png">
 
     <script>
     /* Synchronous <head> theme bootstrap: prevents FOUC before first paint */
@@ -39,9 +43,6 @@
             box-sizing: border-box;
             margin: 0;
             padding: 0;
-            font-size: 100%;
-            font-weight: inherit;
-            vertical-align: baseline;
             -webkit-font-smoothing: antialiased;
             -moz-osx-font-smoothing: grayscale;
         }
@@ -214,7 +215,16 @@
         }
         .masthead-lockup {
             text-align: center;
-            padding: 1.65rem 0 0.5rem;
+            padding: 1.5rem 0 0.5rem;
+        }
+        .masthead-seal {
+            width: 5.5rem;
+            height: 5.5rem;
+            margin: 0 auto 0.65rem;
+            display: block;
+            --steno-bg: #0b0e15;
+            --steno-ink: #e6e0d4;
+            --steno-brass: #d4b87a;
         }
         .masthead-kicker {
             font-family: var(--font-sans);
@@ -378,6 +388,15 @@
             color: var(--text-secondary);
             text-wrap: pretty;
         }
+        .quote-attribution {
+            display: block;
+            margin-top: 0.4rem;
+            font-family: var(--font-sans);
+            font-style: normal;
+            font-size: 0.74rem;
+            letter-spacing: 0.03em;
+            color: var(--text-muted);
+        }
         .section-divider {
             margin: 2.5rem 0;
             border: 0;
@@ -390,6 +409,18 @@
             border-left: 3px solid var(--border-strong);
             margin: 1.25rem 0 1.75rem;
         }
+        .dispatch-header-row {
+            display: flex;
+            align-items: center;
+            gap: 1.1rem;
+            margin-bottom: 0.65rem;
+        }
+        .dispatch-seal {
+            width: 4rem;
+            height: 4rem;
+            flex-shrink: 0;
+            display: block;
+        }
         .dispatch-meta {
             display: flex;
             align-items: center;
@@ -401,7 +432,7 @@
             text-transform: uppercase;
             letter-spacing: 0.1em;
             color: var(--text-muted);
-            margin-bottom: 0.45rem;
+            margin-bottom: 0.35rem;
             font-variant-numeric: tabular-nums;
         }
         .dispatch-tag {
@@ -414,7 +445,7 @@
             font-size: 1.2rem;
             font-weight: 700;
             line-height: 1.25;
-            margin-bottom: 0.4rem;
+            margin-bottom: 0.15rem;
         }
         .dispatch-summary {
             font-size: 0.94rem;
@@ -431,7 +462,7 @@
             letter-spacing: 0.08em;
             display: flex;
             flex-wrap: wrap;
-            gap: 1.25rem;
+            gap: 0.65rem 1.25rem;
         }
         .dispatch-action a {
             color: var(--accent-primary);
@@ -605,7 +636,7 @@
             flex-wrap: wrap;
             gap: 0.5rem;
             font-family: var(--font-serif);
-            font-style:italic;
+            font-style: italic;
             font-size: 0.85rem;
             color: var(--text-muted);
         }
@@ -646,7 +677,7 @@
                 <div class="folio-meta">
                     <span><a href="/">The Chronicle</a></span>
                     <span class="folio-dot" aria-hidden="true">•</span>
-                    <span>Instrument Register — Route /rec/</span>
+                    <span>Analytical Instrument — Route /steno/</span>
                     <span class="folio-dot" aria-hidden="true">•</span>
                     <span>69° 39′ N, 18° 57′ E<span class="folio-wire"> — Tromsø</span></span>
                 </div>
@@ -680,15 +711,31 @@
             </div>
 
             <div class="masthead-lockup">
-                <p class="masthead-kicker">Working Instrument • Local Audio &amp; Language Pipeline</p>
+                <svg class="masthead-seal" viewBox="0 0 512 512" width="88" height="88" aria-hidden="true">
+                        <circle cx="256" cy="256" r="246" fill="var(--steno-bg, var(--bg-elevated))" stroke="none"/>
+                        <circle cx="256" cy="256" r="242" stroke="var(--steno-ink, var(--text-primary))" fill="none" stroke-width="6.5"/>
+                        <path d="M 256.00 58.00 L 264.00 58.16 L 272.07 32.58 L 290.05 34.60 L 292.23 61.34 L 300.06 62.96 L 307.82 64.90 L 321.38 41.76 L 338.46 47.73 L 334.64 74.28 L 341.91 77.61 L 349.04 81.22 L 367.42 61.68 L 382.74 71.30 L 373.10 96.34 L 379.45 101.20 L 385.60 106.31 L 407.87 91.34 L 420.66 104.13 L 405.69 126.40 L 410.80 132.55 L 415.66 138.90 L 440.70 129.26 L 450.32 144.58 L 430.78 162.96 L 434.39 170.09 L 437.72 177.36 L 464.27 173.54 L 470.24 190.62 L 447.10 204.18 L 449.04 211.94 L 450.66 219.77 L 477.40 221.95 L 479.42 239.93 L 453.84 248.00 L 454.00 256.00 L 453.84 264.00 L 479.42 272.07 L 477.40 290.05 L 450.66 292.23 L 449.04 300.06 L 447.10 307.82 L 470.24 321.38 L 464.27 338.46 L 437.72 334.64 L 434.39 341.91 L 430.78 349.04 L 450.32 367.42 L 440.70 382.74 L 415.66 373.10 L 410.80 379.45 L 405.69 385.60 L 420.66 407.87 L 407.87 420.66 L 385.60 405.69 L 379.45 410.80 L 373.10 415.66 L 382.74 440.70 L 367.42 450.32 L 349.04 430.78 L 341.91 434.39 L 334.64 437.72 L 338.46 464.27 L 321.38 470.24 L 307.82 447.10 L 300.06 449.04 L 292.23 450.66 L 290.05 477.40 L 272.07 479.42 L 264.00 453.84 L 256.00 454.00 L 248.00 453.84 L 239.93 479.42 L 221.95 477.40 L 219.77 450.66 L 211.94 449.04 L 204.18 447.10 L 190.62 470.24 L 173.54 464.27 L 177.36 437.72 L 170.09 434.39 L 162.96 430.78 L 144.58 450.32 L 129.26 440.70 L 138.90 415.66 L 132.55 410.80 L 126.40 405.69 L 104.13 420.66 L 91.34 407.87 L 106.31 385.60 L 101.20 379.45 L 96.34 373.10 L 71.30 382.74 L 61.68 367.42 L 81.22 349.04 L 77.61 341.91 L 74.28 334.64 L 47.73 338.46 L 41.76 321.38 L 64.90 307.82 L 62.96 300.06 L 61.34 292.23 L 34.60 290.05 L 32.58 272.07 L 58.16 264.00 L 58.00 256.00 L 58.16 248.00 L 32.58 239.93 L 34.60 221.95 L 61.34 219.77 L 62.96 211.94 L 64.90 204.18 L 41.76 190.62 L 47.73 173.54 L 74.28 177.36 L 77.61 170.09 L 81.22 162.96 L 61.68 144.58 L 71.30 129.26 L 96.34 138.90 L 101.20 132.55 L 106.31 126.40 L 91.34 104.13 L 104.13 91.34 L 126.40 106.31 L 132.55 101.20 L 138.90 96.34 L 129.26 71.30 L 144.58 61.68 L 162.96 81.22 L 170.09 77.61 L 177.36 74.28 L 173.54 47.73 L 190.62 41.76 L 204.18 64.90 L 211.94 62.96 L 219.77 61.34 L 221.95 34.60 L 239.93 32.58 L 248.00 58.16 Z" stroke="var(--steno-brass, var(--accent-primary))" fill="none" stroke-width="4.2" stroke-linejoin="round"/>
+                        <circle cx="256" cy="256" r="180" stroke="var(--steno-ink, var(--text-primary))" fill="none" stroke-width="3.8"/>
+                        <circle cx="256" cy="256" r="170" stroke="var(--steno-ink, var(--text-primary))" fill="none" stroke-width="1.2" opacity="0.7"/>
+                        <line x1="256" y1="78" x2="256" y2="120" stroke="var(--steno-brass, var(--accent-primary))" stroke-width="3.5" stroke-linecap="round"/>
+                        <line x1="256" y1="392" x2="256" y2="434" stroke="var(--steno-brass, var(--accent-primary))" stroke-width="3.5" stroke-linecap="round"/>
+                        <polygon points="256,64 242,96 270,96" fill="var(--steno-brass, var(--accent-primary))"/>
+                        <polygon points="256,448 242,416 270,416" fill="var(--steno-brass, var(--accent-primary))"/>
+                        <path d="M 92 256 L 114 256 L 123 236 L 134 276 L 145 222 L 156 288 L 167 244 L 175 256 L 188 256" stroke="var(--steno-brass, var(--accent-primary))" fill="none" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M 324 256 L 337 256 L 345 244 L 356 288 L 367 222 L 378 276 L 389 236 L 398 256 L 420 256" stroke="var(--steno-brass, var(--accent-primary))" fill="none" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
+                        <text x="258" y="148" text-anchor="middle" style="font-family:Georgia,Baskerville,'Times New Roman',serif;font-weight:700;font-size:20px;letter-spacing:0.26em;fill:var(--steno-brass, var(--accent-primary));">STENO</text>
+                        <text x="252" y="338" text-anchor="middle" style="font-family:Georgia,Baskerville,'Times New Roman',serif;font-weight:700;font-style:italic;font-size:242px;fill:var(--steno-ink, var(--text-primary));">S</text>
+                        <text x="258" y="384" text-anchor="middle" style="font-family:Georgia,Baskerville,'Times New Roman',serif;font-weight:700;font-size:19px;letter-spacing:0.26em;fill:var(--steno-brass, var(--accent-primary));">MDCCCXLIII</text>
+                    </svg>
+                <p class="masthead-kicker">Analytical Instrument • On-Device Audio &amp; Language Mechanism</p>
                 <h1 class="site-title">Steno</h1>
-                <p class="site-deck">Steno — a modern annalist for your meetings — an automaton stenographer. A single-file, strictly local desktop and command-line instrument for multi-speaker recording, transcription, and minutes across macOS, Windows, and Linux.</p>
+                <p class="site-deck">Steno — a modern annalist for your meetings — an automaton stenographer. A single-file desktop and command-line apparatus for multi-speaker recording, transcription, and structured minutes across macOS, Windows, and Linux.</p>
             </div>
 
             <nav class="masthead-nav" aria-label="Primary Sections">
                 <a href="#premise">I. Premise</a>
-                <a href="#pipeline">II. Pipeline</a>
-                <a href="#platforms">III. Platforms &amp; CLI</a>
+                <a href="#pipeline">II. Operations</a>
+                <a href="#platforms">III. Apparatus &amp; CLI</a>
                 <a href="#benchmarks">IV. Verification</a>
                 <a href="#download">Download</a>
             </nav>
@@ -703,8 +750,8 @@
     <main class="page-shell">
 
         <div class="edition-banner">
-            <span>Technical Specification &amp; Single-File Distribution</span>
-            <span>Bilingual Interface (English &amp; Norwegian) • 2026</span>
+            <span>Operational Specification &amp; Single-File Distribution</span>
+            <span>macOS • Windows • Linux • 2026</span>
         </div>
 
         <div class="broadsheet-grid">
@@ -715,24 +762,50 @@
             <div class="primary-column">
 
                 <article class="essay-article" id="premise">
-                    <div class="section-kicker">I. The Instrument &amp; Its Premise</div>
-                    <h2>Local Transcription Without External Telemetry</h2>
+                    <div class="section-kicker">I. Operational Premise</div>
+                    <h2>Ordering Spoken Deliberation Without External Telegraphs</h2>
 
-                    <p>Modern institutional and project meetings routinely involve sensitive deliberations, personal data, or unpublished technical work that should not be transmitted to third-party cloud transcription APIs. <strong>Steno</strong>—a modern annalist for your meetings, an automaton stenographer (<code>steno.py</code>)—consolidates an entire speech-to-minutes pipeline into a single, self-bootstrapping Python file that executes exclusively on the operator’s own machine.</p>
+                    <blockquote>
+                        “The Analytical Engine has no pretensions whatever to originate anything. It can do whatever we know how to order it to perform. It can follow analysis; but it has no power of anticipating any analytical relations or truths.”
+                        <span class="quote-attribution">— Ada Augusta, Countess of Lovelace, <em>Note G on the Analytical Engine</em> (1843)</span>
+                    </blockquote>
 
-                    <p>Once model weights are cached locally, every stage—from microphone capture and voice activity detection to word-level alignment, speaker diarization, and structured minutes generation—operates offline. Neither audio waveforms nor text transcripts leave the local filesystem.</p>
+                    <p>Spoken deliberation is transient by nature, yet institutional and technical assemblies frequently involve unpublished inquiry or confidential counsel that ought not to pass through external cloud telegraphs. <strong>Steno</strong>—a modern annalist for your meetings, an automaton stenographer (<code>steno.py</code>)—confines the entire mechanism of transcription, speaker attribution, and summarization to a single self-bootstrapping file on the operator’s own machine.</p>
+
+                    <p>The apparatus claims no faculty of invention. Its office is strictly mechanical: to sample acoustic vibrations, align them to discrete lexical intervals, partition speakers by vocal timbre, and arrange the resulting text into an indexed transcript and structured abstract. Neither audio waveforms nor text transcripts leave the local filesystem.</p>
 
                     <div class="dispatch-card" id="download">
-                        <div class="dispatch-meta">
-                            <span class="dispatch-tag">Zero-Python Polyglot &amp; Universal Installers</span>
-                            <span>macOS • Windows 11 • Linux</span>
+                        <div class="dispatch-header-row">
+                            <svg class="dispatch-seal" viewBox="0 0 512 512" width="88" height="88" aria-hidden="true">
+                        <circle cx="256" cy="256" r="246" fill="var(--steno-bg, var(--bg-elevated))" stroke="none"/>
+                        <circle cx="256" cy="256" r="242" stroke="var(--steno-ink, var(--text-primary))" fill="none" stroke-width="6.5"/>
+                        <path d="M 256.00 58.00 L 264.00 58.16 L 272.07 32.58 L 290.05 34.60 L 292.23 61.34 L 300.06 62.96 L 307.82 64.90 L 321.38 41.76 L 338.46 47.73 L 334.64 74.28 L 341.91 77.61 L 349.04 81.22 L 367.42 61.68 L 382.74 71.30 L 373.10 96.34 L 379.45 101.20 L 385.60 106.31 L 407.87 91.34 L 420.66 104.13 L 405.69 126.40 L 410.80 132.55 L 415.66 138.90 L 440.70 129.26 L 450.32 144.58 L 430.78 162.96 L 434.39 170.09 L 437.72 177.36 L 464.27 173.54 L 470.24 190.62 L 447.10 204.18 L 449.04 211.94 L 450.66 219.77 L 477.40 221.95 L 479.42 239.93 L 453.84 248.00 L 454.00 256.00 L 453.84 264.00 L 479.42 272.07 L 477.40 290.05 L 450.66 292.23 L 449.04 300.06 L 447.10 307.82 L 470.24 321.38 L 464.27 338.46 L 437.72 334.64 L 434.39 341.91 L 430.78 349.04 L 450.32 367.42 L 440.70 382.74 L 415.66 373.10 L 410.80 379.45 L 405.69 385.60 L 420.66 407.87 L 407.87 420.66 L 385.60 405.69 L 379.45 410.80 L 373.10 415.66 L 382.74 440.70 L 367.42 450.32 L 349.04 430.78 L 341.91 434.39 L 334.64 437.72 L 338.46 464.27 L 321.38 470.24 L 307.82 447.10 L 300.06 449.04 L 292.23 450.66 L 290.05 477.40 L 272.07 479.42 L 264.00 453.84 L 256.00 454.00 L 248.00 453.84 L 239.93 479.42 L 221.95 477.40 L 219.77 450.66 L 211.94 449.04 L 204.18 447.10 L 190.62 470.24 L 173.54 464.27 L 177.36 437.72 L 170.09 434.39 L 162.96 430.78 L 144.58 450.32 L 129.26 440.70 L 138.90 415.66 L 132.55 410.80 L 126.40 405.69 L 104.13 420.66 L 91.34 407.87 L 106.31 385.60 L 101.20 379.45 L 96.34 373.10 L 71.30 382.74 L 61.68 367.42 L 81.22 349.04 L 77.61 341.91 L 74.28 334.64 L 47.73 338.46 L 41.76 321.38 L 64.90 307.82 L 62.96 300.06 L 61.34 292.23 L 34.60 290.05 L 32.58 272.07 L 58.16 264.00 L 58.00 256.00 L 58.16 248.00 L 32.58 239.93 L 34.60 221.95 L 61.34 219.77 L 62.96 211.94 L 64.90 204.18 L 41.76 190.62 L 47.73 173.54 L 74.28 177.36 L 77.61 170.09 L 81.22 162.96 L 61.68 144.58 L 71.30 129.26 L 96.34 138.90 L 101.20 132.55 L 106.31 126.40 L 91.34 104.13 L 104.13 91.34 L 126.40 106.31 L 132.55 101.20 L 138.90 96.34 L 129.26 71.30 L 144.58 61.68 L 162.96 81.22 L 170.09 77.61 L 177.36 74.28 L 173.54 47.73 L 190.62 41.76 L 204.18 64.90 L 211.94 62.96 L 219.77 61.34 L 221.95 34.60 L 239.93 32.58 L 248.00 58.16 Z" stroke="var(--steno-brass, var(--accent-primary))" fill="none" stroke-width="4.2" stroke-linejoin="round"/>
+                        <circle cx="256" cy="256" r="180" stroke="var(--steno-ink, var(--text-primary))" fill="none" stroke-width="3.8"/>
+                        <circle cx="256" cy="256" r="170" stroke="var(--steno-ink, var(--text-primary))" fill="none" stroke-width="1.2" opacity="0.7"/>
+                        <line x1="256" y1="78" x2="256" y2="120" stroke="var(--steno-brass, var(--accent-primary))" stroke-width="3.5" stroke-linecap="round"/>
+                        <line x1="256" y1="392" x2="256" y2="434" stroke="var(--steno-brass, var(--accent-primary))" stroke-width="3.5" stroke-linecap="round"/>
+                        <polygon points="256,64 242,96 270,96" fill="var(--steno-brass, var(--accent-primary))"/>
+                        <polygon points="256,448 242,416 270,416" fill="var(--steno-brass, var(--accent-primary))"/>
+                        <path d="M 92 256 L 114 256 L 123 236 L 134 276 L 145 222 L 156 288 L 167 244 L 175 256 L 188 256" stroke="var(--steno-brass, var(--accent-primary))" fill="none" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M 324 256 L 337 256 L 345 244 L 356 288 L 367 222 L 378 276 L 389 236 L 398 256 L 420 256" stroke="var(--steno-brass, var(--accent-primary))" fill="none" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
+                        <text x="258" y="148" text-anchor="middle" style="font-family:Georgia,Baskerville,'Times New Roman',serif;font-weight:700;font-size:20px;letter-spacing:0.26em;fill:var(--steno-brass, var(--accent-primary));">STENO</text>
+                        <text x="252" y="338" text-anchor="middle" style="font-family:Georgia,Baskerville,'Times New Roman',serif;font-weight:700;font-style:italic;font-size:242px;fill:var(--steno-ink, var(--text-primary));">S</text>
+                        <text x="258" y="384" text-anchor="middle" style="font-family:Georgia,Baskerville,'Times New Roman',serif;font-weight:700;font-size:19px;letter-spacing:0.26em;fill:var(--steno-brass, var(--accent-primary));">MDCCCXLIII</text>
+                    </svg>
+                            <div>
+                                <div class="dispatch-meta">
+                                    <span class="dispatch-tag">Zero-Python Polyglot &amp; Universal Installers</span>
+                                    <span>macOS • Windows 11 • Linux</span>
+                                </div>
+                                <h3 class="dispatch-title">Single-File Distribution: <code>steno.com</code> &amp; <code>steno.py</code></h3>
+                            </div>
                         </div>
-                        <h3 class="dispatch-title">Single-File Distribution: <code>steno.py</code></h3>
                         <p class="dispatch-summary">
-                            Contains the embedded desktop GUI template, transcript and minutes HTML renderers, the five-stage checkpoint engine, bilingual English/Norwegian localization, and an automatic <code>uv</code> environment bootstrapper. <strong>No pre-installed Python is required</strong>—on macOS and Linux, <code>sh steno.py</code> (or <code>install.sh</code>) provisions a standalone Python 3.12 runtime automatically; on Windows, <code>steno.cmd</code> (or <code>install.ps1</code>) does the same.
+                            Encapsulates the progressive-disclosure desktop interface, transcript and minutes HTML renderers, the five-stage checkpoint engine, and an automatic <code>uv</code> runtime provisioner. <strong>No pre-installed Python is required</strong>—<code>steno.com</code> (Cosmopolitan APE universal binary) and <code>steno.py</code> run directly across macOS, Windows 11, and Linux, support <code>--install</code> and <code>--uninstall</code>, and include an in-app <em>File → Uninstall Steno…</em> menu with confirmation dialog to remove all cached files.
                         </p>
                         <div class="dispatch-action">
-                            <a href="steno.py" download="steno.py">Download steno.py →</a>
+                            <a href="steno.com" download="steno.com">Download Universal Binary (steno.com) →</a>
+                            <a href="steno.py" download="steno.py">Download Script (steno.py) →</a>
                             <a href="steno.cmd" download="steno.cmd">Windows Launcher (steno.cmd) →</a>
                             <a href="install.sh" download="install.sh">macOS / Linux Installer (install.sh) →</a>
                             <a href="install.ps1" download="install.ps1">Windows Installer (install.ps1) →</a>
@@ -741,92 +814,87 @@
 
                     <hr class="section-divider" id="pipeline">
 
-                    <div class="section-kicker">II. The Five-Stage Checkpointed Pipeline</div>
-                    <h2>Crash-Resumable Stages &amp; Speaker Attribution</h2>
+                    <div class="section-kicker">II. The Five Sequential Operations</div>
+                    <h2>Checkpointed Execution &amp; Speaker Attribution</h2>
 
-                    <p>Long audio jobs on consumer hardware are vulnerable to memory pressure, battery depletion, or manual interruption. Rather than treating transcription and summarization as a monolithic pass, the engine writes atomic JSON checkpoints under <code>.mote_checkpoints/&lt;stem&gt;/</code> after each stage completes.</p>
+                    <p>To prevent memory contention on portable machines, the five analytical stages execute sequentially rather than concurrently. Upon completing each operation, the engine writes an atomic JSON checkpoint under <code>.steno_checkpoints/&lt;stem&gt;/</code> and releases its model weights before the next model is loaded.</p>
 
-                    <p>If a run is paused or interrupted, re-running the same file resumes automatically from the last completed checkpoint. Operators may also re-execute individual stages—such as regenerating meeting minutes with a different language model or updated manual notes—in seconds without repeating acoustic inference.</p>
+                    <p>If an operation is halted, re-invoking the file resumes from the last verified checkpoint. Individual stages—such as re-binding participant identities or re-computing the final minutes with amended context notes—may be repeated independently in seconds.</p>
 
                     <div class="stage-ledger" role="list" aria-label="Pipeline Stages">
                         <div class="stage-row" role="listitem">
                             <span class="stage-code">Stage 1 • ASR</span>
                             <div class="stage-desc">
-                                <strong>Speech-to-Text (<code>1_asr.json</code>):</strong> Transcribes raw audio (<code>.wav</code>, <code>.m4a</code>, <code>.opus</code>, <code>.mp3</code>) via WhisperX using vocabulary hints extracted from the meeting title, participant list, and attached slide decks (<code>.pptx</code>, <code>.pdf</code>, <code>.docx</code>).
+                                <strong>Acoustic Transcription (<code>1_asr.json</code>):</strong> Transcribes raw recordings (<code>.wav</code>, <code>.m4a</code>, <code>.opus</code>, <code>.mp3</code>) via WhisperX, conditioned on domain terminology extracted from the meeting title, participant roster, and attached slide decks (<code>.pptx</code>, <code>.pdf</code>, <code>.docx</code>).
                             </div>
                         </div>
                         <div class="stage-row" role="listitem">
                             <span class="stage-code">Stage 2 • Align</span>
                             <div class="stage-desc">
-                                <strong>Word-Level Forced Alignment (<code>2_align.json</code>):</strong> Aligns every transcribed word to exact millisecond boundaries via Wav2Vec2 (using <code>NbAiLab/nb-wav2vec2-300m-bokmaal</code> for Norwegian small/base models).
+                                <strong>Phoneme Alignment (<code>2_align.json</code>):</strong> Aligns every transcribed word to exact millisecond boundaries via Wav2Vec2 acoustic alignment models matched to the active language and model tier.
                             </div>
                         </div>
                         <div class="stage-row" role="listitem">
                             <span class="stage-code">Stage 3 • Diarize</span>
                             <div class="stage-desc">
-                                <strong>Speaker Separation (<code>3_diarize.json</code>):</strong> Assigns words to distinct speaker clusters (<code>SPEAKER_00</code>, <code>SPEAKER_01</code>, …) via <code>pyannote/speaker-diarization-community-1</code>. Automatically bypassed when locked to a single speaker (<code>--speakers 1</code>) for lectures or keynotes.
+                                <strong>Speaker Separation (<code>3_diarize.json</code>):</strong> Partitions words across distinct speaker clusters (<code>SPEAKER_00</code>, <code>SPEAKER_01</code>, …) via <code>pyannote/speaker-diarization-community-1</code>. Bypassed automatically when locked to a single speaker (<code>--speakers 1</code>) for lectures.
                             </div>
                         </div>
                         <div class="stage-row" role="listitem">
                             <span class="stage-code">Stage 4 • Names</span>
                             <div class="stage-desc">
-                                <strong>Identity Mapping &amp; Interactive HTML (<code>4_speakers.json</code>):</strong> Resolves speaker IDs to participant names using round-table introductions, direct address rules, and manual notes. Emits a searchable HTML transcript with browser-side speaker renaming and one-click HTML re-export.
+                                <strong>Participant Resolution (<code>4_speakers.json</code>):</strong> Binds anonymous speaker clusters to named participants using opening introductions, direct address patterns, and operator notes. Emits a searchable HTML transcript with inline speaker renaming.
                             </div>
                         </div>
                         <div class="stage-row" role="listitem">
                             <span class="stage-code">Stage 5 • Notes</span>
                             <div class="stage-desc">
-                                <strong>Minutes &amp; Lecture Summaries (<code>_referat.md</code> / <code>.html</code>):</strong> Streams structured Markdown and printable HTML via a managed local Ollama instance, switching automatically between multi-speaker meeting minutes (with action tables) and single-speaker lecture notes.
+                                <strong>Structured Minutes &amp; Abstracts (<code>.md</code> / <code>.html</code>):</strong> Synthesizes structured Markdown and printable HTML via a managed local Ollama instance, adapting its schema between multi-speaker meeting minutes (with action tables) and single-speaker lecture notes.
                             </div>
                         </div>
                     </div>
 
                     <hr class="section-divider" id="platforms">
 
-                    <div class="section-kicker">III. Cross-Platform Execution &amp; Localization</div>
-                    <h2>Operation on macOS, Windows, and Linux</h2>
+                    <div class="section-kicker">III. Cross-Platform Apparatus &amp; Command Line</div>
+                    <h2>Execution on macOS, Windows, and Linux</h2>
 
-                    <p>The header of <code>steno.py</code> is a polyglot script valid under POSIX shells (<code>/bin/sh</code>), Windows Command Prompt / PowerShell, and direct Python invocation. On first launch, it verifies or installs Astral’s standalone <code>uv</code> binary, provisions an isolated Python 3.12 runtime with <code>pywebview</code>, <code>markdown</code>, and <code>static-ffmpeg</code>, and downloads standalone <code>whisperx</code> and <code>ollama</code> binaries on demand.</p>
+                    <p>The header of <code>steno.py</code> is a polyglot script valid under POSIX shells (<code>/bin/sh</code>), Windows Command Prompt, and direct Python invocation. On first launch, it provisions Astral’s standalone <code>uv</code> binary, an isolated Python 3.12 environment (<code>pywebview</code>, <code>markdown</code>, <code>static-ffmpeg</code>), and standalone <code>whisperx</code> and <code>ollama</code> binaries on demand.</p>
 
-                    <p>Both the progressive-disclosure desktop interface and the command-line parser provide full localization in English (<code>en</code>) and Norwegian (<code>no</code>). Launching without arguments opens the native desktop window; passing any file or flag dispatches directly to the command-line interface.</p>
+                    <p>Invoking the script without arguments opens the native desktop window; supplying any file path or flag dispatches directly to the command-line interface.</p>
 
                     <pre class="terminal-specimen"><code># 0. Zero-Python Universal Install (provisions standalone Python 3.12 + steno CLI)
 # macOS / Linux:
-curl -LsSf https://s.hypertekst.net/rec/install.sh | sh
+curl -LsSf https://hypertekst.net/steno/install.sh | sh
 # Windows 11 (PowerShell):
-irm https://s.hypertekst.net/rec/install.ps1 | iex
+irm https://hypertekst.net/steno/install.ps1 | iex
 
 # 1. Or run steno.py directly without pre-installed Python (macOS / Linux / Windows)
 sh steno.py
 
-# 2. Display CLI help in English or Norwegian
-sh steno.py --ui-lang en --help
-sh steno.py --ui-lang no --help
-
-# 3. Inspect local RAM, CPU/GPU, and recommended model profile
+# 2. Inspect command-line options and hardware profile recommendations
+sh steno.py --help
 sh steno.py --check-hw
 
-# 4. Run 20-second live microphone dBFS level &amp; coarse ASR check
+# 3. Run a 20-second live microphone dBFS level &amp; acoustic check
 sh steno.py --live-check --live-seconds 20
 
-# 5. Transcribe a 4-speaker meeting with agenda slides and auto hardware profile
+# 4. Transcribe a 4-speaker meeting with slide context and automatic hardware profile
 sh steno.py meeting.m4a --profile auto \
-  --title "Architecture Review – 2026-11-05" \
-  --speaker-names "Kari Nordmann (Chair), Ola Hansen, Ingrid Berg, Per Lie" \
+  --title "Analytical Engine Review – 2026-11-05" \
+  --speaker-names "Ada Lovelace (Chair), Charles Babbage, Mary Somerville, Luigi Menabrea" \
   -c slides.pptx -M draft_notes.docx</code></pre>
 
                     <hr class="section-divider" id="benchmarks">
 
-                    <div class="section-kicker">IV. Empirical Verification &amp; Hardware Profiles</div>
-                    <h2>Synthetic Four-Speaker Benchmark</h2>
+                    <div class="section-kicker">IV. Empirical Verification</div>
+                    <h2>Model Selection &amp; Memory Discipline</h2>
 
-                    <p>To prevent memory exhaustion on 8 GB and 16 GB laptops while maintaining word accuracy on Norwegian and English speech, models run sequentially rather than concurrently. WhisperX and alignment models are explicitly unloaded and garbage-collected before Pyannote or Ollama is initialized.</p>
+                    <p>Before initiating inference, the application measures available system memory, processor architecture, GPU VRAM, and free disk space against the peak sequential footprint of the chosen profile, alerting the operator whenever a lighter configuration is warranted.</p>
 
                     <blockquote>
-                        “Across twenty evaluated ASR and LLM combinations on a synthetic four-speaker benchmark suite, pairing a compact 244M acoustic model with a 300M phoneme aligner and a 4B local reasoning model outperformed models six times larger while running nearly three times faster.”
+                        “Across twenty evaluated acoustic and language model pairings on a four-speaker benchmark suite, a compact 244M acoustic model paired with a 300M phoneme aligner and a 4B local language model surpassed models six times larger while completing inference in nearly one-third the time.”
                     </blockquote>
-
-                    <p>Before starting a job, the application evaluates available system RAM and disk space against the peak sequential memory requirement of the selected model pair, warning the operator if a lighter profile is required.</p>
                 </article>
 
             </div>
@@ -849,8 +917,8 @@ sh steno.py meeting.m4a --profile auto \
                                 <td>Python 3.12 (via uv)</td>
                             </tr>
                             <tr>
-                                <th scope="row">UI Languages</th>
-                                <td>English (en) &amp; Norsk (no)</td>
+                                <th scope="row">Interface</th>
+                                <td>Desktop GUI &amp; CLI</td>
                             </tr>
                             <tr>
                                 <th scope="row">ASR Engine</th>
@@ -865,6 +933,10 @@ sh steno.py meeting.m4a --profile auto \
                                 <td>Ollama (Local HTTP)</td>
                             </tr>
                             <tr>
+                                <th scope="row">Emblem SVGs</th>
+                                <td><a href="steno-logo-dark.svg">Dark</a> • <a href="steno-logo-light.svg">Light</a></td>
+                            </tr>
+                            <tr>
                                 <th scope="row">Telemetry</th>
                                 <td>None (100% Offline)</td>
                             </tr>
@@ -877,10 +949,10 @@ sh steno.py meeting.m4a --profile auto \
                     <ul class="instrument-list">
                         <li class="instrument-item">
                             <div class="instrument-header">
-                                <span class="instrument-name">macOS (ARM64 &amp; Intel)</span>
+                                <span class="instrument-name">macOS (Apple Silicon &amp; Intel)</span>
                                 <span class="instrument-route">darwin</span>
                             </div>
-                            <p class="instrument-desc">Native Cocoa WebKit window via <code>pywebview</code>, <code>avfoundation</code> 16 kHz mic capture, and <code>say</code> voice guide.</p>
+                            <p class="instrument-desc">Native Cocoa WebKit window via <code>pywebview</code>, <code>avfoundation</code> 16 kHz microphone capture, and spoken round-table prompts.</p>
                         </li>
 
                         <li class="instrument-item">
@@ -888,7 +960,7 @@ sh steno.py meeting.m4a --profile auto \
                                 <span class="instrument-name">Windows 11 (x64 &amp; ARM64)</span>
                                 <span class="instrument-route">win32</span>
                             </div>
-                            <p class="instrument-desc">Edge WebView2 window, automatic DirectShow (<code>dshow</code>) audio device probing, PowerShell <code>System.Speech</code> TTS, and CUDA/CPU inference.</p>
+                            <p class="instrument-desc">Edge WebView2 window, automatic DirectShow (<code>dshow</code>) microphone discovery, PowerShell speech synthesis, and CUDA/CPU execution.</p>
                         </li>
 
                         <li class="instrument-item">
@@ -896,7 +968,7 @@ sh steno.py meeting.m4a --profile auto \
                                 <span class="instrument-name">Linux (x86_64 &amp; AArch64)</span>
                                 <span class="instrument-route">linux</span>
                             </div>
-                            <p class="instrument-desc">GTK/Qt WebKit window, PulseAudio/PipeWire (<code>pulse</code>) with ALSA fallback, <code>espeak-ng</code> voice guide, and CUDA/CPU inference.</p>
+                            <p class="instrument-desc">GTK/Qt WebKit window, PulseAudio/PipeWire (<code>pulse</code>) with ALSA fallback, <code>espeak-ng</code> voice prompts, and CUDA/CPU execution.</p>
                         </li>
                     </ul>
                 </section>
@@ -910,24 +982,24 @@ sh steno.py meeting.m4a --profile auto \
                                 <td>12–16 GB+ RAM (~6.5 GB peak)</td>
                             </tr>
                             <tr>
-                                <th scope="row">ASR + LLM</th>
-                                <td>nb-whisper-small + gemma4:e4b</td>
+                                <th scope="row">Models</th>
+                                <td>244M Whisper + 4B Gemma</td>
                             </tr>
                             <tr>
                                 <th scope="row">fast</th>
                                 <td>16 GB+ RAM (~6.5 GB peak)</td>
                             </tr>
                             <tr>
-                                <th scope="row">ASR + LLM</th>
-                                <td>distil-turbo + gemma4:e4b</td>
+                                <th scope="row">Models</th>
+                                <td>756M Distil + 4B Gemma</td>
                             </tr>
                             <tr>
                                 <th scope="row">light</th>
                                 <td>8 GB RAM (~3.8 GB peak)</td>
                             </tr>
                             <tr>
-                                <th scope="row">ASR + LLM</th>
-                                <td>nb-whisper-small + llama3.2</td>
+                                <th scope="row">Models</th>
+                                <td>244M Whisper + 3B Llama</td>
                             </tr>
                         </tbody>
                     </table>
@@ -974,11 +1046,11 @@ sh steno.py meeting.m4a --profile auto \
                     </div>
                     <div>
                         <span class="impressum-label">Instrument Route</span>
-                        <a href="/rec/">hypertekst.net/rec/</a>
+                        <a href="/steno/">hypertekst.net/steno/</a>
                     </div>
                     <div>
-                        <span class="impressum-label">Source Repository</span>
-                        <a href="https://github.com/e12e/rec" rel="noopener">github.com/e12e/rec</a>
+                        <span class="impressum-label">GitHub Profile</span>
+                        <a href="https://github.com/e12e" rel="me noopener">github.com/e12e</a>
                     </div>
                     <div>
                         <span class="impressum-label">Correspondence</span>

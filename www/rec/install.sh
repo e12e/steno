@@ -3,13 +3,13 @@
 # Steno - a modern annalist for your meetings - an automaton stenographer.
 #
 # Usage:
-#   curl -LsSf https://s.hypertekst.net/rec/install.sh | sh
+#   curl -LsSf https://hypertekst.net/steno/install.sh | sh
 #   or locally:
 #   sh install.sh
 
 set -eu
 
-STENO_URL="${STENO_URL:-https://s.hypertekst.net/rec/steno.py}"
+STENO_URL="${STENO_URL:-https://hypertekst.net/steno/steno.py}"
 INSTALL_DIR="${STENO_INSTALL_DIR:-$HOME/.local/share/steno}"
 BIN_DIR="${STENO_BIN_DIR:-$HOME/.local/bin}"
 SOURCE_FILE="${STENO_SOURCE_FILE:-}"
