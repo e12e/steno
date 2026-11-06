@@ -56,5 +56,13 @@ Feature: Idiomatic CLI Argument Parsing, Unified Entrypoint Dispatch, and Pipeli
     And www/rec/install.sh installs the steno launcher into a custom prefix using /bin/sh
     And www/rec/install.ps1 and www/rec/steno.cmd provide zero-Python Windows installation and double-click launch
 
+  Scenario: Cosmopolitan APE steno.com binary, install/uninstall lifecycle, and GUI File menu uninstall dialog
+    Given the Cosmopolitan APE binary dist/steno.com and www/rec/steno.com
+    When running install_steno_app and uninstall_steno_app in an isolated prefix and inspecting the GUI File menu
+    Then dist/steno.com has a valid MZqFpD APE + 64-bit PE32+ header and embeds the steno.py payload
+    And install_steno_app creates the cached app directory, CLI launcher, and desktop entry, and uninstall_steno_app removes them cleanly
+    And the desktop GUI includes a File menu with an Uninstall option and a Yes/No confirmation modal connected to MoteApi.uninstall_app
+
+
 
 

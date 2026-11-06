@@ -79,7 +79,7 @@ class TestGherkinBDDScenarios(unittest.TestCase):
     def test_all_gherkin_scenarios_in_feature_file(self) -> None:
         self.assertTrue(FEATURE_FILE.is_file(), f"Missing Gherkin feature file: {FEATURE_FILE}")
         scenarios = parse_gherkin_feature(FEATURE_FILE)
-        self.assertEqual(len(scenarios), 9)
+        self.assertEqual(len(scenarios), 10)
 
         for sc in scenarios:
             name = str(sc["name"])
@@ -312,6 +312,76 @@ class TestGherkinBDDScenarios(unittest.TestCase):
                 self.assertIn("install.sh", idx_html)
                 self.assertIn("install.ps1", idx_html)
                 self.assertIn("steno.cmd", idx_html)
+            elif step == "Given the Cosmopolitan APE binary dist/steno.com and www/rec/steno.com":
+                root_dir = Path(__file__).resolve().parent.parent
+                ctx["dist_com"] = root_dir / "dist" / "steno.com"
+                ctx["www_com"] = root_dir / "www" / "rec" / "steno.com"
+                ctx["www_idx"] = root_dir / "www" / "rec" / "index.html"
+            elif step == "When running install_steno_app and uninstall_steno_app in an isolated prefix and inspecting the GUI File menu":
+                install_fn = getattr(mote_core, "install_steno_app", None)
+                uninstall_fn = getattr(mote_core, "uninstall_steno_app", None)
+                self.assertTrue(callable(install_fn), "mote.core.install_steno_app is missing")
+                self.assertTrue(callable(uninstall_fn), "mote.core.uninstall_steno_app is missing")
+                ctx["install_fn"] = install_fn
+                ctx["uninstall_fn"] = uninstall_fn
+                ctx["gui_html"] = mote_gui.HTML
+            elif step == "Then dist/steno.com has a valid MZqFpD APE + 64-bit PE32+ header and embeds the steno.py payload":
+                import struct
+
+                dist_com = ctx["dist_com"]
+                www_com = ctx["www_com"]
+                www_idx = ctx["www_idx"]
+                assert isinstance(dist_com, Path) and isinstance(www_com, Path) and isinstance(www_idx, Path)
+                self.assertTrue(dist_com.is_file(), f"Missing {dist_com}")
+                self.assertTrue(www_com.is_file(), f"Missing {www_com}")
+                com_bytes = dist_com.read_bytes()
+                self.assertEqual(com_bytes, www_com.read_bytes(), "www/rec/steno.com is out of sync with dist/steno.com")
+                self.assertTrue(com_bytes.startswith(b"MZqFpD="), "steno.com must start with Cosmopolitan APE MZqFpD= magic")
+                e_lfanew = struct.unpack_from("<I", com_bytes, 0x3C)[0]
+                self.assertEqual(com_bytes[e_lfanew : e_lfanew + 4], b"PE\x00\x00", "Invalid PE signature at e_lfanew")
+                machine = struct.unpack_from("<H", com_bytes, e_lfanew + 4)[0]
+                self.assertEqual(machine, 0x8664, "PE header must target x86_64 (0x8664)")
+                opt_magic = struct.unpack_from("<H", com_bytes, e_lfanew + 24)[0]
+                self.assertEqual(opt_magic, 0x020B, "PE optional header must be PE32+ (0x020B)")
+                self.assertIn(b"# === STENO_PAYLOAD_BEGIN ===", com_bytes)
+                self.assertIn("steno.com", www_idx.read_text(encoding="utf-8"))
+            elif step == "And install_steno_app creates the cached app directory, CLI launcher, and desktop entry, and uninstall_steno_app removes them cleanly":
+                install_fn = ctx["install_fn"]
+                uninstall_fn = ctx["uninstall_fn"]
+                assert callable(install_fn) and callable(uninstall_fn)
+                with tempfile.TemporaryDirectory() as tmp:
+                    tmp_root = Path(tmp)
+                    res_inst = install_fn(target_root=tmp_root, platform_str="darwin")
+                    self.assertTrue(res_inst["ok"])
+                    app_dir = Path(res_inst["app_dir"])
+                    launcher = Path(res_inst["launcher_path"])
+                    desktop_entry = Path(res_inst["desktop_entry"])
+                    mote_cache = tmp_root / ".local" / "share" / "mote_transcribe"
+                    mote_cache.mkdir(parents=True, exist_ok=True)
+                    (mote_cache / "dummy_model.bin").write_bytes(b"1234")
+                    self.assertTrue(app_dir.is_dir())
+                    self.assertTrue(launcher.is_file())
+                    self.assertTrue(desktop_entry.exists())
+                    res_uninst = uninstall_fn(target_root=tmp_root, platform_str="darwin")
+                    self.assertTrue(res_uninst["ok"])
+                    self.assertFalse(app_dir.exists(), "app_dir should be removed on uninstall")
+                    self.assertFalse(mote_cache.exists(), "mote_transcribe cache should be removed on uninstall")
+                    self.assertFalse(launcher.exists(), "CLI launcher should be removed on uninstall")
+                    self.assertFalse(desktop_entry.exists(), "Desktop entry should be removed on uninstall")
+            elif step == "And the desktop GUI includes a File menu with an Uninstall option and a Yes/No confirmation modal connected to MoteApi.uninstall_app":
+                gui_html = str(ctx["gui_html"])
+                self.assertIn("file_menu_btn", gui_html)
+                self.assertIn("menu_uninstall_btn", gui_html)
+                self.assertIn("uninstall_modal", gui_html)
+                self.assertIn("confirm_uninstall_yes_btn", gui_html)
+                self.assertIn("confirm_uninstall_no_btn", gui_html)
+                api = mote_gui.MoteApi()
+                self.assertTrue(hasattr(api, "uninstall_app"), "MoteApi.uninstall_app is missing")
+                self.assertTrue(hasattr(api, "install_app"), "MoteApi.install_app is missing")
+                parser = mote_core.build_cli_parser("en", ["--help"])
+                help_en = parser.format_help()
+                self.assertIn("--install", help_en)
+                self.assertIn("--uninstall", help_en)
             else:
                 self.fail(f"Unrecognized Gherkin step in '{name}': {step}")
 
