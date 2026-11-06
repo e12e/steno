@@ -38,6 +38,7 @@ from mote.core import (  # noqa: E402
     get_initial_hf_token,
     install_steno_app,
     is_diarization_cached,
+    is_termux,
     is_transcript_file,
     resolve_moved_audio_path,
     resolve_speaker_bounds,
@@ -259,7 +260,9 @@ class MoteApi:
             )
         else:
             voice = "en" if is_en else "no"
-            if shutil.which("espeak-ng"):
+            if shutil.which("termux-tts-speak"):
+                self._tts_proc = subprocess.Popen(["termux-tts-speak", "-l", voice, prompt_text])
+            elif shutil.which("espeak-ng"):
                 self._tts_proc = subprocess.Popen(["espeak-ng", "-v", voice, prompt_text])
             elif shutil.which("espeak"):
                 self._tts_proc = subprocess.Popen(["espeak", "-v", voice, prompt_text])
@@ -522,6 +525,8 @@ class MoteApi:
             subprocess.Popen(["open", folder_path])
         elif os.name == "nt":
             os.startfile(folder_path)  # type: ignore[attr-defined]
+        elif shutil.which("termux-open"):
+            subprocess.Popen(["termux-open", folder_path])
         else:
             subprocess.Popen(["xdg-open", folder_path])
 
@@ -708,6 +713,9 @@ def main() -> None:
         install_steno_app()
     except Exception:
         pass
+    if webview is None or is_termux():
+        cli_main(["--help"])
+        return
     api = MoteApi()
     window = webview.create_window(
         "Steno — A modern annalist for your meetings — an automaton stenographer",

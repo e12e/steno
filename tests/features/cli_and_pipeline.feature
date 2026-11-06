@@ -63,6 +63,14 @@ Feature: Idiomatic CLI Argument Parsing, Unified Entrypoint Dispatch, and Pipeli
     And install_steno_app creates the cached app directory, CLI launcher, and desktop entry, and uninstall_steno_app removes them cleanly
     And the desktop GUI includes a File menu with an Uninstall option and a Yes/No confirmation modal connected to MoteApi.uninstall_app
 
+  Scenario: Multi-architecture support for Android Termux (aarch64-linux-android), Linux (arm64/amd64), and Windows (arm64/amd64)
+    Given target environments for Android Termux (aarch64-linux-android), Linux (arm64 and amd64), and Windows 11 (arm64 and amd64)
+    When resolving CPU architecture, POSIX shell paths, Termux package bootstrap, and PE32+ import tables in steno.com
+    Then detect_cpu_arch normalizes arm64 and amd64 across Linux, macOS, Termux, and Windows WOW64
+    And Termux (aarch64-linux-android) resolves $PREFIX/bin/sh, uses pulse audio capture, and executes steno.com without /bin/sh or uv wheels
+    And the Windows PE32+ code section in steno.com imports KERNEL32.dll and msvcrt.dll to extract and launch steno.py on amd64 and arm64
+
+
 
 
 

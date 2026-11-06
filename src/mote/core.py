@@ -25,7 +25,7 @@ import urllib.request
 import xml.etree.ElementTree as ET
 import zipfile
 import zlib
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, TypedDict
@@ -905,6 +905,78 @@ def stage_audio_input(audio_path: Path, tmp_dir: Path) -> Path:
     return staged
 
 
+def is_termux(env: Mapping[str, str] | None = None, prefix_dir: Path | None = None) -> bool:
+    """Detect whether the current environment is Android Termux (aarch64-linux-android).
+
+    >>> is_termux({"TERMUX_VERSION": "0.118.1"}, prefix_dir=Path("/nonexistent"))
+    True
+    >>> is_termux({"PREFIX": "/data/data/com.termux/files/usr"}, prefix_dir=Path("/nonexistent"))
+    True
+    >>> is_termux({}, prefix_dir=Path("/nonexistent"))
+    False
+    """
+    e = env if env is not None else os.environ
+    if e.get("TERMUX_VERSION") or e.get("STENO_TERMUX") == "1":
+        return True
+    if "com.termux" in e.get("PREFIX", ""):
+        return True
+    pdir = prefix_dir if prefix_dir is not None else Path("/data/data/com.termux/files/usr")
+    if pdir.is_dir():
+        return True
+    if env is None and "android" in platform.platform().lower():
+        return True
+    return False
+
+
+def detect_cpu_arch(machine_str: str | None = None, env: Mapping[str, str] | None = None) -> str:
+    """Return normalized CPU architecture ('arm64' or 'amd64') across Linux, macOS, Windows, and Termux.
+
+    >>> detect_cpu_arch("aarch64", {})
+    'arm64'
+    >>> detect_cpu_arch("ARM64", {})
+    'arm64'
+    >>> detect_cpu_arch("x86_64", {})
+    'amd64'
+    >>> detect_cpu_arch("AMD64", {})
+    'amd64'
+    >>> detect_cpu_arch("AMD64", {"PROCESSOR_ARCHITEW6432": "ARM64"})
+    'arm64'
+    """
+    e = env if env is not None else os.environ
+    wow_arch = e.get("PROCESSOR_ARCHITEW6432", "").strip().lower()
+    proc_arch = e.get("PROCESSOR_ARCHITECTURE", "").strip().lower()
+    raw = (machine_str if machine_str is not None else platform.machine()).strip().lower()
+    for token in (wow_arch, raw, proc_arch):
+        if token in ("arm64", "aarch64", "armv8l", "armv8b") or token.startswith("aarch64"):
+            return "arm64"
+    return "amd64"
+
+
+def resolve_posix_shell(env: Mapping[str, str] | None = None) -> str:
+    """Return an executable POSIX sh binary path, supporting Android Termux ($PREFIX/bin/sh) and standard UNIX.
+
+    >>> resolve_posix_shell({"PREFIX": "/nonexistent"}).endswith("sh")
+    True
+    """
+    e = env if env is not None else os.environ
+    prefix = e.get("PREFIX", "").strip()
+    if prefix:
+        cand = Path(prefix) / "bin" / "sh"
+        if cand.is_file():
+            return str(cand)
+    termux_sh = Path("/data/data/com.termux/files/usr/bin/sh")
+    if termux_sh.is_file():
+        return str(termux_sh)
+    if Path("/bin/sh").is_file():
+        return "/bin/sh"
+    found = shutil.which("sh", path=e.get("PATH"))
+    if found:
+        return found
+    if Path("/system/bin/sh").is_file():
+        return "/system/bin/sh"
+    return "/bin/sh"
+
+
 def build_runtime_env() -> dict[str, str]:
     env = os.environ.copy()
     env["PYTHONWARNINGS"] = "ignore::UserWarning:pyannote.audio.core.io"
@@ -912,8 +984,10 @@ def build_runtime_env() -> dict[str, str]:
     env["PYTHONUNBUFFERED"] = "1"
     if os.name != "nt":
         env.setdefault("LC_ALL", "en_US.UTF-8")
+    termux_prefix = env.get("PREFIX", "/data/data/com.termux/files/usr")
     extra = [
         str(LOCAL_BIN_DIR),
+        str(Path(termux_prefix) / "bin"),
         str(Path.home() / ".cache" / "mote" / "bin"),
         str(Path.home() / ".local" / "share" / "uv" / "tools" / "whisperx" / "bin"),
         str(Path.home() / ".local" / "share" / "uv" / "tools" / "whisperx" / "Scripts"),
@@ -928,6 +1002,7 @@ def build_runtime_env() -> dict[str, str]:
     elif os.name == "nt":
         local_app = os.environ.get("LOCALAPPDATA", "")
         if local_app:
+            extra.append(str(Path(local_app) / "uv" / "bin"))
             extra.append(str(Path(local_app) / "Programs" / "Ollama"))
             extra.append(str(Path(local_app) / "Microsoft" / "WinGet" / "Links"))
         app_data = os.environ.get("APPDATA", "")
@@ -984,7 +1059,7 @@ def build_ffmpeg_mic_record_cmd(
     os_name: str | None = None,
     env: dict[str, str] | None = None,
 ) -> list[str]:
-    """Build cross-platform 16kHz mono PCM16 ffmpeg microphone capture command for macOS, Windows, and Linux.
+    """Build cross-platform 16kHz mono PCM16 ffmpeg microphone capture command for macOS, Windows, Linux, and Termux.
 
     >>> cmd_mac = build_ffmpeg_mic_record_cmd("ffmpeg", Path("/tmp/a.wav"), platform_str="darwin", os_name="posix")
     >>> cmd_mac[:6]
@@ -995,6 +1070,9 @@ def build_ffmpeg_mic_record_cmd(
     >>> cmd_lin = build_ffmpeg_mic_record_cmd("ffmpeg", Path("/tmp/a.wav"), platform_str="linux", os_name="posix")
     >>> cmd_lin[2] == '-f' and cmd_lin[3] in ('pulse', 'alsa')
     True
+    >>> cmd_tmx = build_ffmpeg_mic_record_cmd("ffmpeg", Path("/tmp/a.wav"), platform_str="linux-android", os_name="posix", env={"TERMUX_VERSION": "0.118.1"})
+    >>> cmd_tmx[:6]
+    ['ffmpeg', '-y', '-f', 'pulse', '-i', 'default']
     """
     plat = platform_str if platform_str is not None else sys.platform
     os_n = os_name if os_name is not None else os.name
@@ -1055,7 +1133,9 @@ def build_ffmpeg_mic_record_cmd(
         ]
 
     linux_fmt = "pulse"
-    if sys.platform.startswith("linux") and not shutil.which("pactl") and not os.environ.get("PULSE_SERVER"):
+    if plat == "linux-android" or (env is not None and is_termux(env, prefix_dir=Path("/nonexistent"))):
+        linux_fmt = "pulse"
+    elif sys.platform.startswith("linux") and not shutil.which("pactl") and not os.environ.get("PULSE_SERVER"):
         linux_fmt = "alsa"
     return [
         ffmpeg_bin,
@@ -1091,6 +1171,14 @@ def _resolve_steno_install_paths(
         bin_dir = root / ".local" / "bin"
         launcher_path = bin_dir / "steno.cmd"
         desktop_entry = roaming_appdata / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Steno.cmd"
+    elif (plat == "linux-android" or (target_root is None and is_termux())) and target_root is None:
+        prefix = Path(os.environ.get("PREFIX", "/data/data/com.termux/files/usr"))
+        app_dir = root / ".local" / "share" / "steno"
+        mote_cache_dir = root / ".local" / "share" / "mote_transcribe"
+        cache_dir = root / ".cache" / "steno"
+        bin_dir = (prefix / "bin") if (prefix / "bin").is_dir() else (root / ".local" / "bin")
+        launcher_path = bin_dir / "steno"
+        desktop_entry = root / ".shortcuts" / "Steno"
     else:
         app_dir = root / ".local" / "share" / "steno"
         mote_cache_dir = root / ".local" / "share" / "mote_transcribe"
@@ -1101,6 +1189,8 @@ def _resolve_steno_install_paths(
             desktop_entry = root / "Applications" / "Steno.app"
         elif plat.startswith("win"):
             desktop_entry = root / "StartMenu" / "Steno.cmd"
+        elif plat == "linux-android":
+            desktop_entry = root / ".shortcuts" / "Steno"
         else:
             desktop_entry = root / ".local" / "share" / "applications" / "steno.desktop"
 
@@ -1125,6 +1215,10 @@ def install_steno_app(
     >>> with tempfile.TemporaryDirectory() as d:
     ...     res = install_steno_app(target_root=Path(d), platform_str="linux")
     ...     res["ok"] and Path(res["launcher_path"]).is_file() and Path(res["desktop_entry"]).is_file()
+    True
+    >>> with tempfile.TemporaryDirectory() as d:
+    ...     res_tmx = install_steno_app(target_root=Path(d), platform_str="linux-android")
+    ...     res_tmx["ok"] and Path(res_tmx["launcher_path"]).is_file() and Path(res_tmx["desktop_entry"]).is_file()
     True
     """
     plat = platform_str if platform_str is not None else sys.platform
@@ -1156,14 +1250,22 @@ def install_steno_app(
     if plat.startswith("win"):
         cmd_body = (
             "@echo off\r\n"
-            'set "PATH=%USERPROFILE%\\.local\\bin;%LOCALAPPDATA%\\Microsoft\\WinGet\\Links;%PATH%"\r\n'
+            'set "PATH=%USERPROFILE%\\.local\\bin;%LOCALAPPDATA%\\uv\\bin;%LOCALAPPDATA%\\Microsoft\\WinGet\\Links;%PATH%"\r\n'
             f'uv run --python 3.12 --script "{target_py}" %*\r\n'
         )
         launcher_path.write_text(cmd_body, encoding="utf-8")
         desktop_entry.parent.mkdir(parents=True, exist_ok=True)
         desktop_entry.write_text(cmd_body, encoding="utf-8")
     else:
-        sh_body = f'#!/bin/sh\nexec /bin/sh "{target_py}" "$@"\n'
+        sh_bin = resolve_posix_shell() if plat == "linux-android" or is_termux() else "/bin/sh"
+        sh_body = (
+            f"#!{sh_bin}\n"
+            'SH_BIN="/bin/sh"\n'
+            'if [ -n "${PREFIX:-}" ] && [ -x "$PREFIX/bin/sh" ]; then SH_BIN="$PREFIX/bin/sh"\n'
+            'elif [ -x "/data/data/com.termux/files/usr/bin/sh" ]; then SH_BIN="/data/data/com.termux/files/usr/bin/sh"\n'
+            'elif [ ! -x "$SH_BIN" ] && command -v sh >/dev/null 2>&1; then SH_BIN="$(command -v sh)"; fi\n'
+            f'exec "$SH_BIN" "{target_py}" "$@"\n'
+        )
         launcher_path.write_text(sh_body, encoding="utf-8")
         launcher_path.chmod(0o755)
 
@@ -1188,6 +1290,10 @@ def install_steno_app(
             app_exec = macos_dir / "Steno"
             app_exec.write_text(sh_body, encoding="utf-8")
             app_exec.chmod(0o755)
+        elif plat == "linux-android":
+            desktop_entry.parent.mkdir(parents=True, exist_ok=True)
+            desktop_entry.write_text(sh_body, encoding="utf-8")
+            desktop_entry.chmod(0o755)
         else:
             desktop_entry.parent.mkdir(parents=True, exist_ok=True)
             desktop_entry.write_text(
@@ -1195,7 +1301,7 @@ def install_steno_app(
                 "Type=Application\n"
                 "Name=Steno\n"
                 "Comment=Steno - a modern annalist for your meetings - an automaton stenographer\n"
-                f'Exec=/bin/sh "{target_py}"\n'
+                f'Exec={sh_bin} "{target_py}"\n'
                 "Terminal=false\n"
                 "Categories=AudioVideo;Audio;Office;Utility;\n",
                 encoding="utf-8",
@@ -1319,8 +1425,9 @@ def detect_hardware_resources(target_dir: Path | None = None) -> dict[str, Any]:
     ram_bytes = 0
     cpu_brand = platform.processor() or platform.machine() or "Ukjent CPU"
     cpu_cores = os.cpu_count() or 1
-    arch = platform.machine().lower()
-    is_apple_silicon = sys.platform == "darwin" and ("arm" in arch or "aarch64" in arch)
+    arch = detect_cpu_arch()
+    is_apple_silicon = sys.platform == "darwin" and arch == "arm64"
+    termux_active = is_termux()
 
     if sys.platform == "darwin":
         try:
@@ -1373,11 +1480,24 @@ def detect_hardware_resources(target_dir: Path | None = None) -> dict[str, Any]:
             pass
         try:
             cpuinfo = Path("/proc/cpuinfo").read_text(encoding="utf-8", errors="ignore")
-            m_cpu = re.search(r"model name\s*:\s*(.+)", cpuinfo)
+            m_cpu = (
+                re.search(r"model name\s*:\s*(.+)", cpuinfo, flags=re.IGNORECASE)
+                or re.search(r"Hardware\s*:\s*(.+)", cpuinfo, flags=re.IGNORECASE)
+                or re.search(r"Processor\s*:\s*(.+)", cpuinfo, flags=re.IGNORECASE)
+            )
             if m_cpu:
                 cpu_brand = m_cpu.group(1).strip()
         except Exception:
             pass
+        if termux_active and shutil.which("getprop"):
+            try:
+                soc = subprocess.check_output(
+                    ["getprop", "ro.soc.model"], text=True, stderr=subprocess.DEVNULL
+                ).strip()
+                if soc:
+                    cpu_brand = soc
+            except Exception:
+                pass
 
     if ram_bytes <= 0:
         ram_bytes = 8 * (1024**3)
@@ -1449,6 +1569,7 @@ def detect_hardware_resources(target_dir: Path | None = None) -> dict[str, Any]:
         "cpu_cores": cpu_cores,
         "arch": arch,
         "is_apple_silicon": is_apple_silicon,
+        "is_termux": termux_active,
         "gpu_name": gpu_name,
         "gpu_vram_gb": gpu_vram_gb,
         "disk_free_gb": disk_free_gb,
@@ -1575,9 +1696,61 @@ def ensure_ffmpeg(env: dict[str, str], log_fn: Callable[[str], None]) -> str:
         pass
     env["PATH"] = os.environ.get("PATH", "") + os.pathsep + env["PATH"]
     found = shutil.which("ffmpeg", path=env["PATH"])
-    if not found:
-        raise RuntimeError("Fant ikke ffmpeg.")
-    return found
+    if found:
+        return found
+
+    if is_termux(env):
+        pkg_bin = shutil.which("pkg", path=env["PATH"]) or shutil.which("apt-get", path=env["PATH"])
+        if pkg_bin:
+            log_fn("==> Installerer ffmpeg via Termux pakkebehandler...")
+            subprocess.run([pkg_bin, "install", "-y", "ffmpeg"], env=env, check=False)
+            found = shutil.which("ffmpeg", path=env["PATH"])
+            if found:
+                return found
+
+    if sys.platform.startswith("linux") and not is_termux(env):
+        LOCAL_BIN_DIR.mkdir(parents=True, exist_ok=True)
+        arch = detect_cpu_arch(env=env)
+        jvs_arch = "arm64" if arch == "arm64" else "amd64"
+        url = f"https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-{jvs_arch}-static.tar.xz"
+        try:
+            with tempfile.TemporaryDirectory(prefix="ffmpeg_dl_") as tmp:
+                tmp_path = Path(tmp)
+                archive = tmp_path / "ffmpeg.tar.xz"
+                urllib.request.urlretrieve(url, archive)
+                with tarfile.open(archive, "r:xz") as tf:
+                    tf.extractall(tmp_path)
+                for cand in tmp_path.rglob("ffmpeg"):
+                    if cand.is_file():
+                        target = LOCAL_BIN_DIR / "ffmpeg"
+                        shutil.copy2(cand, target)
+                        target.chmod(target.stat().st_mode | stat.S_IEXEC)
+                        return str(target)
+        except Exception:
+            pass
+
+    if os.name == "nt":
+        winget_bin = shutil.which("winget", path=env["PATH"])
+        if winget_bin:
+            subprocess.run(
+                [
+                    winget_bin,
+                    "install",
+                    "--id",
+                    "Gyan.FFmpeg",
+                    "-e",
+                    "--silent",
+                    "--accept-package-agreements",
+                    "--accept-source-agreements",
+                ],
+                env=env,
+                check=False,
+            )
+            found = shutil.which("ffmpeg", path=env["PATH"])
+            if found:
+                return found
+
+    raise RuntimeError("Fant ikke ffmpeg.")
 
 
 def ensure_whisperx(
@@ -1588,17 +1761,44 @@ def ensure_whisperx(
     found = shutil.which("whisperx", path=env["PATH"])
     if found:
         return found
-    uv_bin = shutil.which("uv", path=env["PATH"])
-    if not uv_bin:
-        raise RuntimeError("Fant ikke 'uv' for automatisk installasjon av whisperx.")
     if progress_fn:
         progress_fn(8, "Installerer WhisperX automatisk (kun første gang)...")
-    log_fn("==> WhisperX mangler. Installerer automatisk via 'uv tool install whisperx'...")
-    subprocess.run(
-        [uv_bin, "tool", "install", "--python", "3.12", "whisperx"],
-        env=env,
-        check=True,
-    )
+
+    if is_termux(env):
+        uv_bin = shutil.which("uv", path=env["PATH"])
+        log_fn("==> WhisperX mangler på Termux. Installerer med systemets Python...")
+        if uv_bin:
+            subprocess.run(
+                [uv_bin, "tool", "install", "--python", sys.executable, "whisperx"],
+                env=env,
+                check=True,
+            )
+        else:
+            subprocess.run(
+                [sys.executable, "-m", "pip", "install", "--user", "whisperx"],
+                env=env,
+                check=True,
+            )
+    else:
+        uv_bin = shutil.which("uv", path=env["PATH"])
+        if not uv_bin:
+            raise RuntimeError("Fant ikke 'uv' for automatisk installasjon av whisperx.")
+        log_fn("==> WhisperX mangler. Installerer automatisk via 'uv tool install whisperx'...")
+        proc = subprocess.run(
+            [uv_bin, "tool", "install", "--python", "3.12", "whisperx"],
+            env=env,
+            check=False,
+        )
+        if proc.returncode != 0 and os.name == "nt" and detect_cpu_arch(env=env) == "arm64":
+            log_fn("==> Prøver Windows x86_64 Python 3.12 (Prism-kompatible hjul) for WhisperX på ARM64...")
+            subprocess.run(
+                [uv_bin, "tool", "install", "--python", "cpython-3.12-windows-x86_64-none", "whisperx"],
+                env=env,
+                check=True,
+            )
+        elif proc.returncode != 0:
+            raise subprocess.CalledProcessError(proc.returncode, proc.args)
+
     found = shutil.which("whisperx", path=env["PATH"])
     if not found:
         cand = Path.home() / ".local" / "bin" / ("whisperx.exe" if os.name == "nt" else "whisperx")
@@ -1686,13 +1886,21 @@ def ensure_ollama_binary(
     if sys.platform == "darwin" and Path("/Applications/Ollama.app/Contents/Resources/ollama").is_file():
         return "/Applications/Ollama.app/Contents/Resources/ollama"
 
+    if is_termux(env):
+        pkg_bin = shutil.which("pkg", path=env["PATH"]) or shutil.which("apt-get", path=env["PATH"])
+        if pkg_bin:
+            log_fn("==> Installerer innebygd Ollama via Termux pakkebehandler...")
+            subprocess.run([pkg_bin, "install", "-y", "ollama"], env=env, check=False)
+            found = shutil.which("ollama", path=env["PATH"])
+            if found:
+                return found
+
     LOCAL_BIN_DIR.mkdir(parents=True, exist_ok=True)
     if progress_fn:
         progress_fn(74, "Laster ned frittstående Ollama-motor...")
     log_fn("==> Ollama ble ikke funnet. Laster ned frittstående binærfil...")
 
-    machine = platform.machine().lower()
-    arch = "arm64" if machine in ("arm64", "aarch64") else "amd64"
+    arch = detect_cpu_arch(env=env)
 
     with tempfile.TemporaryDirectory(prefix="ollama_dl_") as tmp:
         tmp_path = Path(tmp)
@@ -1714,6 +1922,8 @@ def ensure_ollama_binary(
             with tarfile.open(archive, "r:gz") as tf:
                 tf.extractall(tmp_path)
             src = tmp_path / "bin" / "ollama"
+            if not src.is_file():
+                src = next((c for c in tmp_path.rglob("ollama") if c.is_file()), src)
             target = LOCAL_BIN_DIR / "ollama"
             shutil.copy2(src, target)
             target.chmod(target.stat().st_mode | stat.S_IEXEC)

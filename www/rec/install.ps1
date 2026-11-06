@@ -1,4 +1,4 @@
-# Universal zero-Python installer for Steno (Windows 10 / 11 PowerShell)
+# Universal zero-Python installer for Steno (Windows 10 / 11 on AMD64 & ARM64 PowerShell)
 # Steno - a modern annalist for your meetings - an automaton stenographer.
 #
 # Usage (PowerShell):
@@ -33,7 +33,7 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
 $LauncherCmd = Join-Path $BinDir "steno.cmd"
 $CmdContent = @"
 @echo off
-set "PATH=%USERPROFILE%\.local\bin;%LOCALAPPDATA%\Microsoft\WinGet\Links;%PATH%"
+set "PATH=%USERPROFILE%\.local\bin;%LOCALAPPDATA%\uv\bin;%LOCALAPPDATA%\Microsoft\WinGet\Links;%PATH%"
 where uv >nul 2>nul || (
   echo Installing uv ^(standalone Python runtime^)...
   powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://astral.sh/uv/install.ps1 | iex"

@@ -79,7 +79,7 @@ class TestGherkinBDDScenarios(unittest.TestCase):
     def test_all_gherkin_scenarios_in_feature_file(self) -> None:
         self.assertTrue(FEATURE_FILE.is_file(), f"Missing Gherkin feature file: {FEATURE_FILE}")
         scenarios = parse_gherkin_feature(FEATURE_FILE)
-        self.assertEqual(len(scenarios), 10)
+        self.assertEqual(len(scenarios), 11)
 
         for sc in scenarios:
             name = str(sc["name"])
@@ -384,6 +384,94 @@ class TestGherkinBDDScenarios(unittest.TestCase):
                 help_en = parser.format_help()
                 self.assertIn("--install", help_en)
                 self.assertIn("--uninstall", help_en)
+            elif step == "Given target environments for Android Termux (aarch64-linux-android), Linux (arm64 and amd64), and Windows 11 (arm64 and amd64)":
+                root_dir = Path(__file__).resolve().parent.parent
+                ctx["root_dir"] = root_dir
+                ctx["dist_com"] = root_dir / "dist" / "steno.com"
+                ctx["dist_py"] = root_dir / "dist" / "steno.py"
+            elif step == "When resolving CPU architecture, POSIX shell paths, Termux package bootstrap, and PE32+ import tables in steno.com":
+                dist_com = ctx["dist_com"]
+                dist_py = ctx["dist_py"]
+                assert isinstance(dist_com, Path) and isinstance(dist_py, Path)
+                ctx["com_bytes"] = dist_com.read_bytes()
+                ctx["py_text"] = dist_py.read_text(encoding="utf-8")
+            elif step == "Then detect_cpu_arch normalizes arm64 and amd64 across Linux, macOS, Termux, and Windows WOW64":
+                self.assertEqual(mote_core.detect_cpu_arch("aarch64", {}), "arm64")
+                self.assertEqual(mote_core.detect_cpu_arch("arm64", {}), "arm64")
+                self.assertEqual(mote_core.detect_cpu_arch("armv8l", {}), "arm64")
+                self.assertEqual(mote_core.detect_cpu_arch("x86_64", {}), "amd64")
+                self.assertEqual(mote_core.detect_cpu_arch("AMD64", {}), "amd64")
+                self.assertEqual(
+                    mote_core.detect_cpu_arch("AMD64", {"PROCESSOR_ARCHITEW6432": "ARM64"}),
+                    "arm64",
+                )
+                py_text = str(ctx["py_text"])
+                self.assertIn("platform_machine == 'x86_64'", py_text)
+                self.assertIn("platform_machine == 'AMD64'", py_text)
+            elif step == "And Termux (aarch64-linux-android) resolves $PREFIX/bin/sh, uses pulse audio capture, and executes steno.com without /bin/sh or uv wheels":
+                import shutil
+                import subprocess
+
+                self.assertTrue(mote_core.is_termux({"TERMUX_VERSION": "0.118.1"}, prefix_dir=Path("/nonexistent")))
+                self.assertTrue(
+                    mote_core.is_termux({"PREFIX": "/data/data/com.termux/files/usr"}, prefix_dir=Path("/nonexistent"))
+                )
+                self.assertFalse(mote_core.is_termux({}, prefix_dir=Path("/nonexistent")))
+                cmd_tmx = mote_core.build_ffmpeg_mic_record_cmd(
+                    "ffmpeg",
+                    Path("/tmp/tmx.wav"),
+                    platform_str="linux-android",
+                    os_name="posix",
+                    env={"TERMUX_VERSION": "0.118.1"},
+                )
+                self.assertEqual(cmd_tmx[:6], ["ffmpeg", "-y", "-f", "pulse", "-i", "default"])
+                with tempfile.TemporaryDirectory() as tmp:
+                    tmp_path = Path(tmp)
+                    fake_prefix = tmp_path / "data" / "data" / "com.termux" / "files" / "usr"
+                    (fake_prefix / "bin").mkdir(parents=True, exist_ok=True)
+                    fake_sh = fake_prefix / "bin" / "sh"
+                    fake_sh.write_text('#!/bin/sh\nexec /bin/sh "$@"\n', encoding="utf-8")
+                    fake_sh.chmod(0o755)
+                    self.assertEqual(
+                        mote_core.resolve_posix_shell({"PREFIX": str(fake_prefix)}),
+                        str(fake_sh),
+                    )
+                    res_tmx = mote_core.install_steno_app(target_root=tmp_path, platform_str="linux-android")
+                    self.assertTrue(res_tmx["ok"])
+                    self.assertTrue(Path(res_tmx["launcher_path"]).is_file())
+                    self.assertTrue(Path(res_tmx["desktop_entry"]).is_file())
+
+                    # Execute steno.com under simulated Termux environment (--self-test)
+                    env_tmx = os.environ.copy()
+                    env_tmx["TERMUX_VERSION"] = "0.118.1"
+                    env_tmx["PREFIX"] = str(fake_prefix)
+                    env_tmx["STENO_INSTALL_DIR"] = str(tmp_path / "steno_app")
+                    proc = subprocess.run(
+                        [str(fake_sh), str(ctx["dist_com"]), "--self-test"],
+                        env=env_tmx,
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    self.assertEqual(proc.returncode, 0, msg=f"Termux steno.com failed: {proc.stderr}\n{proc.stdout}")
+                    self.assertIn("SELF_TEST_OK", proc.stdout)
+            elif step == "And the Windows PE32+ code section in steno.com imports KERNEL32.dll and msvcrt.dll to extract and launch steno.py on amd64 and arm64":
+                import struct
+
+                com_bytes = ctx["com_bytes"]
+                assert isinstance(com_bytes, bytes)
+                e_lfanew = struct.unpack_from("<I", com_bytes, 0x3C)[0]
+                # DataDirectory[1] (Import Table RVA & Size) is at optional header offset 112 + 8 = 120
+                imp_rva, imp_size = struct.unpack_from("<II", com_bytes, e_lfanew + 24 + 120)
+                self.assertEqual(imp_rva, 0x1080)
+                self.assertGreaterEqual(imp_size, 60)
+                self.assertIn(b"KERNEL32.dll\x00", com_bytes)
+                self.assertIn(b"msvcrt.dll\x00", com_bytes)
+                self.assertIn(b"GetModuleFileNameA\x00", com_bytes)
+                self.assertIn(b"GetCommandLineA\x00", com_bytes)
+                self.assertIn(b"SetEnvironmentVariableA\x00", com_bytes)
+                self.assertIn(b"STENO_SELF\x00", com_bytes)
+                self.assertIn(b"STENO_CMDLINE\x00", com_bytes)
             else:
                 self.fail(f"Unrecognized Gherkin step in '{name}': {step}")
 

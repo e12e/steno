@@ -1,8 +1,8 @@
 @echo off
 REM Steno - a modern annalist for your meetings - an automaton stenographer.
-REM Zero-Python double-click & CLI launcher for Windows 10/11.
+REM Zero-Python double-click & CLI launcher for Windows 10/11 (AMD64 & ARM64).
 setlocal
-set "PATH=%USERPROFILE%\.local\bin;%LOCALAPPDATA%\Microsoft\WinGet\Links;%PATH%"
+set "PATH=%USERPROFILE%\.local\bin;%LOCALAPPDATA%\uv\bin;%LOCALAPPDATA%\Microsoft\WinGet\Links;%PATH%"
 set "STENO_DIR=%~dp0"
 set "STENO_PY=%STENO_DIR%steno.py"
 

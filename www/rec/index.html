@@ -751,7 +751,7 @@
 
         <div class="edition-banner">
             <span>Operational Specification &amp; Single-File Distribution</span>
-            <span>macOS • Windows • Linux • 2026</span>
+            <span>macOS • Windows • Linux • Termux (arm64 &amp; amd64) • 2026</span>
         </div>
 
         <div class="broadsheet-grid">
@@ -795,13 +795,13 @@
                             <div>
                                 <div class="dispatch-meta">
                                     <span class="dispatch-tag">Cosmopolitan APE Universal Binary</span>
-                                    <span>macOS • Windows 11 • Linux</span>
+                                    <span>macOS • Windows 11 • Linux • Termux (arm64 &amp; amd64)</span>
                                 </div>
                                 <h3 class="dispatch-title">Single-Binary Distribution: <code>steno.com</code></h3>
                             </div>
                         </div>
                         <p class="dispatch-summary">
-                            A single Actually Portable Executable (<code>steno.com</code>) encapsulating the desktop interface, transcript and minutes HTML renderers, the five-stage checkpoint engine, and an automatic <code>uv</code> runtime provisioner. <strong>No pre-installed Python is required</strong>—double-clicking or running <code>steno.com</code> caches its runtime across macOS, Windows 11, and Linux, installs desktop and CLI shortcuts automatically, and includes an in-app <em>File → Uninstall Steno…</em> menu (with a Yes/No confirmation dialog) as well as <code>--uninstall</code> to remove all cached files.
+                            A single Actually Portable Executable (<code>steno.com</code>) encapsulating the desktop interface, transcript and minutes HTML renderers, the five-stage checkpoint engine, and an automatic runtime provisioner. <strong>No pre-installed Python is required</strong>—double-clicking or running <code>steno.com</code> caches its runtime across macOS, Windows 11, Linux (<code>amd64</code> &amp; <code>arm64</code>), and Android Termux (<code>aarch64-linux-android</code>), installs desktop and CLI shortcuts automatically, and includes an in-app <em>File → Uninstall Steno…</em> menu (with a Yes/No confirmation dialog) as well as <code>--uninstall</code> to remove all cached files.
                         </p>
                         <div class="dispatch-action">
                             <a href="steno.com" download="steno.com">Download Universal Binary (steno.com) →</a>
@@ -853,9 +853,9 @@
                     <hr class="section-divider" id="platforms">
 
                     <div class="section-kicker">III. Cross-Platform Apparatus &amp; Command Line</div>
-                    <h2>Execution on macOS, Windows, and Linux</h2>
+                    <h2>Execution on macOS, Windows, Linux, and Termux</h2>
 
-                    <p><code>steno.com</code> is a Cosmopolitan Actually Portable Executable valid simultaneously as a 64-bit Windows PE executable and a POSIX shell/Python bundle on macOS and Linux. On first launch, it caches Astral’s standalone <code>uv</code> binary, an isolated Python 3.12 environment (<code>pywebview</code>, <code>markdown</code>, <code>static-ffmpeg</code>), and standalone <code>whisperx</code> and <code>ollama</code> binaries in the local application support directory.</p>
+                    <p><code>steno.com</code> is a Cosmopolitan Actually Portable Executable valid simultaneously as a 64-bit Windows PE32+ executable (running on both <code>amd64</code> and Windows 11 <code>arm64</code>) and a POSIX shell/Python bundle on macOS, Linux (<code>amd64</code> &amp; <code>arm64</code>), and Android Termux (<code>aarch64-linux-android</code>). On first launch, it caches Astral’s standalone <code>uv</code> binary (or native Termux <code>pkg</code> packages on Android), an isolated Python runtime, and standalone <code>ffmpeg</code>, <code>whisperx</code>, and <code>ollama</code> binaries in the local application support directory.</p>
 
                     <p>Invoking <code>steno.com</code> without arguments (or double-clicking it) installs the desktop shortcut and opens the native desktop window—where <em>File → Uninstall Steno…</em> lets the operator remove all cached files with a Yes/No confirmation dialog at any time. Supplying any file path or flag dispatches directly to the command-line interface.</p>
 
@@ -960,10 +960,18 @@ chmod +x steno.com
 
                         <li class="instrument-item">
                             <div class="instrument-header">
-                                <span class="instrument-name">Linux (x86_64 &amp; AArch64)</span>
+                                <span class="instrument-name">Linux (amd64 &amp; arm64)</span>
                                 <span class="instrument-route">linux</span>
                             </div>
-                            <p class="instrument-desc">GTK/Qt WebKit window, PulseAudio/PipeWire (<code>pulse</code>) with ALSA fallback, <code>espeak-ng</code> voice prompts, and CUDA/CPU execution.</p>
+                            <p class="instrument-desc">GTK/Qt WebKit window, PulseAudio/PipeWire (<code>pulse</code>) with ALSA fallback, automatic static <code>ffmpeg</code> &amp; <code>ollama</code> provisioning on <code>x86_64</code> and <code>aarch64</code>, and CUDA/CPU execution.</p>
+                        </li>
+
+                        <li class="instrument-item">
+                            <div class="instrument-header">
+                                <span class="instrument-name">Android Termux (arm64)</span>
+                                <span class="instrument-route">aarch64-linux-android</span>
+                            </div>
+                            <p class="instrument-desc">Native Bionic <code>$PREFIX/bin/sh</code> &amp; Python execution, automatic <code>pkg</code> provisioning for <code>ffmpeg</code> and <code>ollama</code>, PulseAudio capture, <code>termux-tts-speak</code>, and Termux Widget shortcut integration.</p>
                         </li>
                     </ul>
                 </section>

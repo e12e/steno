@@ -23,14 +23,19 @@ POLYGLOT_HEADER = r'''#!/bin/sh
 # /// script
 # requires-python = ">=3.11"
 # dependencies = [
-#   "pywebview>=5.3",
+#   "pywebview>=5.3; sys_platform == 'darwin' or sys_platform == 'win32' or sys_platform == 'linux'",
 #   "markdown>=3.5",
-#   "static-ffmpeg>=2.7",
+#   "static-ffmpeg>=2.7; sys_platform == 'darwin' or (sys_platform == 'win32' and platform_machine == 'AMD64') or (sys_platform == 'linux' and platform_machine == 'x86_64')",
 # ]
 # ///
 "true" ''' + "'''\\'" + r'''
 # 2>nul & goto :windows_boot
-export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$HOME/.local/share/mise/shims:/opt/homebrew/bin:/usr/local/bin:$PATH"
+export PATH="${PREFIX:-/data/data/com.termux/files/usr}/bin:$HOME/.local/bin:$HOME/.cargo/bin:$HOME/.local/share/mise/shims:/opt/homebrew/bin:/usr/local/bin:$PATH"
+if [ -n "${TERMUX_VERSION:-}" ] || [ -d "/data/data/com.termux/files/usr" ] || [ "$(uname -o 2>/dev/null)" = "Android" ]; then
+  export STENO_TERMUX=1
+  command -v python3 >/dev/null 2>&1 || (command -v pkg >/dev/null 2>&1 && pkg install -y python ffmpeg >/dev/null 2>&1) || true
+  exec python3 "$0" "$@"
+fi
 if [ -f /etc/alpine-release ] && [ ! -f /usr/lib/libstdc++.so.6 ] && command -v apk >/dev/null 2>&1; then
   apk add --no-cache libstdc++ >/dev/null 2>&1 || true
 fi
@@ -51,12 +56,12 @@ where uv >nul 2>nul || (
   echo Installing uv ^(standalone Python runtime^) / Installerer uv...
   powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://astral.sh/uv/install.ps1 | iex"
 )
-set "PATH=%USERPROFILE%\\.local\\bin;%LOCALAPPDATA%\\Microsoft\\WinGet\\Links;%PATH%"
+set "PATH=%USERPROFILE%\\.local\\bin;%LOCALAPPDATA%\\uv\\bin;%LOCALAPPDATA%\\Microsoft\\WinGet\\Links;%PATH%"
 uv run --python 3.12 --script "%~f0" %*
 exit /b %ERRORLEVEL%
 ''' + "'''" + r'''
 # Universal single-file distribution for Steno - a modern annalist for your meetings - an automaton stenographer.
-# Automatically bootstrapped for macOS (ARM64/AMD64), Windows 11, and Linux.
+# Automatically bootstrapped for macOS (ARM64/AMD64), Windows 11 (ARM64/AMD64), Linux (ARM64/AMD64), and Android Termux (aarch64-linux-android).
 from __future__ import annotations
 
 import sys
@@ -65,19 +70,23 @@ from pathlib import Path
 
 BOOTSTRAP_CODE = r'''
 def _self_bootstrap_if_needed() -> None:
-    """If launched via raw 'python steno.py' without uv, auto-install uv and re-exec."""
-    if any(flag in sys.argv for flag in ("-h", "--help", "--self-test", "--check-hw", "--status")):
+    """If launched via raw 'python steno.py' without uv, auto-install uv and re-exec (bypassed on Termux)."""
+    import os, platform
+    if any(flag in sys.argv for flag in ("-h", "--help", "--self-test", "--check-hw", "--status", "--install", "--uninstall")):
+        return
+    if os.environ.get("STENO_BOOTSTRAPPED") == "1" or os.environ.get("STENO_TERMUX") == "1":
+        return
+    if "TERMUX_VERSION" in os.environ or Path("/data/data/com.termux/files/usr").is_dir() or "android" in platform.platform().lower():
         return
     try:
         import markdown  # noqa: F401
-        import static_ffmpeg  # noqa: F401
         import webview  # noqa: F401
         return
     except ModuleNotFoundError:
         pass
 
     print("Preparing standalone Python environment via uv / Forbereder frittstående Python-miljø via uv...")
-    import os, shutil, subprocess
+    import shutil, subprocess
     search_paths = [
         str(Path.home() / ".local" / "bin"),
         str(Path.home() / ".cargo" / "bin"),
@@ -105,15 +114,17 @@ def _self_bootstrap_if_needed() -> None:
             )
         else:
             import urllib.request
+            sh_bin = "/bin/sh" if Path("/bin/sh").exists() else (shutil.which("sh") or "/system/bin/sh")
             with urllib.request.urlopen("https://astral.sh/uv/install.sh", timeout=30) as resp:
                 install_script = resp.read()
-            subprocess.run(["/bin/sh"], input=install_script, check=True)
+            subprocess.run([sh_bin], input=install_script, check=True)
         os.environ["PATH"] = str(Path.home() / ".local" / "bin") + os.pathsep + os.environ["PATH"]
         uv_bin = shutil.which("uv")
 
     if not uv_bin:
         raise RuntimeError("Klarte ikke å finne eller installere 'uv'.")
 
+    os.environ["STENO_BOOTSTRAPPED"] = "1"
     cmd = [uv_bin, "run", "--python", "3.12", "--script", str(Path(__file__).resolve()), *sys.argv[1:]]
     raise SystemExit(subprocess.call(cmd))
 
@@ -189,26 +200,32 @@ def generate_cosmopolitan_ape_binary(py_content: str | None = None) -> bytes:
     e_lfanew = 0x0800
     dos_e_lfanew = struct.pack("<I", e_lfanew)
 
-    # 3. Bytes 0x40..0x7FF: POSIX /bin/sh self-extractor & runner
+    # 3. Bytes 0x40..0x7FF: POSIX /bin/sh & Android Termux self-extractor & runner
     posix_boot = (
         b"\n"
-        b'export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$HOME/.local/share/mise/shims:/opt/homebrew/bin:/usr/local/bin:$PATH"\n'
+        b'export PATH="${PREFIX:-/data/data/com.termux/files/usr}/bin:$HOME/.local/bin:$HOME/.cargo/bin:$HOME/.local/share/mise/shims:/opt/homebrew/bin:/usr/local/bin:$PATH"\n'
         b'STENO_APP_DIR="${STENO_INSTALL_DIR:-$HOME/.local/share/steno}"\n'
         b'mkdir -p "$STENO_APP_DIR"\n'
         b'STENO_CACHE_PY="$STENO_APP_DIR/steno.py"\n'
-        b'sed -n "/^# === STENO_PAYLOAD_BEGIN ===$/,\\$p" "$0" > "$STENO_CACHE_PY.tmp" && mv "$STENO_CACHE_PY.tmp" "$STENO_CACHE_PY"\n'
+        b'LC_ALL=C sed -n "/^# === STENO_PAYLOAD_BEGIN ===$/,\\$p" "$0" > "$STENO_CACHE_PY.tmp" && mv "$STENO_CACHE_PY.tmp" "$STENO_CACHE_PY"\n'
         b'chmod 0755 "$STENO_CACHE_PY"\n'
-        b'exec /bin/sh "$STENO_CACHE_PY" "$@"\n'
+        b'SH_BIN="/bin/sh"\n'
+        b'if [ -n "${PREFIX:-}" ] && [ -x "$PREFIX/bin/sh" ]; then SH_BIN="$PREFIX/bin/sh"\n'
+        b'elif [ -x "/data/data/com.termux/files/usr/bin/sh" ]; then SH_BIN="/data/data/com.termux/files/usr/bin/sh"\n'
+        b'elif [ ! -x "$SH_BIN" ] && command -v sh >/dev/null 2>&1; then SH_BIN="$(command -v sh)"\n'
+        b'elif [ ! -x "$SH_BIN" ] && [ -x "/system/bin/sh" ]; then SH_BIN="/system/bin/sh"; fi\n'
+        b'exec "$SH_BIN" "$STENO_CACHE_PY" "$@"\n'
     )
     header_part = dos_prefix + dos_e_lfanew + posix_boot
     assert len(header_part) <= e_lfanew, f"POSIX header too long: {len(header_part)}"
     header_padded = header_part.ljust(e_lfanew, b" ")
 
-    # 4. Bytes 0x800..0xFFF: 64-bit Windows PE32+ (x86_64) Header + Section Table
+    # 4. Bytes 0x800..0xFFF: 64-bit Windows PE32+ (x86_64 / ARM64 Prism) Header + Section Table
+    raw_code_size = 0x0600
     pe_sig = b"PE\x00\x00"
     coff_hdr = struct.pack(
         "<HHIIIHH",
-        0x8664,  # Machine: IMAGE_FILE_MACHINE_AMD64
+        0x8664,  # Machine: IMAGE_FILE_MACHINE_AMD64 (runs natively on amd64 and via Prism on Windows 11 arm64)
         1,       # NumberOfSections: 1 (.text)
         0,       # TimeDateStamp
         0,       # PointerToSymbolTable
@@ -220,7 +237,7 @@ def generate_cosmopolitan_ape_binary(py_content: str | None = None) -> bytes:
         "<HBBIIIIIQIIHHHHHHIIIIHHQQQQII",
         0x020B,          # Magic: PE32+ (64-bit)
         14, 0,           # LinkerVersion
-        0x0200,          # SizeOfCode
+        raw_code_size,   # SizeOfCode
         0,               # SizeOfInitializedData
         0,               # SizeOfUninitializedData
         0x1000,          # AddressOfEntryPoint (RVA)
@@ -244,23 +261,110 @@ def generate_cosmopolitan_ape_binary(py_content: str | None = None) -> bytes:
         0,               # LoaderFlags
         16,              # NumberOfRvaAndSizes
     )
-    data_dirs = b"\x00" * (16 * 8)
+    data_dirs_list = [(0, 0)] * 16
+    data_dirs_list[1] = (0x1080, 60)   # IMAGE_DIRECTORY_ENTRY_IMPORT (3 descriptors * 20 bytes)
+    data_dirs_list[12] = (0x10E0, 64)  # IMAGE_DIRECTORY_ENTRY_IAT
+    data_dirs = b"".join(struct.pack("<II", rva, sz) for rva, sz in data_dirs_list)
     opt_hdr = opt_hdr_fixed + data_dirs
     assert len(opt_hdr) == 240
 
     sec_hdr = struct.pack(
         "<8sIIIIIIHHI",
         b".text\x00\x00\x00",
-        0x0200,      # VirtualSize
-        0x1000,      # VirtualAddress
-        0x0200,      # SizeOfRawData
-        0x1000,      # PointerToRawData (file offset 4096)
+        raw_code_size,  # VirtualSize
+        0x1000,         # VirtualAddress
+        raw_code_size,  # SizeOfRawData
+        0x1000,         # PointerToRawData (file offset 4096)
         0, 0, 0, 0,
-        0x60000020,  # Characteristics: CODE | EXECUTE | READ
+        0xE0000060,     # Characteristics: CODE | INITIALIZED_DATA | EXECUTE | READ | WRITE
     )
     pe_headers_block = (pe_sig + coff_hdr + opt_hdr + sec_hdr).ljust(0x0800, b"\x00")
-    # Minimal x86_64 return stub (xor eax, eax; ret) at file offset 0x1000..0x11FF
-    code_section = (b"\x31\xc0\xc3").ljust(0x0200, b"\x90")
+
+    # 5. Build x86_64 Windows launcher stub + Import Table at RVA 0x1000..0x15FF
+    # Imports:
+    #   KERNEL32.dll: GetModuleFileNameA (IAT 0x10E0), GetCommandLineA (IAT 0x10E8), SetEnvironmentVariableA (IAT 0x10F0)
+    #   msvcrt.dll:   system (IAT 0x1110)
+    code_buf = bytearray()
+
+    def _emit(ins: bytes) -> None:
+        code_buf.extend(ins)
+
+    def _emit_rip_op(prefix: bytes, target_rva: int) -> None:
+        next_rva = 0x1000 + len(code_buf) + len(prefix) + 4
+        code_buf.extend(prefix)
+        code_buf.extend(struct.pack("<i", target_rva - next_rva))
+
+    _emit(b"\x48\x81\xec\x38\x04\x00\x00")      # sub rsp, 0x438
+    _emit(b"\x31\xc9")                          # xor ecx, ecx (hModule = NULL)
+    _emit(b"\x48\x8d\x54\x24\x20")              # lea rdx, [rsp + 0x20]
+    _emit(b"\x41\xb8\x00\x04\x00\x00")          # mov r8d, 1024
+    _emit_rip_op(b"\xff\x15", 0x10E0)           # call [rip + GetModuleFileNameA]
+    _emit_rip_op(b"\x48\x8d\x0d", 0x11A0)       # lea rcx, [rip + "STENO_SELF"]
+    _emit(b"\x48\x8d\x54\x24\x20")              # lea rdx, [rsp + 0x20]
+    _emit_rip_op(b"\xff\x15", 0x10F0)           # call [rip + SetEnvironmentVariableA]
+    _emit_rip_op(b"\xff\x15", 0x10E8)           # call [rip + GetCommandLineA]
+    _emit_rip_op(b"\x48\x8d\x0d", 0x11B0)       # lea rcx, [rip + "STENO_CMDLINE"]
+    _emit(b"\x48\x89\xc2")                      # mov rdx, rax
+    _emit_rip_op(b"\xff\x15", 0x10F0)           # call [rip + SetEnvironmentVariableA]
+    _emit_rip_op(b"\x48\x8d\x0d", 0x11C0)       # lea rcx, [rip + win_bootstrap_cmd]
+    _emit_rip_op(b"\xff\x15", 0x1110)           # call [rip + msvcrt!system]
+    _emit(b"\x48\x81\xc4\x38\x04\x00\x00")      # add rsp, 0x438
+    _emit(b"\xc3")                              # ret
+    assert len(code_buf) <= 0x80
+    code_padded = bytes(code_buf).ljust(0x80, b"\x90")
+
+    imp_dir = (
+        struct.pack("<IIIII", 0x10C0, 0, 0, 0x1120, 0x10E0)  # KERNEL32.dll
+        + struct.pack("<IIIII", 0x1100, 0, 0, 0x1130, 0x1110)  # msvcrt.dll
+        + (b"\x00" * 20)
+    ).ljust(0x40, b"\x00")
+    k32_ilt = struct.pack("<QQQQ", 0x1140, 0x1158, 0x1170, 0)
+    k32_iat = struct.pack("<QQQQ", 0x1140, 0x1158, 0x1170, 0)
+    crt_ilt = struct.pack("<QQ", 0x1190, 0)
+    crt_iat = struct.pack("<QQ", 0x1190, 0)
+    dll_names = (
+        b"KERNEL32.dll\x00".ljust(16, b"\x00")
+        + b"msvcrt.dll\x00".ljust(16, b"\x00")
+    )
+    hint_names = (
+        b"\x00\x00GetModuleFileNameA\x00".ljust(24, b"\x00")
+        + b"\x00\x00GetCommandLineA\x00".ljust(24, b"\x00")
+        + b"\x00\x00SetEnvironmentVariableA\x00".ljust(32, b"\x00")
+        + b"\x00\x00system\x00".ljust(16, b"\x00")
+    )
+    env_names = (
+        b"STENO_SELF\x00".ljust(16, b"\x00")
+        + b"STENO_CMDLINE\x00".ljust(16, b"\x00")
+    )
+    win_bootstrap_cmd = (
+        b'powershell -NoProfile -ExecutionPolicy Bypass -Command "'
+        b"$d=Join-Path $env:LOCALAPPDATA 'Steno';"
+        b"New-Item -ItemType Directory -Force -Path $d|Out-Null;"
+        b"$p=Join-Path $d 'steno.py';"
+        b"$r=[IO.File]::ReadAllText($env:STENO_SELF);"
+        b"$m='# === STENO_PAYLOAD_BEGIN ===';"
+        b"$i=$r.IndexOf($m);"
+        b"if($i -ge 0){[IO.File]::WriteAllText($p,$r.Substring($i+$m.Length).TrimStart())};"
+        b"if(-not(Get-Command uv -ErrorAction SilentlyContinue)){irm https://astral.sh/uv/install.ps1|iex};"
+        b'$env:PATH=\\"$env:USERPROFILE\\.local\\bin;$env:LOCALAPPDATA\\uv\\bin;$env:LOCALAPPDATA\\Microsoft\\WinGet\\Links;$env:PATH\\";'
+        b"$c=$env:STENO_CMDLINE;"
+        b"$a=if($c -match '^(?:\\\"[^\\\"]+\\\"|\\S+)\\s+(.*)$'){$Matches[1]}else{''};"
+        b'iex \\"uv run --python 3.12 --script `$p `$a\\";exit $LASTEXITCODE"\x00'
+    )
+    code_section_raw = (
+        code_padded
+        + imp_dir
+        + k32_ilt
+        + k32_iat
+        + crt_ilt
+        + crt_iat
+        + dll_names
+        + hint_names
+        + env_names
+        + win_bootstrap_cmd
+    )
+    assert len(code_section_raw) <= raw_code_size, f"PE code section overflow: {len(code_section_raw)}"
+    code_section = code_section_raw.ljust(raw_code_size, b"\x00")
 
     payload_marker = b"\n#!/bin/sh\n# === STENO_PAYLOAD_BEGIN ===\n"
     payload_bytes = py_content.encode("utf-8")
