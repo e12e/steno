@@ -634,6 +634,7 @@
       <div class="dz-actions">
         <button id="check_audio_btn" class="btn-sm" onclick="runQuickAudioCheck()" disabled title="Kjør grov sanntidstranskripsjon og lydnivåsjekk (dBFS) på de første 20 sekundene av valgt lydfil">Lydsjekk (20s)</button>
         <button id="browse_audio_btn" onclick="browseAudio()">Velg fil...</button>
+        <button id="url_audio_btn" class="btn-sm" onclick="promptAudioUrl()" title="Hent eller strøm lyd fra nettadresse (podcast, video, opptak, strøm)">Nettadresse (URL)...</button>
       </div>
     </div>
 
@@ -861,6 +862,7 @@
       selected_file_empty: "Slipp fil her (.m4a, .wav, .opus, .mp3, .html, .json) eller velg...",
       check_audio_btn: "Lydsjekk (20s)",
       browse_audio_btn: "Velg fil...",
+      url_audio_btn: "Nettadresse (URL)...",
       rec_start: "🎙️ Spill inn møte",
       rec_stop: "⏹ Stopp opptak",
       live_ready: "Lyd: klar",
@@ -919,6 +921,7 @@
       selected_file_empty: "Drop file here (.m4a, .wav, .opus, .mp3, .html, .json) or browse...",
       check_audio_btn: "Audio Check (20s)",
       browse_audio_btn: "Browse...",
+      url_audio_btn: "URL / Stream...",
       rec_start: "🎙️ Record Meeting",
       rec_stop: "⏹ Stop Recording",
       live_ready: "Audio: ready",
@@ -980,7 +983,7 @@
     if (sel && sel.value !== currentUiLang) sel.value = currentUiLang;
     const d = UI_I18N[currentUiLang];
     const textIds = [
-      'lbl_step1_title', 'check_audio_btn', 'browse_audio_btn', 'speak_guide_btn',
+      'lbl_step1_title', 'check_audio_btn', 'browse_audio_btn', 'url_audio_btn', 'speak_guide_btn',
       'lbl_auto_speak', 'lbl_live_chk', 'lbl_meeting_title', 'lbl_speakers_hint',
       'lbl_context_drawer', 'btn_add_agenda', 'btn_add_notes', 'lbl_agenda_text',
       'lbl_manual_notes_text', 'lbl_stages', 'apply_rec_btn', 'lbl_adv_drawer',
@@ -1335,6 +1338,34 @@
   async function browseAudio() {
     const info = await pywebview.api.pick_audio_file();
     if (info) await applySelection(info);
+  }
+
+  async function promptAudioUrl() {
+    const isEn = (currentUiLang === 'en');
+    const promptMsg = isEn
+      ? "Enter URL to audio file, video stream, podcast, or broadcast (HTTP/HTTPS/RTMP/HLS):"
+      : "Oppgi nettadresse til lydfil, videostrøm, podcast eller kringkasting (HTTP/HTTPS/RTMP/HLS):";
+    const url = window.prompt(promptMsg, "");
+    if (!url || !url.trim()) return;
+    const outDir = document.getElementById('out_dir') ? document.getElementById('out_dir').value : '';
+    const selEl = document.getElementById('selected-file');
+    const prevText = selEl ? selEl.textContent : '';
+    if (selEl) {
+      selEl.textContent = (isEn ? "⏳ Extracting audio from URL: " : "⏳ Henter og trekker ut lyd fra nettadresse: ") + url.trim();
+    }
+    try {
+      const info = await pywebview.api.fetch_media_url(url.trim(), outDir);
+      if (info && info.audio_path) {
+        await applySelection(info);
+      } else {
+        if (selEl) selEl.textContent = prevText;
+        alert(isEn ? "Could not extract audio from URL." : "Kunne ikke hente lyd fra oppgitt nettadresse.");
+      }
+    } catch (err) {
+      console.error(err);
+      if (selEl) selEl.textContent = prevText;
+      alert((isEn ? "Error fetching URL: " : "Feil ved henting av nettadresse: ") + err);
+    }
   }
 
   async function browseFolder() {

@@ -30,6 +30,7 @@ from mote.core import (  # noqa: E402
     clean_base_stem,
     cli_main,
     detect_hardware_resources,
+    download_media_url_audio,
     ensure_ffmpeg,
     evaluate_model_resource_fit,
     extract_context_from_file,
@@ -38,6 +39,7 @@ from mote.core import (  # noqa: E402
     get_initial_hf_token,
     install_steno_app,
     is_diarization_cached,
+    is_media_url,
     is_termux,
     is_transcript_file,
     resolve_moved_audio_path,
@@ -457,6 +459,19 @@ class MoteApi:
             "notes_html_name": notes_html_name,
             "is_transcript_input": is_transcript_file(audio_path),
         }
+
+    def fetch_media_url(self, url: str, out_dir: str | None = None) -> dict[str, Any] | None:
+        """Download or stream media from a URL, extract 16kHz audio, and suggest meeting output names."""
+        clean_url = (url or "").strip()
+        if not is_media_url(clean_url):
+            return None
+        target_dir = Path(out_dir).resolve() if out_dir else None
+        extracted_wav = download_media_url_audio(
+            url=clean_url,
+            out_dir=target_dir,
+            log_fn=self._log,
+        )
+        return self.suggest_output_names(str(extracted_wav), str(extracted_wav.parent))
 
     def pick_audio_file(self) -> dict[str, Any] | None:
         if not self.window:

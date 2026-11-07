@@ -21,12 +21,14 @@ import tempfile
 import threading
 import time
 import unicodedata
+import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 import zipfile
 import zlib
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import Any, TypedDict
 
@@ -177,6 +179,137 @@ def is_transcript_file(path: Path | str) -> bool:
     """
     p = Path(path) if isinstance(path, str) else path
     return p.suffix.lower() in TRANSCRIPT_EXTENSIONS
+
+
+def is_media_url(url: str | Path | None) -> bool:
+    """Return True if url represents a web, streaming, or network media location.
+
+    >>> is_media_url("https://hypertekst.net/steno/test_meeting.opus")
+    True
+    >>> is_media_url("http://example.com/live/stream.m3u8")
+    True
+    >>> is_media_url("rtmp://live.stream.org/audio")
+    True
+    >>> is_media_url("meeting.wav")
+    False
+    >>> is_media_url(Path("/tmp/audio.mp3"))
+    False
+    >>> is_media_url(None)
+    False
+    """
+    if url is None:
+        return False
+    s = str(url).strip()
+    parsed = urllib.parse.urlparse(s)
+    return parsed.scheme.lower() in ("http", "https", "rtmp", "rtmps", "rtsp", "mms", "hls")
+
+
+def build_media_url_ffmpeg_cmd(
+    url: str,
+    out_wav: Path,
+    ffmpeg_bin: str = "ffmpeg",
+    max_seconds: float | None = None,
+) -> list[str]:
+    """Construct ffmpeg command arguments to stream or download audio from a URL into 16kHz mono WAV.
+
+    >>> cmd = build_media_url_ffmpeg_cmd("https://example.com/audio.mp3", Path("/tmp/out.wav"), max_seconds=20)
+    >>> "-vn" in cmd and "-ac" in cmd and "16000" in cmd and "-t" in cmd
+    True
+    """
+    cmd = [
+        ffmpeg_bin,
+        "-y",
+        "-reconnect",
+        "1",
+        "-reconnect_streamed",
+        "1",
+        "-reconnect_delay_max",
+        "5",
+        "-user_agent",
+        "Mozilla/5.0 (compatible; Steno/1.0)",
+        "-i",
+        str(url).strip(),
+        "-vn",
+        "-ac",
+        "1",
+        "-ar",
+        "16000",
+        "-c:a",
+        "pcm_s16le",
+    ]
+    if max_seconds is not None and max_seconds > 0:
+        cmd.extend(["-t", str(max_seconds)])
+    cmd.append(str(out_wav))
+    return cmd
+
+
+def download_media_url_audio(
+    url: str,
+    out_dir: Path | None = None,
+    log_fn: Callable[[str], None] = print,
+    max_seconds: float | None = None,
+    ffmpeg_bin: str | None = None,
+    env: dict[str, str] | None = None,
+) -> Path:
+    """Download or stream media from a URL and extract 16kHz mono 16-bit PCM WAV audio via ffmpeg."""
+    clean_url = str(url).strip()
+    target_dir = Path(out_dir).resolve() if out_dir is not None else Path.cwd().resolve()
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    parsed = urllib.parse.urlparse(clean_url)
+    path_name = Path(parsed.path).name
+    stem = clean_base_stem(Path(path_name)) if path_name else ""
+    if not stem or stem.startswith("?") or len(stem) < 2:
+        host_slug = re.sub(r"[^a-zA-Z0-9]+", "_", parsed.netloc).strip("_")
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        stem = f"stream_{host_slug}_{ts}" if host_slug else f"stream_{ts}"
+
+    out_name = unique_filename(target_dir, stem, ".wav")
+    out_wav = target_dir / out_name
+
+    run_env = env.copy() if env is not None else os.environ.copy()
+    f_bin = ffmpeg_bin or ensure_ffmpeg(run_env, log_fn)
+
+    cmd = build_media_url_ffmpeg_cmd(
+        url=clean_url,
+        out_wav=out_wav,
+        ffmpeg_bin=f_bin,
+        max_seconds=max_seconds,
+    )
+
+    log_fn(
+        f"==> Laster ned og trekker ut lyd fra nettadresse / Extracting audio from URL:\n"
+        f"    {clean_url} -> {out_wav.name}"
+    )
+
+    proc = subprocess.run(cmd, env=run_env, capture_output=True, text=True, check=False)
+    if proc.returncode != 0 and not out_wav.is_file():
+        # Fallback without reconnect flags for older ffmpeg versions
+        cmd_simple = [
+            f_bin,
+            "-y",
+            "-i",
+            clean_url,
+            "-vn",
+            "-ac",
+            "1",
+            "-ar",
+            "16000",
+            "-c:a",
+            "pcm_s16le",
+        ]
+        if max_seconds is not None and max_seconds > 0:
+            cmd_simple.extend(["-t", str(max_seconds)])
+        cmd_simple.append(str(out_wav))
+        proc = subprocess.run(cmd_simple, env=run_env, capture_output=True, text=True, check=False)
+        if proc.returncode != 0 and not out_wav.is_file():
+            err_msg = proc.stderr.strip() or f"ffmpeg exited with code {proc.returncode}"
+            raise RuntimeError(
+                f"Kunne ikke hente lyd fra nettadresse / Failed to extract audio from {clean_url}: {err_msg}"
+            )
+
+    log_fn(f"==> Lyd hentet og lagret til / Saved extracted audio to: {out_wav}")
+    return out_wav
 
 
 def clean_base_stem(path: Path | str) -> str:
@@ -3599,12 +3732,12 @@ def build_cli_parser(ui_lang: str | None = None, argv: list[str] | None = None) 
     parser.add_argument(
         "input_file",
         nargs="?",
-        type=Path,
+        type=str,
         default=None,
         help=(
-            "Path to audio file (.wav, .m4a, .opus, .mp3) or existing transcript (.html, .json, .txt, .srt, .vtt)"
+            "Path to audio file (.wav, .m4a, .opus, .mp3), existing transcript (.html, .json, .txt, .srt, .vtt), or media stream URL (http://, https://, rtmp://, etc.)"
             if is_en
-            else "Sti til lydfil (.wav, .m4a, .opus, .mp3) eller eksisterende transkripsjon (.html, .json, .txt, .srt, .vtt)"
+            else "Sti til lydfil (.wav, .m4a, .opus, .mp3), eksisterende transkripsjon (.html, .json, .txt, .srt, .vtt), eller nettadresse/strøm (http://, https://, osv.)"
         ),
     )
     parser.add_argument(
@@ -3997,9 +4130,20 @@ def cli_main(argv: list[str] | None = None) -> int:
     if args.input_file is None:
         parser.error("Du må oppgi 'input_file' (eller bruke '--live-check' for direkte mikrofonsjekk).")
 
-    base_dir = Path(__file__).resolve().parent
-    resolved_input = resolve_moved_audio_path(args.input_file, base_dir)
-    target_out_dir = (args.out_dir or resolved_input.parent).resolve()
+    if is_media_url(args.input_file):
+        out_base = Path(args.out_dir).resolve() if args.out_dir else Path.cwd().resolve()
+        dl_wav = download_media_url_audio(
+            url=str(args.input_file),
+            out_dir=out_base,
+            log_fn=print,
+            max_seconds=args.live_seconds if args.live_check else None,
+        )
+        resolved_input = dl_wav
+        target_out_dir = out_base
+    else:
+        base_dir = Path(__file__).resolve().parent
+        resolved_input = resolve_moved_audio_path(args.input_file, base_dir)
+        target_out_dir = (args.out_dir or resolved_input.parent).resolve()
 
     if args.status:
         st = get_checkpoint_status_dict(target_out_dir, resolved_input)
