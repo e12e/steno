@@ -79,7 +79,7 @@ class TestGherkinBDDScenarios(unittest.TestCase):
     def test_all_gherkin_scenarios_in_feature_file(self) -> None:
         self.assertTrue(FEATURE_FILE.is_file(), f"Missing Gherkin feature file: {FEATURE_FILE}")
         scenarios = parse_gherkin_feature(FEATURE_FILE)
-        self.assertEqual(len(scenarios), 12)
+        self.assertEqual(len(scenarios), 13)
 
         for sc in scenarios:
             name = str(sc["name"])
@@ -535,6 +535,55 @@ class TestGherkinBDDScenarios(unittest.TestCase):
                 self.assertTrue(up_data["ok"])
                 self.assertTrue(Path(up_data["result"]["audio_path"]).is_file())
                 Path(up_data["result"]["audio_path"]).unlink(missing_ok=True)
+            elif step == "Given a remote audio, video stream, or podcast URL":
+                ctx["audio_url"] = "https://hypertekst.net/steno/test_meeting.opus"
+                ctx["stream_url"] = "https://example.com/live/press_conference.m3u8"
+            elif step == "When downloading and extracting audio from the media URL via download_media_url_audio":
+                self.assertTrue(mote_core.is_media_url(str(ctx["audio_url"])))
+                self.assertTrue(mote_core.is_media_url(str(ctx["stream_url"])))
+                self.assertFalse(mote_core.is_media_url("/local/path/recording.wav"))
+                self.assertFalse(mote_core.is_media_url(Path("meeting.m4a")))
+            elif step == "Then ffmpeg extracts 16kHz mono audio without downloading video tracks":
+                with tempfile.TemporaryDirectory() as tmp:
+                    tmp_dir = Path(tmp)
+                    logs: list[str] = []
+                    with mock.patch("subprocess.run") as mock_run:
+                        mock_run.return_value = mock.Mock(returncode=0)
+                        out_wav = mote_core.download_media_url_audio(
+                            str(ctx["audio_url"]),
+                            out_dir=tmp_dir,
+                            log_fn=logs.append,
+                            ffmpeg_bin="ffmpeg",
+                        )
+                        self.assertEqual(out_wav.suffix, ".wav")
+                        self.assertTrue(mock_run.called)
+                        cmd = mock_run.call_args[0][0]
+                        self.assertIn("-vn", cmd, "Must disable video decoding with -vn")
+                        self.assertIn("16000", cmd)
+                        self.assertIn("pcm_s16le", cmd)
+                        self.assertIn(str(ctx["audio_url"]), cmd)
+            elif step == "And the CLI dispatches direct URLs to audio download and downstream pipeline":
+                with tempfile.TemporaryDirectory() as tmp:
+                    fake_wav = Path(tmp) / "downloaded.wav"
+                    fake_wav.write_bytes(b"RIFF....WAVE")
+                    with mock.patch.object(mote_core, "download_media_url_audio", return_value=fake_wav) as mock_dl:
+                        with mock.patch.object(mote_core, "get_checkpoint_status_dict", return_value={"ok": True}) as mock_status:
+                            rc = mote_core.cli_main(["https://hypertekst.net/steno/test_meeting.opus", "--status"])
+                            self.assertEqual(rc, 0)
+                            mock_dl.assert_called_once()
+                            call_url = mock_dl.call_args.kwargs.get("url") or (mock_dl.call_args[0][0] if mock_dl.call_args[0] else None)
+                            self.assertEqual(call_url, "https://hypertekst.net/steno/test_meeting.opus")
+            elif step == "And the GUI provides fetch_media_url to load remote audio streams into the meeting workflow":
+                api = mote_gui.MoteApi()
+                self.assertTrue(hasattr(api, "fetch_media_url"))
+                with tempfile.TemporaryDirectory() as tmp:
+                    fake_wav = Path(tmp) / "stream.wav"
+                    fake_wav.write_bytes(b"RIFF....WAVE")
+                    with mock.patch.object(mote_gui, "download_media_url_audio", return_value=fake_wav):
+                        res = api.fetch_media_url("https://example.com/stream.m3u8", out_dir=tmp)
+                        self.assertIsNotNone(res)
+                        self.assertEqual(res["audio_path"], str(fake_wav))
+                        self.assertIn("html_name", res)
             else:
                 self.fail(f"Unrecognized Gherkin step in '{name}': {step}")
 

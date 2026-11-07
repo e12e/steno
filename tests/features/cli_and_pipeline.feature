@@ -76,6 +76,14 @@ Feature: Idiomatic CLI Argument Parsing, Unified Entrypoint Dispatch, and Pipeli
     Then GET / serves the app HTML with the window.pywebview.api browser bridge injected
     And POST /api/get_defaults and GET /api/_events and POST /api/_upload_file bridge MoteApi calls without GTK or Qt
 
+  Scenario: Media URL and stream audio downloading and extraction for CLI and GUI
+    Given a remote audio, video stream, or podcast URL
+    When downloading and extracting audio from the media URL via download_media_url_audio
+    Then ffmpeg extracts 16kHz mono audio without downloading video tracks
+    And the CLI dispatches direct URLs to audio download and downstream pipeline
+    And the GUI provides fetch_media_url to load remote audio streams into the meeting workflow
+
+
 
 
 
