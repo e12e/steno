@@ -79,7 +79,7 @@ class TestGherkinBDDScenarios(unittest.TestCase):
     def test_all_gherkin_scenarios_in_feature_file(self) -> None:
         self.assertTrue(FEATURE_FILE.is_file(), f"Missing Gherkin feature file: {FEATURE_FILE}")
         scenarios = parse_gherkin_feature(FEATURE_FILE)
-        self.assertEqual(len(scenarios), 11)
+        self.assertEqual(len(scenarios), 12)
 
         for sc in scenarios:
             name = str(sc["name"])
@@ -443,8 +443,10 @@ class TestGherkinBDDScenarios(unittest.TestCase):
 
                     # Execute steno.com under simulated Termux environment (--self-test)
                     env_tmx = os.environ.copy()
+                    env_tmx["HOME"] = str(tmp_path)
                     env_tmx["TERMUX_VERSION"] = "0.118.1"
                     env_tmx["PREFIX"] = str(fake_prefix)
+                    env_tmx["PATH"] = f"{fake_prefix / 'bin'}:/usr/bin:/bin"
                     env_tmx["STENO_INSTALL_DIR"] = str(tmp_path / "steno_app")
                     proc = subprocess.run(
                         [str(fake_sh), str(ctx["dist_com"]), "--self-test"],
@@ -472,6 +474,75 @@ class TestGherkinBDDScenarios(unittest.TestCase):
                 self.assertIn(b"SetEnvironmentVariableA\x00", com_bytes)
                 self.assertIn(b"STENO_SELF\x00", com_bytes)
                 self.assertIn(b"STENO_CMDLINE\x00", com_bytes)
+            elif step == "Given a ChromeOS Crostini or Linux environment where neither gi (GTK) nor qtpy (Qt) is installed":
+                has_fn = getattr(mote_gui, "has_native_webview_backend", None)
+                self.assertTrue(callable(has_fn), "mote.gui.has_native_webview_backend is missing")
+                self.assertFalse(
+                    has_fn(platform_str="linux", find_spec_fn=lambda _name: None),
+                    "Should return False on Linux when neither gi nor qtpy is installed",
+                )
+            elif step == "When starting the local browser GUI bridge server for Steno":
+                create_srv = getattr(mote_gui, "create_browser_gui_server", None)
+                self.assertTrue(callable(create_srv), "mote.gui.create_browser_gui_server is missing")
+                api = mote_gui.MoteApi()
+                srv, bridge, url = create_srv(api, mote_gui.HTML, port=0)
+                t = threading.Thread(target=srv.serve_forever, daemon=True)
+                t.start()
+                ctx["browser_srv"] = srv
+                ctx["browser_bridge"] = bridge
+                ctx["browser_url"] = url
+                ctx["browser_api"] = api
+            elif step == "Then GET / serves the app HTML with the window.pywebview.api browser bridge injected":
+                import urllib.request
+
+                url = str(ctx["browser_url"])
+                with urllib.request.urlopen(url + "/", timeout=5) as resp:
+                    page_html = resp.read().decode("utf-8")
+                self.assertIn("steno-browser-bridge", page_html)
+                self.assertIn("window.pywebview", page_html)
+                self.assertIn("pywebviewready", page_html)
+            elif step == "And POST /api/get_defaults and GET /api/_events and POST /api/_upload_file bridge MoteApi calls without GTK or Qt":
+                import urllib.request
+
+                url = str(ctx["browser_url"])
+                srv = ctx["browser_srv"]
+                bridge = ctx["browser_bridge"]
+                try:
+                    req = urllib.request.Request(
+                        url + "/api/get_defaults",
+                        data=b'{"args": []}',
+                        headers={"Content-Type": "application/json"},
+                        method="POST",
+                    )
+                    with urllib.request.urlopen(req, timeout=5) as resp:
+                        data = json.loads(resp.read().decode("utf-8"))
+                    self.assertTrue(data["ok"])
+                    self.assertIn("default_out_dir", data["result"])
+
+                    bridge.evaluate_js("updateProgress(42, 'Testing ChromeOS')")
+                    with urllib.request.urlopen(url + "/api/_events", timeout=5) as resp:
+                        ev_data = json.loads(resp.read().decode("utf-8"))
+                    self.assertIn("updateProgress(42, 'Testing ChromeOS')", ev_data["events"])
+
+                    wav_bytes = mote_core.build_wav_bytes_from_pcm16(b"\x00\x00" * 800, 16000)
+                    up_req = urllib.request.Request(
+                        url + "/api/_upload_file",
+                        data=wav_bytes,
+                        headers={
+                            "Content-Type": "application/octet-stream",
+                            "X-Steno-Filename": "chromeos_test.wav",
+                            "X-Steno-Kind": "audio",
+                        },
+                        method="POST",
+                    )
+                    with urllib.request.urlopen(up_req, timeout=5) as resp:
+                        up_data = json.loads(resp.read().decode("utf-8"))
+                    self.assertTrue(up_data["ok"])
+                    self.assertTrue(Path(up_data["result"]["audio_path"]).is_file())
+                    Path(up_data["result"]["audio_path"]).unlink(missing_ok=True)
+                finally:
+                    srv.shutdown()
+                    srv.server_close()
             else:
                 self.fail(f"Unrecognized Gherkin step in '{name}': {step}")
 

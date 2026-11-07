@@ -70,6 +70,13 @@ Feature: Idiomatic CLI Argument Parsing, Unified Entrypoint Dispatch, and Pipeli
     And Termux (aarch64-linux-android) resolves $PREFIX/bin/sh, uses pulse audio capture, and executes steno.com without /bin/sh or uv wheels
     And the Windows PE32+ code section in steno.com imports KERNEL32.dll and msvcrt.dll to extract and launch steno.py on amd64 and arm64
 
+  Scenario: ChromeOS and Linux fallback to local browser GUI when GTK and Qt are absent
+    Given a ChromeOS Crostini or Linux environment where neither gi (GTK) nor qtpy (Qt) is installed
+    When starting the local browser GUI bridge server for Steno
+    Then GET / serves the app HTML with the window.pywebview.api browser bridge injected
+    And POST /api/get_defaults and GET /api/_events and POST /api/_upload_file bridge MoteApi calls without GTK or Qt
+
+
 
 
 
