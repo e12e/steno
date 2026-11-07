@@ -486,63 +486,55 @@ class TestGherkinBDDScenarios(unittest.TestCase):
                 self.assertTrue(callable(create_srv), "mote.gui.create_browser_gui_server is missing")
                 api = mote_gui.MoteApi()
                 srv, bridge, url = create_srv(api, mote_gui.HTML, port=0)
-                t = threading.Thread(target=srv.serve_forever, daemon=True)
-                t.start()
+                if srv is not None:
+                    srv.server_close()
                 ctx["browser_srv"] = srv
                 ctx["browser_bridge"] = bridge
                 ctx["browser_url"] = url
                 ctx["browser_api"] = api
             elif step == "Then GET / serves the app HTML with the window.pywebview.api browser bridge injected":
-                import urllib.request
-
-                url = str(ctx["browser_url"])
-                with urllib.request.urlopen(url + "/", timeout=5) as resp:
-                    page_html = resp.read().decode("utf-8")
+                bridge = ctx["browser_bridge"]
+                status, _ctype, body = bridge.handle_http_request("GET", "/")
+                self.assertEqual(status, 200)
+                page_html = body.decode("utf-8")
                 self.assertIn("steno-browser-bridge", page_html)
                 self.assertIn("window.pywebview", page_html)
                 self.assertIn("pywebviewready", page_html)
             elif step == "And POST /api/get_defaults and GET /api/_events and POST /api/_upload_file bridge MoteApi calls without GTK or Qt":
-                import urllib.request
-
-                url = str(ctx["browser_url"])
-                srv = ctx["browser_srv"]
                 bridge = ctx["browser_bridge"]
-                try:
-                    req = urllib.request.Request(
-                        url + "/api/get_defaults",
-                        data=b'{"args": []}',
-                        headers={"Content-Type": "application/json"},
-                        method="POST",
-                    )
-                    with urllib.request.urlopen(req, timeout=5) as resp:
-                        data = json.loads(resp.read().decode("utf-8"))
-                    self.assertTrue(data["ok"])
-                    self.assertIn("default_out_dir", data["result"])
+                status, _ctype, body = bridge.handle_http_request(
+                    "POST",
+                    "/api/get_defaults",
+                    {"Content-Type": "application/json"},
+                    b'{"args": []}',
+                )
+                self.assertEqual(status, 200)
+                data = json.loads(body.decode("utf-8"))
+                self.assertTrue(data["ok"])
+                self.assertIn("default_out_dir", data["result"])
 
-                    bridge.evaluate_js("updateProgress(42, 'Testing ChromeOS')")
-                    with urllib.request.urlopen(url + "/api/_events", timeout=5) as resp:
-                        ev_data = json.loads(resp.read().decode("utf-8"))
-                    self.assertIn("updateProgress(42, 'Testing ChromeOS')", ev_data["events"])
+                bridge.evaluate_js("updateProgress(42, 'Testing ChromeOS')")
+                status_ev, _ctype_ev, ev_body = bridge.handle_http_request("GET", "/api/_events")
+                self.assertEqual(status_ev, 200)
+                ev_data = json.loads(ev_body.decode("utf-8"))
+                self.assertIn("updateProgress(42, 'Testing ChromeOS')", ev_data["events"])
 
-                    wav_bytes = mote_core.build_wav_bytes_from_pcm16(b"\x00\x00" * 800, 16000)
-                    up_req = urllib.request.Request(
-                        url + "/api/_upload_file",
-                        data=wav_bytes,
-                        headers={
-                            "Content-Type": "application/octet-stream",
-                            "X-Steno-Filename": "chromeos_test.wav",
-                            "X-Steno-Kind": "audio",
-                        },
-                        method="POST",
-                    )
-                    with urllib.request.urlopen(up_req, timeout=5) as resp:
-                        up_data = json.loads(resp.read().decode("utf-8"))
-                    self.assertTrue(up_data["ok"])
-                    self.assertTrue(Path(up_data["result"]["audio_path"]).is_file())
-                    Path(up_data["result"]["audio_path"]).unlink(missing_ok=True)
-                finally:
-                    srv.shutdown()
-                    srv.server_close()
+                wav_bytes = mote_core.build_wav_bytes_from_pcm16(b"\x00\x00" * 800, 16000)
+                status_up, _ctype_up, up_body = bridge.handle_http_request(
+                    "POST",
+                    "/api/_upload_file",
+                    {
+                        "Content-Type": "application/octet-stream",
+                        "X-Steno-Filename": "chromeos_test.wav",
+                        "X-Steno-Kind": "audio",
+                    },
+                    wav_bytes,
+                )
+                self.assertEqual(status_up, 200)
+                up_data = json.loads(up_body.decode("utf-8"))
+                self.assertTrue(up_data["ok"])
+                self.assertTrue(Path(up_data["result"]["audio_path"]).is_file())
+                Path(up_data["result"]["audio_path"]).unlink(missing_ok=True)
             else:
                 self.fail(f"Unrecognized Gherkin step in '{name}': {step}")
 
