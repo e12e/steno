@@ -83,6 +83,14 @@ Feature: Idiomatic CLI Argument Parsing, Unified Entrypoint Dispatch, and Pipeli
     And the CLI dispatches direct URLs to audio download and downstream pipeline
     And the GUI provides fetch_media_url to load remote audio streams into the meeting workflow
 
+  Scenario: Local voiceover no-autoplay, pre-generated neural audio, microphone discovery/gain, and UX state machine
+    Given the local UX state machine in app.html and MoteApi
+    When inspecting voiceover configuration, microphone controls, and state machine transitions
+    Then voiceover does not autoplay by default and uses pre-generated high-quality audio files
+    And MoteApi lists available audio input devices, system volume, and supports microphone selection and dB gain boost
+    And the UX state machine supports Record (meeting or lecture), Existing File, Stream/URL, Context via File or Link, and Resume Transcription
+
+
 
 
 

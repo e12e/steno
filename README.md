@@ -319,3 +319,9 @@ Kjør alle sjekker (doctests, enhetstester, `ruff` og `mypy`) med:
 make check
 ```
 
+---
+
+## 10. Lisens / License
+
+Dette prosjektet er lisensiert under **Apache License, Version 2.0** — se [`LICENSE`](LICENSE) for fullstendige vilkår.
+

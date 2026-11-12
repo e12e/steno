@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import array
+import base64
 import getpass
 import html
 import json
@@ -623,13 +624,13 @@ def determine_stages_to_run(
     >>> determine_stages_to_run("auto_resume", True, False, False, False, False, False)
     (False, False, False, True, True)
     """
-    if task_mode == "full_fresh":
+    if task_mode in ("full_fresh", "full"):
         return (not is_trans_input, not is_trans_input, not is_trans_input, True, True)
-    if task_mode == "only_1_asr":
+    if task_mode in ("only_1_asr", "transcribe_s1"):
         return (not is_trans_input, False, False, False, False)
-    if task_mode == "only_2_align":
+    if task_mode in ("only_2_align", "transcribe_s2"):
         return (not is_trans_input and not has_s1, not is_trans_input, False, False, False)
-    if task_mode == "only_3_diarize":
+    if task_mode in ("only_3_diarize", "transcribe_s3"):
         return (
             not is_trans_input and not has_s1 and not has_s2,
             not is_trans_input and not has_s2,
@@ -645,7 +646,7 @@ def determine_stages_to_run(
             True,
             True,
         )
-    if task_mode == "from_4_names":
+    if task_mode in ("from_4_names", "names_and_notes"):
         return (
             not is_trans_input and not has_s3 and not has_s2 and not has_s1,
             not is_trans_input and not has_s3 and not has_s2,
@@ -653,7 +654,7 @@ def determine_stages_to_run(
             True,
             True,
         )
-    if task_mode == "only_4_names":
+    if task_mode in ("only_4_names", "transcribe_only"):
         return (
             not is_trans_input and not has_s3 and not has_s2 and not has_s1,
             not is_trans_input and not has_s3 and not has_s2,
@@ -661,7 +662,7 @@ def determine_stages_to_run(
             True,
             False,
         )
-    if task_mode == "only_5_notes":
+    if task_mode in ("only_5_notes", "notes_only"):
         has_trans_source = is_trans_input or has_s4 or has_html or has_s3 or has_s2 or has_s1
         return (
             not has_trans_source,
@@ -1004,6 +1005,77 @@ def extract_context_from_file(path: Path) -> str:
     return sanitize_text(txt)
 
 
+def normalize_context_url(url: str) -> str:
+    """Normalize Google Docs/Slides share links into direct text/pptx export URLs.
+
+    >>> normalize_context_url("https://docs.google.com/document/d/1AbCdEfG/edit?usp=sharing")
+    'https://docs.google.com/document/d/1AbCdEfG/export?format=txt'
+    >>> normalize_context_url("https://docs.google.com/presentation/d/9XyZ123/edit#slide=id.p")
+    'https://docs.google.com/presentation/d/9XyZ123/export/pptx'
+    >>> normalize_context_url("https://example.com/agenda.md")
+    'https://example.com/agenda.md'
+    """
+    clean = (url or "").strip()
+    m_doc = re.match(r"^https?://docs\.google\.com/document/d/([a-zA-Z0-9_-]+)", clean)
+    if m_doc:
+        return f"https://docs.google.com/document/d/{m_doc.group(1)}/export?format=txt"
+    m_pres = re.match(r"^https?://docs\.google\.com/presentation/d/([a-zA-Z0-9_-]+)", clean)
+    if m_pres:
+        return f"https://docs.google.com/presentation/d/{m_pres.group(1)}/export/pptx"
+    return clean
+
+
+def fetch_context_from_url(url: str, timeout: int = 20) -> dict[str, Any]:
+    """Download agenda, lecture slides, or draft notes from an HTTP/HTTPS URL and extract clean text."""
+    raw_url = (url or "").strip()
+    parsed = urllib.parse.urlparse(raw_url)
+    if parsed.scheme.lower() not in ("http", "https"):
+        raise ValueError(f"Ugyldig nettadresse for kontekst / Invalid context URL: {raw_url}")
+
+    eff_url = normalize_context_url(raw_url)
+    eff_parsed = urllib.parse.urlparse(eff_url)
+    req = urllib.request.Request(
+        eff_url,
+        headers={"User-Agent": "Mozilla/5.0 (compatible; Steno/1.0)"},
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        ctype = str(resp.headers.get("Content-Type", "")).lower()
+        body = resp.read()
+
+    ext = Path(eff_parsed.path).suffix.lower()
+    if not ext or ext not in CONTEXT_DOC_EXTENSIONS:
+        if "presentationml" in ctype or eff_url.endswith("/pptx"):
+            ext = ".pptx"
+        elif "wordprocessingml" in ctype:
+            ext = ".docx"
+        elif "application/pdf" in ctype:
+            ext = ".pdf"
+        elif "opendocument.presentation" in ctype:
+            ext = ".odp"
+        elif "opendocument.text" in ctype:
+            ext = ".odt"
+        elif "application/json" in ctype:
+            ext = ".json"
+        elif "text/plain" in ctype or "text/markdown" in ctype or "format=txt" in eff_url:
+            ext = ".txt"
+        else:
+            ext = ".html"
+
+    with tempfile.TemporaryDirectory(prefix="steno_ctx_url_") as tmp_dir:
+        tmp_file = Path(tmp_dir) / f"downloaded_context{ext}"
+        tmp_file.write_bytes(body)
+        extracted = extract_context_from_file(tmp_file)
+
+    return {
+        "ok": bool(extracted),
+        "url": raw_url,
+        "resolved_url": eff_url,
+        "extension": ext,
+        "extracted_text": extracted,
+        "char_count": len(extracted),
+    }
+
+
 def resolve_moved_audio_path(audio_path: Path, base_dir: Path) -> Path:
     """Locate audio file if moved into data/ or relocated with the project folder (handles NFD/NFC)."""
     if audio_path.is_file():
@@ -1145,8 +1217,291 @@ def build_runtime_env() -> dict[str, str]:
     return env
 
 
+USER_PREFS_FILE = APP_SUPPORT_DIR / "user_prefs.json"
+
+LANGUAGE_LABELS: dict[str, tuple[str, str]] = {
+    "auto": ("Auto (oppdag språk)", "Auto (detect language)"),
+    "no": ("Norsk", "Norwegian"),
+    "nb": ("Norsk bokmål", "Norwegian Bokmål"),
+    "nn": ("Norsk nynorsk", "Norwegian Nynorsk"),
+    "en": ("Engelsk", "English"),
+    "sv": ("Svensk", "Swedish"),
+    "da": ("Dansk", "Danish"),
+    "de": ("Tysk", "German"),
+    "es": ("Spansk", "Spanish"),
+    "fr": ("Fransk", "French"),
+    "fi": ("Finsk", "Finnish"),
+    "nl": ("Nederlandsk", "Dutch"),
+    "pl": ("Polsk", "Polish"),
+    "it": ("Italiensk", "Italian"),
+    "pt": ("Portugisisk", "Portuguese"),
+    "uk": ("Ukrainsk", "Ukrainian"),
+    "ar": ("Arabisk", "Arabic"),
+    "zh": ("Kinesisk", "Chinese"),
+    "ja": ("Japansk", "Japanese"),
+    "ko": ("Koreansk", "Korean"),
+    "tr": ("Tyrkisk", "Turkish"),
+    "hi": ("Hindi", "Hindi"),
+}
+
+
+def normalize_audio_language(lang: str | None) -> str:
+    """Normalize a speech/audio language code or name into a canonical Whisper ISO code (or 'auto').
+
+    >>> normalize_audio_language("no")
+    'no'
+    >>> normalize_audio_language("nb-NO")
+    'no'
+    >>> normalize_audio_language("en_US")
+    'en'
+    >>> normalize_audio_language("Auto")
+    'auto'
+    >>> normalize_audio_language("de")
+    'de'
+    """
+    if not lang:
+        return "no"
+    raw = str(lang).strip().lower()
+    if not raw or raw in ("auto", "detect", "auto-detect"):
+        return "auto"
+    base = re.split(r"[-_]", raw)[0].strip()
+    aliases = {
+        "nb": "no",
+        "nob": "no",
+        "nor": "no",
+        "norsk": "no",
+        "norwegian": "no",
+        "bokmål": "no",
+        "bokmal": "no",
+        "nno": "nn",
+        "nynorsk": "nn",
+        "eng": "en",
+        "english": "en",
+        "engelsk": "en",
+        "swe": "sv",
+        "svensk": "sv",
+        "swedish": "sv",
+        "dan": "da",
+        "dansk": "da",
+        "danish": "da",
+        "deu": "de",
+        "ger": "de",
+        "deutsch": "de",
+        "german": "de",
+        "tysk": "de",
+        "spa": "es",
+        "spanish": "es",
+        "spansk": "es",
+        "fra": "fr",
+        "fre": "fr",
+        "french": "fr",
+        "fransk": "fr",
+    }
+    return aliases.get(base, base)
+
+
+def is_norwegian_language(lang: str | None) -> bool:
+    """Return True if the normalized language code is Norwegian ('no', 'nb', or 'nn').
+
+    >>> is_norwegian_language("no")
+    True
+    >>> is_norwegian_language("nb-NO")
+    True
+    >>> is_norwegian_language("en")
+    False
+    """
+    return normalize_audio_language(lang) in ("no", "nb", "nn")
+
+
+def get_language_display_name(lang: str | None, ui_lang: str = "no") -> str:
+    """Return human-readable language name with ISO code in Norwegian ('no') or English ('en').
+
+    >>> get_language_display_name("en", "no")
+    'Engelsk (en)'
+    >>> get_language_display_name("no", "en")
+    'Norwegian (no)'
+    >>> get_language_display_name("pl", "en")
+    'Polish (pl)'
+    """
+    code = normalize_audio_language(lang)
+    is_en = str(ui_lang).strip().lower().startswith("en")
+    if code in LANGUAGE_LABELS:
+        lbl_no, lbl_en = LANGUAGE_LABELS[code]
+        lbl = lbl_en if is_en else lbl_no
+        return lbl if code == "auto" else f"{lbl} ({code})"
+    return f"{code.upper()} ({code})"
+
+
+def load_user_preferences(prefs_path: Path | None = None) -> dict[str, Any]:
+    """Load persisted user preferences (UI locale, audio speech language, and per-language models).
+
+    >>> with tempfile.TemporaryDirectory() as d:
+    ...     p = Path(d) / "prefs.json"
+    ...     _ = save_user_preferences({"ui_lang": "no", "audio_language": "en"}, p)
+    ...     loaded = load_user_preferences(p)
+    ...     (loaded["ui_lang"], loaded["audio_language"])
+    ('no', 'en')
+    """
+    target = prefs_path if prefs_path is not None else USER_PREFS_FILE
+    defaults: dict[str, Any] = {
+        "ui_lang": "no",
+        "audio_language": "no",
+        "language_models": {},
+    }
+    if not target.is_file():
+        return defaults
+    try:
+        raw = json.loads(target.read_text(encoding="utf-8"))
+        if isinstance(raw, dict):
+            out = dict(defaults)
+            if raw.get("ui_lang") in ("no", "en"):
+                out["ui_lang"] = str(raw["ui_lang"])
+            if raw.get("audio_language"):
+                out["audio_language"] = normalize_audio_language(str(raw["audio_language"]))
+            if isinstance(raw.get("language_models"), dict):
+                out["language_models"] = dict(raw["language_models"])
+            return out
+    except Exception:
+        pass
+    return defaults
+
+
+def save_user_preferences(
+    updates: Mapping[str, Any],
+    prefs_path: Path | None = None,
+) -> dict[str, Any]:
+    """Persist user preferences (UI locale, audio language, and per-language model choices) atomically."""
+    target = prefs_path if prefs_path is not None else USER_PREFS_FILE
+    current = load_user_preferences(target)
+    if "ui_lang" in updates and updates["ui_lang"] in ("no", "en"):
+        current["ui_lang"] = str(updates["ui_lang"])
+    if "audio_language" in updates and updates["audio_language"]:
+        current["audio_language"] = normalize_audio_language(str(updates["audio_language"]))
+    if isinstance(updates.get("language_models"), Mapping):
+        lm = dict(current.get("language_models") or {})
+        for k, v in updates["language_models"].items():
+            if isinstance(v, Mapping):
+                norm_k = normalize_audio_language(str(k))
+                lm[norm_k] = {
+                    "whisper_model": str(v.get("whisper_model", "")),
+                    "ollama_model": str(v.get("ollama_model", "")),
+                    "profile": str(v.get("profile", "recommended")),
+                }
+        current["language_models"] = lm
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(current, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.replace(target)
+    except Exception:
+        pass
+    return current
+
+
+def detect_text_language(text: str) -> dict[str, Any]:
+    """Detect speech/transcript language from text using lexical stopwords and character signatures.
+
+    >>> detect_text_language("Hei alle sammen, og velkommen til statusmøte for prosjektet vårt i dag.")["detected_language"]
+    'no'
+    >>> detect_text_language("Welcome everyone to today's project status meeting and architecture review.")["detected_language"]
+    'en'
+    >>> detect_text_language("Välkommen till dagens möte om säkerhet och budget för nästa år.")["detected_language"]
+    'sv'
+    """
+    clean = sanitize_text(text).lower()
+    words = re.findall(r"[a-zæøåäöüßéèêàùçñ]+", clean)
+    if len(words) < 2:
+        return {
+            "detected_language": "no",
+            "confidence": 0.0,
+            "label_no": get_language_display_name("no", "no"),
+            "label_en": get_language_display_name("no", "en"),
+        }
+
+    stopword_sets: dict[str, set[str]] = {
+        "no": {
+            "og", "i", "det", "på", "som", "er", "en", "til", "har", "for",
+            "med", "ikke", "om", "den", "vi", "av", "skal", "kan", "møte",
+            "møtet", "velkommen", "hei", "hva", "eller", "så", "ut", "nå",
+            "før", "etter", "også", "alle", "sammen", "dette", "fra", "ved",
+        },
+        "en": {
+            "the", "and", "to", "of", "in", "is", "it", "for", "that", "with",
+            "on", "as", "are", "this", "by", "be", "at", "or", "from", "an",
+            "we", "you", "have", "welcome", "meeting", "today", "please", "our",
+            "will", "can", "about", "what", "which", "their", "has", "been",
+        },
+        "sv": {
+            "och", "att", "det", "i", "en", "jag", "hon", "som", "han", "på",
+            "den", "med", "var", "sig", "för", "så", "till", "är", "men", "ett",
+            "om", "hade", "de", "av", "icke", "mig", "du", "henne", "då", "möte",
+            "välkommen", "inte", "vi", "har", "ska", "från", "också",
+        },
+        "da": {
+            "og", "i", "jeg", "det", "at", "en", "den", "til", "er", "som",
+            "på", "de", "med", "han", "af", "for", "ikke", "der", "var", "mig",
+            "sig", "men", "et", "har", "om", "vi", "møde", "mødet", "ud", "fra",
+        },
+        "de": {
+            "der", "die", "und", "in", "den", "von", "zu", "das", "mit", "sich",
+            "des", "auf", "für", "ist", "im", "dem", "nicht", "ein", "eine",
+            "als", "auch", "es", "an", "werden", "aus", "er", "hat", "wir",
+        },
+        "es": {
+            "de", "la", "que", "el", "en", "y", "a", "los", "del", "se",
+            "las", "por", "un", "para", "con", "no", "una", "su", "al", "es",
+            "lo", "como", "más", "pero", "sus", "le", "ya", "o", "este",
+        },
+        "fr": {
+            "de", "la", "le", "et", "les", "des", "en", "un", "du", "une",
+            "que", "est", "pour", "qui", "dans", "a", "par", "plus", "pas",
+            "au", "sur", "ne", "se", "ce", "sont", "avec", "nous", "vous",
+        },
+    }
+
+    scores: dict[str, float] = {k: 0.0 for k in stopword_sets}
+    for w in words:
+        for lang_code, sw_set in stopword_sets.items():
+            if w in sw_set:
+                scores[lang_code] += 1.0
+
+    # Character diacritic boosts
+    if any(ch in clean for ch in ("æ", "ø")):
+        scores["no"] += 2.5
+        scores["da"] += 1.5
+    if "å" in clean:
+        scores["no"] += 1.5
+        scores["sv"] += 1.2
+        scores["da"] += 1.0
+    if any(ch in clean for ch in ("ä", "ö")):
+        scores["sv"] += 3.0
+        scores["de"] += 1.5
+    if "ß" in clean or "ü" in clean:
+        scores["de"] += 3.0
+
+    best_lang = max(scores, key=lambda k: scores[k])
+    best_score = scores[best_lang]
+    total_hits = sum(scores.values())
+    if best_score <= 0.0:
+        return {
+            "detected_language": "no",
+            "confidence": 0.0,
+            "label_no": get_language_display_name("no", "no"),
+            "label_en": get_language_display_name("no", "en"),
+        }
+    conf = min(0.99, round((best_score / max(1.0, total_hits)) * min(1.0, len(words) / 5.0), 2))
+    if best_score >= 3.0 and conf < 0.72:
+        conf = 0.78
+    return {
+        "detected_language": best_lang,
+        "confidence": conf,
+        "label_no": get_language_display_name(best_lang, "no"),
+        "label_en": get_language_display_name(best_lang, "en"),
+    }
+
+
 def resolve_ui_lang(lang_arg: str | None = None, argv: list[str] | None = None) -> str:
-    """Resolve UI/help language ('en' or 'no') from explicit argument, CLI flags, or MOTE_LANG.
+    """Resolve UI/help language ('en' or 'no') from explicit argument, CLI flags, MOTE_LANG, or saved prefs.
 
     >>> resolve_ui_lang("en")
     'en'
@@ -1182,7 +1537,749 @@ def resolve_ui_lang(lang_arg: str | None = None, argv: list[str] | None = None) 
     env_lang = os.environ.get("MOTE_LANG", "").strip().lower()
     if env_lang.startswith("en"):
         return "en"
+    if env_lang in ("no", "nb", "nn"):
+        return "no"
+    if argv is None:
+        prefs = load_user_preferences()
+        if prefs.get("ui_lang") in ("no", "en"):
+            return str(prefs["ui_lang"])
     return "no"
+
+
+def get_voiceover_script(ui_lang: str = "no", note_mode: str = "mote") -> str:
+    """Return the guided voiceover script in Norwegian ('no') or English ('en') for meeting or lecture mode.
+
+    >>> "Møteleder" in get_voiceover_script("no", "mote")
+    True
+    >>> "chair" in get_voiceover_script("en", "mote").lower()
+    True
+    """
+    is_en = str(ui_lang).strip().lower().startswith("en")
+    is_lecture = str(note_mode).strip().lower() == "foredrag"
+    if is_en:
+        if is_lecture:
+            return (
+                "Recording is ready for the lecture. "
+                "Please state your name, the lecture topic, and today's date, and check that the audio meter is green."
+            )
+        return (
+            "Welcome. Before the meeting begins, please do a quick round-table check. "
+            "First, the chair states the meeting topic and today's date. "
+            "Then each participant states their full name and role in a complete sentence while checking that the audio meter is green."
+        )
+    if is_lecture:
+        return (
+            "Opptaket er klart for foredrag. "
+            "Si gjerne ditt navn, tema for foredraget og dagens dato, og sjekk at lydmåleren viser grønt nivå."
+        )
+    return (
+        "Velkommen. Før møtet starter, ta en kort runde rundt bordet. "
+        "Møteleder sier først møtets tema og dagens dato. "
+        "Deretter sier hver deltaker sitt fulle navn og sin rolle i én hel setning, mens dere sjekker at lydmåleren viser grønt nivå."
+    )
+
+
+def ensure_pregenerated_voiceover(
+    ui_lang: str = "no",
+    note_mode: str = "mote",
+    cache_dir: Path | None = None,
+    ffmpeg_bin: str | None = None,
+) -> Path | None:
+    """Ensure a high-quality pre-generated neural voiceover audio file is written to disk and return its Path."""
+    lang = "en" if str(ui_lang).strip().lower().startswith("en") else "no"
+    target_dir = (cache_dir or (APP_SUPPORT_DIR / "voiceover")).resolve()
+    target_dir.mkdir(parents=True, exist_ok=True)
+    out_mp3 = target_dir / f"voiceover_{lang}.mp3"
+
+    if out_mp3.is_file() and out_mp3.stat().st_size > 4000:
+        return out_mp3
+
+    b64_data = load_template(f"voiceover_{lang}.b64", "").strip()
+    if b64_data:
+        try:
+            raw_bytes = base64.b64decode(b64_data)
+            if len(raw_bytes) > 4000:
+                tmp_mp3 = out_mp3.with_suffix(".mp3.tmp")
+                tmp_mp3.write_bytes(raw_bytes)
+                tmp_mp3.replace(out_mp3)
+                return out_mp3
+        except Exception:
+            pass
+
+    # Fallback: synthesize studio-normalized voiceover on macOS if template is absent
+    script_text = get_voiceover_script(lang, note_mode)
+    if sys.platform == "darwin" and shutil.which("say"):
+        voice = "Samantha" if lang == "en" else "Nora"
+        with tempfile.TemporaryDirectory(prefix="steno_vo_") as tmp:
+            aiff_path = Path(tmp) / "raw.aiff"
+            try:
+                subprocess.run(
+                    ["say", "-v", voice, "-r", "180", "-o", str(aiff_path), script_text],
+                    check=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                f_bin = ffmpeg_bin or shutil.which("ffmpeg")
+                if f_bin and aiff_path.is_file():
+                    subprocess.run(
+                        [
+                            f_bin,
+                            "-y",
+                            "-i",
+                            str(aiff_path),
+                            "-af",
+                            "highpass=f=85,equalizer=f=2800:t=q:w=1.2:g=2.5,loudnorm=I=-16:TP=-1.5:LRA=9",
+                            "-ac",
+                            "1",
+                            "-ar",
+                            "22050",
+                            "-b:a",
+                            "24k",
+                            str(out_mp3),
+                        ],
+                        check=True,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                    if out_mp3.is_file() and out_mp3.stat().st_size > 4000:
+                        return out_mp3
+            except Exception:
+                pass
+
+    # Deterministic PCM WAV fallback for headless test environments
+    out_wav = target_dir / f"voiceover_{lang}.wav"
+    pcm_samples = struct.pack("<h", 1200) * 8000
+    out_wav.write_bytes(build_wav_bytes_from_pcm16(pcm_samples, 16000))
+    return out_wav
+
+
+def parse_avfoundation_audio_devices(ffmpeg_output: str) -> list[dict[str, Any]]:
+    """Parse AVFoundation audio input devices from ffmpeg -list_devices output.
+
+    >>> sample = '''
+    ... [AVFoundation indev @ 0x1] AVFoundation video devices:
+    ... [AVFoundation indev @ 0x1] [0] FaceTime HD Camera
+    ... [AVFoundation indev @ 0x1] AVFoundation audio devices:
+    ... [AVFoundation indev @ 0x1] [0] MacBook Air Microphone
+    ... [AVFoundation indev @ 0x1] [1] USB audio CODEC
+    ... '''
+    >>> devs = parse_avfoundation_audio_devices(sample)
+    >>> [(d["id"], d["name"]) for d in devs]
+    [(':0', 'MacBook Air Microphone'), (':1', 'USB audio CODEC')]
+    """
+    in_audio_section = False
+    devices: list[dict[str, Any]] = []
+    for raw_line in (ffmpeg_output or "").splitlines():
+        if "AVFoundation audio devices:" in raw_line:
+            in_audio_section = True
+            continue
+        if "AVFoundation video devices:" in raw_line:
+            in_audio_section = False
+            continue
+        if in_audio_section:
+            m = re.search(r"\[(\d+)\]\s+(.+)$", raw_line.strip())
+            if m:
+                idx_str, dev_name = m.group(1), m.group(2).strip()
+                devices.append(
+                    {
+                        "id": f":{idx_str}",
+                        "index": int(idx_str),
+                        "name": dev_name,
+                    }
+                )
+    return devices
+
+
+def list_audio_input_devices(
+    ffmpeg_bin: str | None = None,
+    platform_str: str | None = None,
+    env: dict[str, str] | None = None,
+) -> list[dict[str, Any]]:
+    """Discover available audio input (microphone) devices across macOS, Windows, and Linux."""
+    plat = platform_str if platform_str is not None else sys.platform
+    run_env = env if env is not None else build_runtime_env()
+    f_bin = ffmpeg_bin or shutil.which("ffmpeg", path=run_env.get("PATH")) or "ffmpeg"
+
+    if plat == "darwin":
+        default_name = ""
+        transport_map: dict[str, str] = {}
+        if sys.platform == "darwin" and shutil.which("system_profiler"):
+            try:
+                sp_out = subprocess.check_output(
+                    ["system_profiler", "SPAudioDataType", "-json"],
+                    text=True,
+                    stderr=subprocess.DEVNULL,
+                    timeout=3,
+                )
+                sp_data = json.loads(sp_out)
+                for group in sp_data.get("SPAudioDataType", []):
+                    for item in group.get("_items", []):
+                        if "coreaudio_input_source" in item or "coreaudio_device_input" in item:
+                            nm = str(item.get("_name", "")).strip()
+                            raw_tr = str(item.get("coreaudio_device_transport", "")).lower()
+                            tr = (
+                                "builtin"
+                                if "builtin" in raw_tr
+                                else (
+                                    "usb"
+                                    if "usb" in raw_tr
+                                    else (
+                                        "bluetooth"
+                                        if "bluetooth" in raw_tr
+                                        else ("virtual" if "virtual" in raw_tr else "audio")
+                                    )
+                                )
+                            )
+                            if nm:
+                                transport_map[nm] = tr
+                            if item.get("coreaudio_default_audio_input_device") == "spaudio_yes" and nm:
+                                default_name = nm
+            except Exception:
+                pass
+
+        avf_devs: list[dict[str, Any]] = []
+        if sys.platform == "darwin":
+            try:
+                proc = subprocess.run(
+                    [f_bin, "-hide_banner", "-f", "avfoundation", "-list_devices", "true", "-i", ""],
+                    env=run_env,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=3,
+                    check=False,
+                )
+                avf_devs = parse_avfoundation_audio_devices(proc.stdout or "")
+            except Exception:
+                pass
+
+        if not default_name and avf_devs:
+            default_name = str(avf_devs[0]["name"])
+
+        tr_labels_no = {
+            "builtin": "Innebygd",
+            "usb": "USB",
+            "bluetooth": "Bluetooth",
+            "virtual": "Virtuell",
+            "audio": "Lydenhet",
+        }
+        tr_labels_en = {
+            "builtin": "Built-in",
+            "usb": "USB",
+            "bluetooth": "Bluetooth",
+            "virtual": "Virtual",
+            "audio": "Audio",
+        }
+
+        def_disp = default_name or "Systemstandard mikrofon"
+        def_tr = transport_map.get(default_name, "builtin")
+        result: list[dict[str, Any]] = [
+            {
+                "id": ":default",
+                "name": def_disp,
+                "is_default": True,
+                "transport": def_tr,
+                "label_no": f"Standard: {def_disp} ({tr_labels_no.get(def_tr, 'Lyd')})",
+                "label_en": f"Default: {def_disp} ({tr_labels_en.get(def_tr, 'Audio')})",
+            }
+        ]
+        for d in avf_devs:
+            nm = str(d["name"])
+            tr = transport_map.get(nm, "audio")
+            is_def = bool(default_name and nm == default_name)
+            tag_no = f"{tr_labels_no.get(tr, 'Lyd')}{' • Standard' if is_def else ''}"
+            tag_en = f"{tr_labels_en.get(tr, 'Audio')}{' • Default' if is_def else ''}"
+            result.append(
+                {
+                    "id": str(d["id"]),
+                    "name": nm,
+                    "is_default": is_def,
+                    "transport": tr,
+                    "label_no": f"[{d['id']}] {nm} ({tag_no})",
+                    "label_en": f"[{d['id']}] {nm} ({tag_en})",
+                }
+            )
+        return result
+
+    if plat.startswith("win") or os.name == "nt":
+        win_devs: list[dict[str, Any]] = [
+            {
+                "id": "default",
+                "name": "System Default Microphone",
+                "is_default": True,
+                "transport": "audio",
+                "label_no": "Standard mikrofon (Windows DirectShow)",
+                "label_en": "Default Microphone (Windows DirectShow)",
+            }
+        ]
+        if os.name == "nt" and Path(f_bin).is_file():
+            try:
+                proc = subprocess.run(
+                    [f_bin, "-hide_banner", "-list_devices", "true", "-f", "dshow", "-i", "dummy"],
+                    env=run_env,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=3,
+                    check=False,
+                )
+                for line in (proc.stdout or "").splitlines():
+                    m_dev = re.search(r'"([^"]+)"\s*\(audio\)', line)
+                    if m_dev:
+                        dname = m_dev.group(1)
+                        win_devs.append(
+                            {
+                                "id": f"audio={dname}",
+                                "name": dname,
+                                "is_default": len(win_devs) == 1,
+                                "transport": "audio",
+                                "label_no": f"{dname}",
+                                "label_en": f"{dname}",
+                            }
+                        )
+            except Exception:
+                pass
+        return win_devs
+
+    # Linux / Termux PulseAudio / ALSA
+    lin_devs: list[dict[str, Any]] = [
+        {
+            "id": "default",
+            "name": "Default Audio Input",
+            "is_default": True,
+            "transport": "audio",
+            "label_no": "Standard mikrofon (PulseAudio / ALSA)",
+            "label_en": "Default Microphone (PulseAudio / ALSA)",
+        }
+    ]
+    if sys.platform.startswith("linux") and shutil.which("pactl"):
+        try:
+            out = subprocess.check_output(
+                ["pactl", "list", "short", "sources"], text=True, stderr=subprocess.DEVNULL, timeout=2
+            )
+            for line in out.splitlines():
+                parts = line.split()
+                if len(parts) >= 2 and not parts[1].endswith(".monitor"):
+                    src_name = parts[1]
+                    lin_devs.append(
+                        {
+                            "id": src_name,
+                            "name": src_name,
+                            "is_default": False,
+                            "transport": "audio",
+                            "label_no": src_name,
+                            "label_en": src_name,
+                        }
+                    )
+        except Exception:
+            pass
+    return lin_devs
+
+
+def get_system_input_volume(platform_str: str | None = None) -> dict[str, Any]:
+    """Read OS microphone input volume (0-100%) on macOS or Linux PulseAudio."""
+    plat = platform_str if platform_str is not None else sys.platform
+    if plat == "darwin" and sys.platform == "darwin" and shutil.which("osascript"):
+        try:
+            out = subprocess.check_output(
+                ["osascript", "-e", "input volume of (get volume settings)"],
+                text=True,
+                stderr=subprocess.DEVNULL,
+                timeout=2,
+            ).strip()
+            if out.isdigit():
+                vol = max(0, min(100, int(out)))
+                return {"supported": True, "volume": vol, "muted": vol == 0}
+        except Exception:
+            pass
+    if plat.startswith("linux") and sys.platform.startswith("linux") and shutil.which("pactl"):
+        try:
+            out = subprocess.check_output(
+                ["pactl", "get-source-volume", "@DEFAULT_SOURCE@"],
+                text=True,
+                stderr=subprocess.DEVNULL,
+                timeout=2,
+            )
+            m = re.search(r"(\d+)%", out)
+            if m:
+                vol = max(0, min(150, int(m.group(1))))
+                return {"supported": True, "volume": vol, "muted": vol == 0}
+        except Exception:
+            pass
+    return {"supported": False, "volume": 100, "muted": False}
+
+
+def set_system_input_volume(volume_pct: int, platform_str: str | None = None) -> dict[str, Any]:
+    """Set OS microphone input volume (0-100%) on macOS or Linux PulseAudio."""
+    plat = platform_str if platform_str is not None else sys.platform
+    clamped = max(0, min(100, int(volume_pct)))
+    if plat == "darwin" and sys.platform == "darwin" and shutil.which("osascript"):
+        try:
+            subprocess.run(
+                ["osascript", "-e", f"set volume input volume {clamped}"],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=2,
+            )
+            return {"ok": True, "supported": True, "volume": clamped, "muted": clamped == 0}
+        except Exception as exc:
+            return {"ok": False, "supported": True, "volume": clamped, "error": str(exc)}
+    if plat.startswith("linux") and sys.platform.startswith("linux") and shutil.which("pactl"):
+        try:
+            subprocess.run(
+                ["pactl", "set-source-volume", "@DEFAULT_SOURCE@", f"{clamped}%"],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=2,
+            )
+            return {"ok": True, "supported": True, "volume": clamped, "muted": clamped == 0}
+        except Exception as exc:
+            return {"ok": False, "supported": True, "volume": clamped, "error": str(exc)}
+    return {"ok": True, "supported": False, "volume": clamped, "muted": clamped == 0}
+
+
+def open_system_sound_settings(platform_str: str | None = None) -> dict[str, Any]:
+    """Open OS Sound Input settings panel so user can inspect microphone permissions, Voice Isolation, or levels."""
+    plat = platform_str if platform_str is not None else sys.platform
+    try:
+        if plat == "darwin":
+            subprocess.Popen(["open", "x-apple.systempreferences:com.apple.Sound-Settings.extension"])
+            return {"ok": True}
+        if plat.startswith("win") or os.name == "nt":
+            subprocess.Popen(["cmd", "/c", "start", "ms-settings:sound"])
+            return {"ok": True}
+        for tool in ("pavucontrol", "gnome-control-center"):
+            if shutil.which(tool):
+                args = [tool, "sound"] if tool == "gnome-control-center" else [tool]
+                subprocess.Popen(args)
+                return {"ok": True}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": False, "error": "Unsupported platform sound settings launcher"}
+
+
+def build_mic_audio_filter(gain_db: float = 0.0, auto_gain: bool = False) -> str:
+    """Build an ffmpeg audio filter chain (-af) for microphone gain boost, denoising, and dynamic normalization.
+
+    >>> build_mic_audio_filter(0.0, False)
+    ''
+    >>> build_mic_audio_filter(6.0, False)
+    'highpass=f=80,lowpass=f=7600,afftdn=nf=-25,volume=6.0dB,alimiter=limit=0.95:level=0'
+    >>> "dynaudnorm" in build_mic_audio_filter(6.0, True)
+    True
+    """
+    if abs(gain_db) < 0.05 and not auto_gain:
+        return ""
+    filters: list[str] = ["highpass=f=80", "lowpass=f=7600", "afftdn=nf=-25"]
+    if abs(gain_db) >= 0.05:
+        filters.append(f"volume={float(gain_db):.1f}dB")
+    if auto_gain:
+        filters.append("dynaudnorm=f=100:g=7:p=0.85:m=3.0:s=12")
+    filters.append("alimiter=limit=0.95:level=0")
+    return ",".join(filters)
+
+
+MACOS_COREAUDIO_RECORD_RUNNER_CODE = """
+import ctypes
+import json
+import signal
+import subprocess
+import sys
+import threading
+
+cfg = json.loads(sys.argv[1])
+ffmpeg_bin = cfg["ffmpeg_bin"]
+out_wav = cfg["out_wav"]
+af_str = cfg.get("af_str", "")
+mic_device = cfg.get("mic_device", "default")
+
+ca = ctypes.CDLL("/System/Library/Frameworks/CoreAudio.framework/CoreAudio")
+at = ctypes.CDLL("/System/Library/Frameworks/AudioToolbox.framework/AudioToolbox")
+cf = ctypes.CDLL("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
+cf.CFStringGetCString.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_long, ctypes.c_uint32]
+cf.CFStringGetCString.restype = ctypes.c_bool
+
+
+class AudioObjectPropertyAddress(ctypes.Structure):
+    _fields_ = [
+        ("mSelector", ctypes.c_uint32),
+        ("mScope", ctypes.c_uint32),
+        ("mElement", ctypes.c_uint32),
+    ]
+
+
+def fourcc(s: str) -> int:
+    return (ord(s[0]) << 24) | (ord(s[1]) << 16) | (ord(s[2]) << 8) | ord(s[3])
+
+
+def get_cfstr(val_ptr: int) -> str:
+    if not val_ptr:
+        return ""
+    buf = ctypes.create_string_buffer(512)
+    if cf.CFStringGetCString(val_ptr, buf, 512, 0x08000100):
+        return buf.value.decode("utf-8", "replace")
+    return ""
+
+
+selected_uid_ptr = None
+try:
+    addr_devs = AudioObjectPropertyAddress(fourcc("dev#"), fourcc("glob"), 0)
+    sz = ctypes.c_uint32(0)
+    ca.AudioObjectGetPropertyDataSize(1, ctypes.byref(addr_devs), 0, None, ctypes.byref(sz))
+    count = sz.value // 4
+    devs = (ctypes.c_uint32 * count)()
+    ca.AudioObjectGetPropertyData(1, ctypes.byref(addr_devs), 0, None, ctypes.byref(sz), devs)
+    input_devs = []
+    for d in devs:
+        addr_in = AudioObjectPropertyAddress(fourcc("stm#"), fourcc("inpt"), 0)
+        sz_in = ctypes.c_uint32(0)
+        ca.AudioObjectGetPropertyDataSize(d, ctypes.byref(addr_in), 0, None, ctypes.byref(sz_in))
+        if sz_in.value > 0:
+            addr_nm = AudioObjectPropertyAddress(fourcc("lnam"), fourcc("glob"), 0)
+            nm_ptr = ctypes.c_void_p()
+            sz_p = ctypes.c_uint32(ctypes.sizeof(ctypes.c_void_p))
+            ca.AudioObjectGetPropertyData(d, ctypes.byref(addr_nm), 0, None, ctypes.byref(sz_p), ctypes.byref(nm_ptr))
+            name = get_cfstr(nm_ptr.value)
+            addr_uid = AudioObjectPropertyAddress(fourcc("uid "), fourcc("glob"), 0)
+            uid_ptr = ctypes.c_void_p()
+            sz_u = ctypes.c_uint32(ctypes.sizeof(ctypes.c_void_p))
+            ca.AudioObjectGetPropertyData(d, ctypes.byref(addr_uid), 0, None, ctypes.byref(sz_u), ctypes.byref(uid_ptr))
+            input_devs.append((d, name, uid_ptr.value))
+            # Reset nominal sample rate to 48000 Hz if left at 96000 Hz by avfoundation
+            addr_sr = AudioObjectPropertyAddress(fourcc("nsrt"), fourcc("glob"), 0)
+            sr = ctypes.c_double(0.0)
+            sz_sr = ctypes.c_uint32(8)
+            ca.AudioObjectGetPropertyData(d, ctypes.byref(addr_sr), 0, None, ctypes.byref(sz_sr), ctypes.byref(sr))
+            if sr.value > 48000.0:
+                new_sr = ctypes.c_double(48000.0)
+                ca.AudioObjectSetPropertyData(d, ctypes.byref(addr_sr), 0, None, 8, ctypes.byref(new_sr))
+
+    clean_req = (mic_device or "").strip().lstrip(":")
+    if clean_req and clean_req not in ("default", ""):
+        if clean_req.isdigit():
+            idx = int(clean_req)
+            if 0 <= idx < len(input_devs):
+                selected_uid_ptr = input_devs[idx][2]
+        else:
+            for _d, nm, u_ptr in input_devs:
+                if clean_req.lower() in nm.lower():
+                    selected_uid_ptr = u_ptr
+                    break
+except Exception:
+    pass
+
+af_args = ["-af", af_str] if af_str else []
+ff_cmd = [
+    ffmpeg_bin,
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-y",
+    "-fflags",
+    "+nobuffer",
+    "-flags",
+    "low_delay",
+    "-f",
+    "s16le",
+    "-ar",
+    "16000",
+    "-ac",
+    "1",
+    "-i",
+    "pipe:0",
+    *af_args,
+    "-ac",
+    "1",
+    "-ar",
+    "16000",
+    "-c:a",
+    "pcm_s16le",
+    "-flush_packets",
+    "1",
+    out_wav,
+]
+ff_proc = subprocess.Popen(ff_cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+
+
+class AudioStreamBasicDescription(ctypes.Structure):
+    _fields_ = [
+        ("mSampleRate", ctypes.c_double),
+        ("mFormatID", ctypes.c_uint32),
+        ("mFormatFlags", ctypes.c_uint32),
+        ("mBytesPerPacket", ctypes.c_uint32),
+        ("mFramesPerPacket", ctypes.c_uint32),
+        ("mBytesPerFrame", ctypes.c_uint32),
+        ("mChannelsPerFrame", ctypes.c_uint32),
+        ("mBitsPerChannel", ctypes.c_uint32),
+        ("mReserved", ctypes.c_uint32),
+    ]
+
+
+class AudioQueueBuffer(ctypes.Structure):
+    _fields_ = [
+        ("mAudioDataBytesCapacity", ctypes.c_uint32),
+        ("mAudioData", ctypes.c_void_p),
+        ("mAudioDataByteSize", ctypes.c_uint32),
+        ("mUserData", ctypes.c_void_p),
+        ("mPacketDescriptionCapacity", ctypes.c_uint32),
+        ("mPacketDescriptions", ctypes.c_void_p),
+        ("mPacketDescriptionCount", ctypes.c_uint32),
+    ]
+
+
+AudioQueueInputCallback = ctypes.CFUNCTYPE(
+    None,
+    ctypes.c_void_p,
+    ctypes.c_void_p,
+    ctypes.POINTER(AudioQueueBuffer),
+    ctypes.c_void_p,
+    ctypes.c_uint32,
+    ctypes.c_void_p,
+)
+
+stop_evt = threading.Event()
+
+
+def input_callback(inUserData, inAQ, inBuffer, inStartTime, inNumPackets, inPacketDesc):
+    if stop_evt.is_set():
+        return
+    buf = inBuffer.contents
+    if buf.mAudioDataByteSize > 0 and ff_proc.stdin:
+        raw = ctypes.string_at(buf.mAudioData, buf.mAudioDataByteSize)
+        try:
+            ff_proc.stdin.write(raw)
+            ff_proc.stdin.flush()
+        except Exception:
+            stop_evt.set()
+            return
+    if not stop_evt.is_set():
+        at.AudioQueueEnqueueBuffer(inAQ, inBuffer, 0, None)
+
+
+cb = AudioQueueInputCallback(input_callback)
+fmt = AudioStreamBasicDescription(
+    mSampleRate=16000.0,
+    mFormatID=0x6C70636D,
+    mFormatFlags=0x0C,
+    mBytesPerPacket=2,
+    mFramesPerPacket=1,
+    mBytesPerFrame=2,
+    mChannelsPerFrame=1,
+    mBitsPerChannel=16,
+    mReserved=0,
+)
+
+q = ctypes.c_void_p()
+res = at.AudioQueueNewInput(ctypes.byref(fmt), cb, None, None, None, 0, ctypes.byref(q))
+if res != 0:
+    sys.exit(res)
+
+if selected_uid_ptr:
+    uid_val = ctypes.c_void_p(selected_uid_ptr)
+    at.AudioQueueSetProperty(q, fourcc("aqcd"), ctypes.byref(uid_val), ctypes.sizeof(ctypes.c_void_p))
+
+bufs = (ctypes.POINTER(AudioQueueBuffer) * 16)()
+for i in range(16):
+    at.AudioQueueAllocateBuffer(q, 3200, ctypes.byref(bufs[i]))
+    at.AudioQueueEnqueueBuffer(q, bufs[i], 0, None)
+
+
+def _sig_handler(_signum, _frame):
+    stop_evt.set()
+
+
+signal.signal(signal.SIGINT, _sig_handler)
+signal.signal(signal.SIGTERM, _sig_handler)
+
+
+def _stdin_watcher():
+    try:
+        for line in sys.stdin:
+            if "q" in line.lower():
+                stop_evt.set()
+                break
+    except Exception:
+        pass
+    stop_evt.set()
+
+
+threading.Thread(target=_stdin_watcher, daemon=True).start()
+
+res = at.AudioQueueStart(q, None)
+if res != 0:
+    sys.exit(res)
+
+while not stop_evt.wait(0.05):
+    if ff_proc.poll() is not None:
+        break
+
+at.AudioQueueStop(q, True)
+at.AudioQueueDispose(q, True)
+if ff_proc.stdin:
+    try:
+        ff_proc.stdin.close()
+    except Exception:
+        pass
+try:
+    ff_proc.wait(timeout=3)
+except Exception:
+    ff_proc.kill()
+"""
+
+
+def start_mic_record_process(
+    ffmpeg_bin: str,
+    out_wav: Path,
+    env: dict[str, str] | None = None,
+    mic_device: str = "default",
+    gain_db: float = 0.0,
+    auto_gain: bool = False,
+    platform_str: str | None = None,
+) -> subprocess.Popen[str]:
+    """Start a microphone capture subprocess (using multi-buffered CoreAudio AudioQueue on macOS to prevent avfoundation packet drops/2.25x speed)."""
+    plat = platform_str if platform_str is not None else sys.platform
+    if plat == "darwin" and sys.platform == "darwin":
+        af_str = build_mic_audio_filter(gain_db=gain_db, auto_gain=auto_gain)
+        if not af_str:
+            af_str = "highpass=f=80,lowpass=f=7600,afftdn=nf=-25"
+        cfg = {
+            "ffmpeg_bin": ffmpeg_bin,
+            "out_wav": str(out_wav),
+            "af_str": af_str,
+            "mic_device": mic_device,
+        }
+        return subprocess.Popen(
+            [sys.executable, "-u", "-c", MACOS_COREAUDIO_RECORD_RUNNER_CODE, json.dumps(cfg)],
+            env=env,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+    cmd = build_ffmpeg_mic_record_cmd(
+        ffmpeg_bin,
+        out_wav,
+        platform_str=plat,
+        env=env,
+        mic_device=mic_device,
+        gain_db=gain_db,
+        auto_gain=auto_gain,
+    )
+    return subprocess.Popen(
+        cmd,
+        env=env,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
 
 
 def build_ffmpeg_mic_record_cmd(
@@ -1191,6 +2288,9 @@ def build_ffmpeg_mic_record_cmd(
     platform_str: str | None = None,
     os_name: str | None = None,
     env: dict[str, str] | None = None,
+    mic_device: str = "default",
+    gain_db: float = 0.0,
+    auto_gain: bool = False,
 ) -> list[str]:
     """Build cross-platform 16kHz mono PCM16 ffmpeg microphone capture command for macOS, Windows, Linux, and Termux.
 
@@ -1209,15 +2309,25 @@ def build_ffmpeg_mic_record_cmd(
     """
     plat = platform_str if platform_str is not None else sys.platform
     os_n = os_name if os_name is not None else os.name
+    clean_dev = (mic_device or "").strip()
+    af_str = build_mic_audio_filter(gain_db=gain_db, auto_gain=auto_gain)
+    af_args = ["-af", af_str] if af_str else []
 
     if plat == "darwin":
+        if not clean_dev or clean_dev in ("default", ":default"):
+            mac_input = ":default"
+        elif clean_dev.startswith(":"):
+            mac_input = clean_dev
+        else:
+            mac_input = f":{clean_dev}"
         return [
             ffmpeg_bin,
             "-y",
             "-f",
             "avfoundation",
             "-i",
-            ":default",
+            mac_input,
+            *af_args,
             "-ac",
             "1",
             "-ar",
@@ -1229,7 +2339,9 @@ def build_ffmpeg_mic_record_cmd(
 
     if os_n == "nt" or plat.startswith("win"):
         dshow_input = "audio=default"
-        if os.name == "nt" and Path(ffmpeg_bin).is_file():
+        if clean_dev and clean_dev not in ("default", ":default"):
+            dshow_input = clean_dev if clean_dev.startswith("audio=") else f"audio={clean_dev}"
+        elif os.name == "nt" and Path(ffmpeg_bin).is_file():
             try:
                 proc = subprocess.run(
                     [ffmpeg_bin, "-hide_banner", "-list_devices", "true", "-f", "dshow", "-i", "dummy"],
@@ -1256,6 +2368,7 @@ def build_ffmpeg_mic_record_cmd(
             "dshow",
             "-i",
             dshow_input,
+            *af_args,
             "-ac",
             "1",
             "-ar",
@@ -1270,13 +2383,15 @@ def build_ffmpeg_mic_record_cmd(
         linux_fmt = "pulse"
     elif sys.platform.startswith("linux") and not shutil.which("pactl") and not os.environ.get("PULSE_SERVER"):
         linux_fmt = "alsa"
+    lin_input = clean_dev if (clean_dev and clean_dev not in (":default",)) else "default"
     return [
         ffmpeg_bin,
         "-y",
         "-f",
         linux_fmt,
         "-i",
-        "default",
+        lin_input,
+        *af_args,
         "-ac",
         "1",
         "-ar",
@@ -1548,7 +2663,94 @@ MODEL_PROFILES: dict[str, dict[str, Any]] = {
 }
 
 
-def detect_hardware_resources(target_dir: Path | None = None) -> dict[str, Any]:
+def recommend_models_for_language(
+    language: str = "no",
+    ram_gb: float = 16.0,
+    profile: str = "recommended",
+    prefs: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Recommend (whisper_model, ollama_model) for the given audio language, RAM size, and profile.
+
+    >>> rec_no = recommend_models_for_language("no", ram_gb=16.0, profile="recommended")
+    >>> (rec_no["whisper_model"], rec_no["ollama_model"])
+    ('NbAiLab/nb-whisper-small', 'gemma4:e4b')
+    >>> rec_en = recommend_models_for_language("en", ram_gb=16.0, profile="recommended")
+    >>> (rec_en["whisper_model"], rec_en["ollama_model"])
+    ('large-v3-turbo', 'gemma4:e4b')
+    >>> rec_en_8g = recommend_models_for_language("en", ram_gb=8.0, profile="light")
+    >>> (rec_en_8g["whisper_model"], rec_en_8g["ollama_model"])
+    ('small', 'llama3.2:latest')
+    """
+    norm_lang = normalize_audio_language(language)
+    eff_prof = profile if profile in ("recommended", "light", "standard", "fast", "quality", "custom") else "recommended"
+    if ram_gb < 11.5 and eff_prof == "recommended":
+        eff_prof = "light"
+
+    if prefs and isinstance(prefs.get("language_models"), Mapping):
+        saved = prefs["language_models"].get(norm_lang)
+        if isinstance(saved, Mapping) and saved.get("whisper_model") and saved.get("ollama_model"):
+            if profile == "custom" or saved.get("profile") == eff_prof:
+                sw = str(saved["whisper_model"])
+                so = str(saved["ollama_model"])
+                return {
+                    "language": norm_lang,
+                    "profile": str(saved.get("profile", eff_prof)),
+                    "whisper_model": sw,
+                    "ollama_model": so,
+                    "default_whisper": sw,
+                    "default_ollama": so,
+                    "whisper_choices": (
+                        [
+                            "NbAiLab/nb-whisper-large",
+                            "NbAiLab/nb-whisper-medium",
+                            "NbAiLab/nb-whisper-small",
+                            "UlrikKoren/nb-whisper-large-distil-turbo-beta-ct2",
+                        ]
+                        if is_norwegian_language(norm_lang)
+                        else ["large-v3-turbo", "large-v3", "medium", "small", "base"]
+                    ),
+                }
+
+    if is_norwegian_language(norm_lang):
+        choices = [
+            "NbAiLab/nb-whisper-large",
+            "NbAiLab/nb-whisper-medium",
+            "NbAiLab/nb-whisper-small",
+            "UlrikKoren/nb-whisper-large-distil-turbo-beta-ct2",
+        ]
+        if eff_prof == "light":
+            w_mod, o_mod = "NbAiLab/nb-whisper-small", "llama3.2:latest"
+        elif eff_prof == "fast":
+            w_mod, o_mod = "UlrikKoren/nb-whisper-large-distil-turbo-beta-ct2", "gemma4:e4b"
+        elif eff_prof in ("quality", "heavy"):
+            w_mod, o_mod = "NbAiLab/nb-whisper-large", "gemma4:e4b"
+        elif eff_prof == "standard":
+            w_mod, o_mod = "NbAiLab/nb-whisper-medium", "gemma4:e4b"
+        else:
+            w_mod, o_mod = "NbAiLab/nb-whisper-small", "gemma4:e4b"
+    else:
+        choices = ["large-v3-turbo", "large-v3", "medium", "small", "base"]
+        if eff_prof == "light":
+            w_mod, o_mod = "small", "llama3.2:latest"
+        elif eff_prof in ("quality", "heavy"):
+            w_mod, o_mod = "large-v3", "gemma4:e4b"
+        elif eff_prof == "standard":
+            w_mod, o_mod = ("large-v3-turbo" if ram_gb >= 11.5 else "small"), "gemma4:e4b"
+        else:
+            w_mod, o_mod = ("large-v3-turbo" if ram_gb >= 11.5 else "small"), "gemma4:e4b"
+
+    return {
+        "language": norm_lang,
+        "profile": eff_prof,
+        "whisper_model": w_mod,
+        "ollama_model": o_mod,
+        "default_whisper": w_mod,
+        "default_ollama": o_mod,
+        "whisper_choices": choices,
+    }
+
+
+def detect_hardware_resources(target_dir: Path | None = None, language: str = "no") -> dict[str, Any]:
     """Detect local RAM, CPU brand/cores, GPU VRAM, free disk space, and recommended model profile.
 
     >>> hw = detect_hardware_resources()
@@ -1691,6 +2893,7 @@ def detect_hardware_resources(target_dir: Path | None = None) -> dict[str, Any]:
         tier = "high" if (ram_gb >= 22.0 or gpu_vram_gb >= 10.0) else "standard"
 
     rec_prof = MODEL_PROFILES[rec_profile_key]
+    lang_rec = recommend_models_for_language(language, ram_gb=ram_gb, profile=rec_profile_key)
     hw_summary = f"{cpu_brand} ({cpu_cores} kjerner), {ram_gb:.0f} GB RAM"
     if gpu_name:
         hw_summary += f", GPU: {gpu_name} ({gpu_vram_gb:.0f} GB VRAM)"
@@ -1709,8 +2912,8 @@ def detect_hardware_resources(target_dir: Path | None = None) -> dict[str, Any]:
         "tier": tier,
         "hardware_summary": hw_summary,
         "recommended_profile": rec_profile_key,
-        "recommended_whisper": rec_prof["whisper_model"],
-        "recommended_ollama": rec_prof["ollama_model"],
+        "recommended_whisper": lang_rec["whisper_model"],
+        "recommended_ollama": lang_rec["ollama_model"],
         "recommended_label": rec_prof["label"],
         "profiles": MODEL_PROFILES,
         "warnings": warnings,
@@ -1721,6 +2924,7 @@ def evaluate_model_resource_fit(
     whisper_model: str,
     ollama_model: str,
     hw: dict[str, Any] | None = None,
+    language: str = "no",
 ) -> dict[str, Any]:
     """Estimate RAM and disk needs for (whisper_model, ollama_model) and warn if hardware is insufficient.
 
@@ -1733,7 +2937,7 @@ def evaluate_model_resource_fit(
     'critical'
     """
     if hw is None:
-        hw = detect_hardware_resources()
+        hw = detect_hardware_resources(language=language)
 
     w_low = whisper_model.lower()
     if any(k in w_low for k in ("tiny", "base", "small")):
@@ -1769,9 +2973,20 @@ def evaluate_model_resource_fit(
     est_total_disk = round(est_asr_disk + est_llm_disk, 1)
     ram_gb = float(hw.get("ram_gb", 16.0))
     disk_free_gb = float(hw.get("disk_free_gb", 20.0))
+    lang_rec = recommend_models_for_language(language, ram_gb=ram_gb)
+    rec_w = str(hw.get("recommended_whisper") or lang_rec["whisper_model"])
+    rec_o = str(hw.get("recommended_ollama") or lang_rec["ollama_model"])
 
     issues: list[str] = []
     level = "ok"
+
+    norm_lang = normalize_audio_language(language)
+    if not is_norwegian_language(norm_lang) and "nb-whisper" in w_low:
+        level = "warning"
+        rec_w = lang_rec["whisper_model"]
+        issues.append(
+            f"Merk: «{whisper_model}» er finjustert kun for norsk. For talespråk «{norm_lang}» anbefales flerspråklig «{rec_w}»."
+        )
 
     if ram_gb < 7.5:
         level = "critical"
@@ -1782,10 +2997,11 @@ def evaluate_model_resource_fit(
         level = "critical"
         issues.append(
             f"Valgt modellkombinasjon krever ~{est_peak_ram:.1f} GB RAM på topp, men maskinen har kun {ram_gb:.0f} GB RAM. "
-            f"Klikk «Bruk anbefalt» ({hw.get('recommended_whisper')} + {hw.get('recommended_ollama')}) for å unngå minnekrasj."
+            f"Klikk «Bruk anbefalt» ({rec_w} + {rec_o}) for å unngå minnekrasj."
         )
     elif est_peak_ram > ram_gb * 0.72:
-        level = "warning"
+        if level == "ok":
+            level = "warning"
         issues.append(
             f"Valgte modeller bruker ~{est_peak_ram:.1f} GB av {ram_gb:.0f} GB RAM. Lukk nettleser og tunge apper før start, "
             "eller velg en lettere profil."
@@ -1806,13 +3022,14 @@ def evaluate_model_resource_fit(
     return {
         "ok": level != "critical",
         "level": level,
+        "status": level,
         "est_peak_ram_gb": est_peak_ram,
         "est_disk_gb": est_total_disk,
         "ram_gb": ram_gb,
         "disk_free_gb": disk_free_gb,
         "message": msg,
-        "recommended_whisper": hw.get("recommended_whisper", "NbAiLab/nb-whisper-small"),
-        "recommended_ollama": hw.get("recommended_ollama", "gemma4:e4b"),
+        "recommended_whisper": rec_w,
+        "recommended_ollama": rec_o,
     }
 
 
@@ -2168,6 +3385,16 @@ def infer_speaker_names_via_api(
         "sekretær",
         "referent",
         "regnskap",
+        "my name",
+        "i am ",
+        "i'm ",
+        "chair",
+        "welcome",
+        "role",
+        "title",
+        "representing",
+        "treasurer",
+        "secretary",
         *name_tokens,
     )
 
@@ -2501,27 +3728,86 @@ def generate_notes_via_api(
     progress_fn: Callable[[int, str], None] | None = None,
     note_mode: str = "mote",
     manual_notes_text: str = "",
+    language: str = "no",
 ) -> str:
     """Use Ollama HTTP /api/chat with streaming to generate meeting minutes or lecture notes."""
     detected_list = ", ".join(sorted(set(speaker_map.values())))
     context_lines: list[str] = []
     if meeting_title.strip():
-        context_lines.append(f"Tittel og dato: {meeting_title.strip()}")
+        context_lines.append(f"Tittel og dato / Title & Date: {meeting_title.strip()}")
     if known_names_hint.strip():
-        context_lines.append(f"Oppgitte personer (navn og tittel/rolle): {known_names_hint.strip()}")
+        context_lines.append(f"Oppgitte personer / Participants: {known_names_hint.strip()}")
     if detected_list:
-        context_lines.append(f"Identifiserte stemmer i transkripsjonen: {detected_list}")
+        context_lines.append(f"Identifiserte stemmer / Identified voices: {detected_list}")
     if agenda_text.strip():
-        context_lines.append(f"Agenda / Lysbilder / Kontekst:\n{agenda_text.strip()}")
+        context_lines.append(f"Agenda / Slides / Context:\n{agenda_text.strip()}")
     if manual_notes_text.strip():
         context_lines.append(
-            "Manuelle møtenotater / referat-utkast (AUTORITATIV FASIT for korrekte navn, stavemåter, saksnummer, "
-            "hvem som hadde ordet/ansvar i enkeltsaker, vedtak og aksjonspunkter):\n"
+            "Manuelle møtenotater / Draft notes (AUTHORITATIVE source for names, roles, decisions, and action items):\n"
             f"{manual_notes_text.strip()}"
         )
     context_block = "\n".join(context_lines)
 
-    if note_mode == "foredrag":
+    norm_lang = normalize_audio_language(language)
+    if norm_lang == "auto":
+        norm_lang = str(detect_text_language(transcript[:2500]).get("detected_language") or "no")
+
+    is_no = is_norwegian_language(norm_lang)
+    lang_name_en = get_language_display_name(norm_lang, "en").split("(")[0].strip()
+
+    if not is_no:
+        lang_instruction = (
+            "Write in clear, professional English."
+            if norm_lang == "en"
+            else f"Write the entire document and all section headings in {lang_name_en} ({norm_lang})."
+        )
+        if note_mode == "foredrag":
+            system_prompt = (
+                "You are an expert academic and technical editor. Output ONLY the structured lecture notes in clean Markdown. "
+                "Do NOT include internal reasoning, introductions, or <think> blocks. "
+                f"The recording is a lecture, presentation, or single-speaker talk. {lang_instruction}"
+            )
+            user_prompt = (
+                "Create a comprehensive, well-structured summary of the lecture/presentation based on the context and timestamped transcript below.\n\n"
+                f"--- CONTEXT ---\n{context_block}\n--- END CONTEXT ---\n\n"
+                "Use this structure (translated into the target language if not English):\n"
+                "# Lecture Notes and Key Takeaways\n\n"
+                "## 1. Overview and Core Message\n"
+                "(Title/date, speaker and role if mentioned, and the central thesis summarized in one paragraph)\n\n"
+                "## 2. Key Takeaways and Insights\n"
+                "(Bullet list of the most important findings, conclusions, and lessons from the talk)\n\n"
+                "## 3. Thematic Breakdown\n"
+                "(Structured by main topics with subheadings, key arguments, concrete examples, figures/facts, and timestamps)\n\n"
+                "## 4. Key Concepts, Models, or Tools\n"
+                "(Concise explanations of important terms, methods, technologies, or references covered)\n\n"
+                "## 5. Recommendations and Further Reflection\n"
+                "(Practical advice, open questions, or suggested follow-up mentioned in the talk)\n\n"
+                f"--- TRANSCRIPT START ---\n{transcript}\n--- TRANSCRIPT END ---"
+            )
+        else:
+            system_prompt = (
+                "You are a professional meeting secretary. Output ONLY the meeting minutes in clean Markdown. "
+                "Do NOT include internal reasoning, introductions, or <think> blocks. "
+                f"{lang_instruction} Organize the minutes by the agenda/topics and use the participants' real names and titles throughout."
+            )
+            user_prompt = (
+                "Create thorough, structured meeting minutes based on the context and timestamped transcript below.\n\n"
+                f"--- MEETING CONTEXT ---\n{context_block}\n--- END CONTEXT ---\n\n"
+                "Use this structure (translated into the target language if not English):\n"
+                "# Meeting Minutes\n\n"
+                "## 1. Meeting Overview and Executive Summary\n"
+                "(Title, date, purpose of the meeting, and main conclusions)\n\n"
+                "## 2. Participants and Roles\n"
+                "(List of participants with full name, title/role, and area of responsibility)\n\n"
+                "## 3. Agenda Items and Discussion\n"
+                "(Structured by agenda items/topics with subheadings, viewpoints attributed by name, and timestamps)\n\n"
+                "## 4. Decisions\n"
+                "(Concrete decisions and agreements reached)\n\n"
+                "## 5. Action Items\n"
+                "(Markdown table with columns: Owner | Task | Deadline / Status)\n\n"
+                f"--- TRANSCRIPT START ---\n{transcript}\n--- TRANSCRIPT END ---"
+            )
+    elif note_mode == "foredrag":
         system_prompt = (
             "Du er en dyktig norsk fagredaktør og notatskriver. Du skriver kun selve oppsummeringen i ren Markdown. "
             "IKKE inkluder egen tankeprosess, introduksjoner eller <think>-blokker. "
@@ -2666,6 +3952,7 @@ def main() -> int:
 
     if "asr" in stages or not asr_json.is_file():
         print("STAGE:ASR:START", flush=True)
+        eff_lang = None if (not language or str(language).lower() == "auto") else language
         asr_options = {
             "beam_size": 5,
             "patience": 1.0,
@@ -2684,16 +3971,18 @@ def main() -> int:
             model_name,
             device=device,
             compute_type=compute_type,
-            language=language,
+            language=eff_lang,
             asr_options=asr_options,
         )
         result = model.transcribe(
             get_audio(),
             batch_size=8,
-            language=language,
+            language=eff_lang,
             print_progress=True,
         )
-        result["language"] = language
+        detected_lang = str(result.get("language") or eff_lang or "no")
+        result["language"] = detected_lang
+        print(f"STAGE:DETECTED_LANG:{detected_lang}", flush=True)
         save_atomic_json(asr_json, result)
         print("STAGE:ASR:DONE", flush=True)
         del model
@@ -2706,7 +3995,8 @@ def main() -> int:
         if result is None:
             result = json.loads(asr_json.read_text(encoding="utf-8"))
         if result.get("segments"):
-            align_lang = result.get("language") or language
+            raw_align_lang = result.get("language") or language
+            align_lang = "no" if str(raw_align_lang).lower() in ("auto", "") else str(raw_align_lang)
             align_model_name = None
             if align_lang in ("no", "nb", "nn") and any(
                 tag in model_name.lower() for tag in ("small", "base", "tiny")
@@ -2781,6 +4071,7 @@ import warnings
 
 warnings.filterwarnings("ignore")
 
+from faster_whisper import WhisperModel
 import torch
 import whisperx
 from whisperx.audio import load_audio
@@ -2789,8 +4080,10 @@ def main() -> int:
     cfg = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
     device = cfg.get("device") or ("cuda" if torch.cuda.is_available() else "cpu")
     compute_type = cfg.get("compute_type", "int8")
-    language = cfg.get("language") or "no"
+    raw_lang = cfg.get("language") or "no"
+    eff_lang = None if str(raw_lang).lower() in ("auto", "") else str(raw_lang)
     model_name = cfg["model"]
+    detect_lang_model = cfg.get("detect_lang_model") or ""
     initial_prompt = cfg.get("initial_prompt") or None
 
     asr_options = {
@@ -2810,9 +4103,10 @@ def main() -> int:
         model_name,
         device=device,
         compute_type=compute_type,
-        language=language,
+        language=eff_lang,
         asr_options=asr_options,
     )
+    det_fw_model = None
     print("LIVE_WORKER:READY", flush=True)
 
     for raw_line in sys.stdin:
@@ -2825,22 +4119,65 @@ def main() -> int:
             req = json.loads(line)
             wav_path = req["wav_path"]
             audio = load_audio(wav_path)
-            res = model.transcribe(
-                audio,
-                batch_size=4,
-                language=language,
-                print_progress=False,
-            )
-            segs = res.get("segments", [])
-            text = " ".join(
-                str(s.get("text", "")).strip()
-                for s in segs
-                if isinstance(s, dict) and str(s.get("text", "")).strip()
-            ).strip()
+            detected_lang = ""
+            lang_prob = 0.0
+            if req.get("detect_language") or eff_lang is None:
+                try:
+                    if "nb-whisper" not in model_name.lower() and hasattr(model, "model") and hasattr(model.model, "detect_language"):
+                        d_lang, d_prob, _ = model.model.detect_language(audio)
+                        detected_lang = str(d_lang)
+                        lang_prob = round(float(d_prob), 3)
+                    elif detect_lang_model:
+                        if det_fw_model is None:
+                            det_fw_model = WhisperModel(detect_lang_model, device=device, compute_type=compute_type)
+                        d_lang, d_prob, _ = det_fw_model.detect_language(audio)
+                        detected_lang = str(d_lang)
+                        lang_prob = round(float(d_prob), 3)
+                except Exception:
+                    pass
+
+            if req.get("only_detect_language"):
+                out_det = {
+                    "start": req.get("start", 0.0),
+                    "end": req.get("end", 0.0),
+                    "text": "",
+                    "detected_language": detected_lang or (eff_lang or "no"),
+                    "language_probability": lang_prob,
+                }
+                print("LIVE_RESULT:" + json.dumps(out_det, ensure_ascii=False), flush=True)
+                continue
+
+            if (
+                detected_lang
+                and detected_lang not in ("no", "nb", "nn")
+                and lang_prob >= 0.70
+                and "nb-whisper" in model_name.lower()
+                and det_fw_model is not None
+            ):
+                segs_iter, _ = det_fw_model.transcribe(audio, language=detected_lang, beam_size=1)
+                text = " ".join(s.text.strip() for s in segs_iter if s.text.strip()).strip()
+            else:
+                res = model.transcribe(
+                    audio,
+                    batch_size=4,
+                    language=eff_lang,
+                    print_progress=False,
+                )
+                segs = res.get("segments", [])
+                text = " ".join(
+                    str(s.get("text", "")).strip()
+                    for s in segs
+                    if isinstance(s, dict) and str(s.get("text", "")).strip()
+                ).strip()
+                if not detected_lang and res.get("language"):
+                    detected_lang = str(res.get("language"))
+
             out = {
                 "start": req.get("start", 0.0),
                 "end": req.get("end", 0.0),
                 "text": text,
+                "detected_language": detected_lang,
+                "language_probability": lang_prob,
             }
             print("LIVE_RESULT:" + json.dumps(out, ensure_ascii=False), flush=True)
         except Exception as exc:
@@ -2858,8 +4195,39 @@ if __name__ == "__main__":
 """
 
 
-def pick_live_whisper_model(preferred_model: str = "NbAiLab/nb-whisper-small") -> str:
-    """Return a cached Whisper model for fast coarse real-time transcription, preferring smaller cached models."""
+def pick_multilingual_whisper_model(preferred_model: str = "") -> str:
+    """Return a cached multilingual Whisper model (non-nb-whisper) for language detection or international speech."""
+    hub_dir = HF_CACHE_DIR / "hub"
+    repo_map = {
+        "large-v3-turbo": "models--mobiuslabsgmbh--faster-whisper-large-v3-turbo",
+        "small": "models--Systran--faster-whisper-small",
+        "base": "models--Systran--faster-whisper-base",
+        "tiny": "models--Systran--faster-whisper-tiny",
+        "medium": "models--Systran--faster-whisper-medium",
+        "large-v3": "models--Systran--faster-whisper-large-v3",
+    }
+    if preferred_model and "nb-whisper" not in preferred_model.lower():
+        folder = repo_map.get(preferred_model, "models--" + preferred_model.replace("/", "--"))
+        if hub_dir.is_dir() and (hub_dir / folder).is_dir() and any((hub_dir / folder).glob("snapshots/*/*")):
+            return preferred_model
+
+    if hub_dir.is_dir():
+        for short_name, folder_name in repo_map.items():
+            model_dir = hub_dir / folder_name
+            if model_dir.is_dir() and any(model_dir.glob("snapshots/*/*")):
+                return short_name
+    if preferred_model and "nb-whisper" not in preferred_model.lower():
+        return preferred_model
+    return "small"
+
+
+def pick_live_whisper_model(
+    preferred_model: str = "NbAiLab/nb-whisper-small",
+    language: str = "no",
+) -> str:
+    """Return a cached Whisper model for fast coarse real-time transcription, respecting audio language."""
+    if not is_norwegian_language(language):
+        return pick_multilingual_whisper_model(preferred_model)
     hub_dir = HF_CACHE_DIR / "hub"
     candidates = [
         "NbAiLab/nb-whisper-tiny",
@@ -2879,6 +4247,121 @@ def pick_live_whisper_model(preferred_model: str = "NbAiLab/nb-whisper-small") -
     return preferred_model
 
 
+def detect_audio_language(
+    input_path: Path,
+    max_seconds: float = 20.0,
+    sample_seconds: float | None = None,
+    log_fn: Callable[[str], None] | None = None,
+) -> dict[str, Any]:
+    """Detect spoken language from an audio/video file or existing transcript file."""
+    log = log_fn or (lambda _msg: None)
+    eff_seconds = float(sample_seconds) if sample_seconds is not None else float(max_seconds)
+    base_dir = Path(__file__).resolve().parent
+    resolved = resolve_moved_audio_path(input_path, base_dir)
+    if not resolved.is_file():
+        return {"ok": False, "error": f"Fant ikke filen: {input_path}"}
+
+    hw = detect_hardware_resources(resolved.parent)
+    ram_gb = float(hw.get("ram_gb", 16.0))
+    prefs = load_user_preferences()
+
+    if is_transcript_file(resolved):
+        turns, _ = load_turns_from_transcript_file(resolved)
+        sample_txt = " ".join(t["text"] for t in turns[:40]) if turns else extract_context_from_file(resolved)[:2500]
+        res_txt = detect_text_language(sample_txt)
+        det_code = str(res_txt.get("detected_language", "no"))
+        conf = float(res_txt.get("confidence", 0.8))
+        rec = recommend_models_for_language(det_code, ram_gb=ram_gb, prefs=prefs)
+        return {
+            "ok": True,
+            "detected_language": det_code,
+            "confidence": conf,
+            "language_probability": conf,
+            "label_no": get_language_display_name(det_code, "no"),
+            "label_en": get_language_display_name(det_code, "en"),
+            "recommended_whisper": rec["whisper_model"],
+            "recommended_ollama": rec["ollama_model"],
+        }
+
+    env = build_runtime_env()
+    ffmpeg_bin = ensure_ffmpeg(env, log)
+    multi_model = pick_multilingual_whisper_model()
+    wx_bin = shutil.which("whisperx", path=env["PATH"])
+    if not wx_bin:
+        return {"ok": False, "error": "WhisperX er ikke installert ennå."}
+    wx_py = get_whisperx_python(wx_bin)
+
+    with tempfile.TemporaryDirectory(prefix="steno_lang_det_") as tmp_dir:
+        tmp_path = Path(tmp_dir)
+        conv_wav = tmp_path / "sample_16k.wav"
+        subprocess.run(
+            [
+                ffmpeg_bin,
+                "-y",
+                "-i",
+                str(resolved),
+                "-t",
+                str(max(4.0, min(30.0, float(eff_seconds)))),
+                "-ar",
+                "16000",
+                "-ac",
+                "1",
+                "-c:a",
+                "pcm_s16le",
+                str(conv_wav),
+            ],
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        if not conv_wav.is_file():
+            return {"ok": False, "error": "Kunne ikke lese lydspor fra filen."}
+
+        det_code_script = (
+            "import json, sys, warnings\n"
+            "warnings.filterwarnings('ignore')\n"
+            "from faster_whisper import WhisperModel\n"
+            "from whisperx.audio import load_audio\n"
+            "m = WhisperModel(sys.argv[1], device='cpu', compute_type='int8')\n"
+            "audio = load_audio(sys.argv[2])\n"
+            "lang, prob, _ = m.detect_language(audio)\n"
+            "print('LANG_DET:' + json.dumps({'lang': str(lang), 'prob': round(float(prob), 3)}))\n"
+        )
+        proc = subprocess.run(
+            [wx_py, "-c", det_code_script, multi_model, str(conv_wav)],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        det_lang = "no"
+        det_prob = 0.0
+        for ln in (proc.stdout or "").splitlines():
+            if ln.strip().startswith("LANG_DET:"):
+                data = json.loads(ln.strip()[len("LANG_DET:") :])
+                det_lang = normalize_audio_language(str(data.get("lang", "no")))
+                det_prob = float(data.get("prob", 0.0))
+                break
+
+    rec = recommend_models_for_language(det_lang, ram_gb=ram_gb, prefs=prefs)
+    log(
+        f"==> Språkgjenkjenning ({resolved.name}): {get_language_display_name(det_lang, 'no')} "
+        f"({det_prob * 100:.0f}% sikkerhet) -> anbefalt modell: {rec['whisper_model']}"
+    )
+    return {
+        "ok": True,
+        "detected_language": det_lang,
+        "confidence": det_prob,
+        "language_probability": det_prob,
+        "label_no": get_language_display_name(det_lang, "no"),
+        "label_en": get_language_display_name(det_lang, "en"),
+        "recommended_whisper": rec["whisper_model"],
+        "recommended_ollama": rec["ollama_model"],
+    }
+
+
 class LiveAudioMonitor:
     """Background monitor that tails an active 16kHz mono WAV recording for live dBFS level + coarse ASR."""
 
@@ -2895,8 +4378,8 @@ class LiveAudioMonitor:
         log_fn: Callable[[str], None] | None = None,
     ) -> None:
         self.wav_path = wav_path
-        self.whisper_model = pick_live_whisper_model(whisper_model)
-        self.language = language
+        self.language = normalize_audio_language(language)
+        self.whisper_model = pick_live_whisper_model(whisper_model, language=self.language)
         self.initial_prompt = initial_prompt
         self.chunk_seconds = max(2.0, chunk_seconds)
         self.enable_asr = enable_asr
@@ -2979,6 +4462,7 @@ class LiveAudioMonitor:
                             json.dumps(
                                 {
                                     "model": self.whisper_model,
+                                    "detect_lang_model": pick_multilingual_whisper_model(),
                                     "language": self.language,
                                     "compute_type": "int8",
                                     "initial_prompt": self.initial_prompt,
@@ -3087,14 +4571,19 @@ def run_live_check_on_file(
 
     env = build_runtime_env()
     ffmpeg_bin = ensure_ffmpeg(env, log)
-    eff_model = pick_live_whisper_model(whisper_model)
-    log(f"==> GROV SANNTIDS-LYDSJEKK ({eff_model}, utsnitt på {chunk_seconds:.0f}s, maks {max_seconds:.0f}s): {resolved.name}")
+    norm_lang = normalize_audio_language(language)
+    eff_model = pick_live_whisper_model(whisper_model, language=norm_lang)
+    log(f"==> GROV SANNTIDS-LYDSJEKK ({eff_model}, språk={norm_lang}, utsnitt på {chunk_seconds:.0f}s, maks {max_seconds:.0f}s): {resolved.name}")
 
     sample_rate = 16000
     bytes_per_sec = sample_rate * 2
     chunk_bytes = int(chunk_seconds * bytes_per_sec)
     if chunk_bytes % 2 != 0:
         chunk_bytes += 1
+
+    detected_lang = ""
+    detected_prob = 0.0
+    all_texts: list[str] = []
 
     with tempfile.TemporaryDirectory(prefix="mote_live_file_") as tmp_dir:
         tmp_path = Path(tmp_dir)
@@ -3128,7 +4617,8 @@ def run_live_check_on_file(
             json.dumps(
                 {
                     "model": eff_model,
-                    "language": language,
+                    "detect_lang_model": pick_multilingual_whisper_model(),
+                    "language": norm_lang,
                     "compute_type": "int8",
                     "initial_prompt": initial_prompt,
                 },
@@ -3178,7 +4668,15 @@ def run_live_check_on_file(
                     c_wav = tmp_path / f"c_{idx:04d}.wav"
                     c_wav.write_bytes(build_wav_bytes_from_pcm16(pcm_slice, sample_rate))
                     proc.stdin.write(
-                        json.dumps({"wav_path": str(c_wav), "start": start_s, "end": end_s}) + "\n"
+                        json.dumps(
+                            {
+                                "wav_path": str(c_wav),
+                                "start": start_s,
+                                "end": end_s,
+                                "detect_language": not bool(detected_lang),
+                            }
+                        )
+                        + "\n"
                     )
                     proc.stdin.flush()
                     while True:
@@ -3189,6 +4687,13 @@ def run_live_check_on_file(
                         if r_clean.startswith("LIVE_RESULT:"):
                             payload = json.loads(r_clean[len("LIVE_RESULT:") :])
                             text = sanitize_text(str(payload.get("text", "")))
+                            if text:
+                                all_texts.append(text)
+                            dl = normalize_audio_language(str(payload.get("detected_language", "")))
+                            dp = float(payload.get("language_probability", 0.0) or 0.0)
+                            if dl and dl != "auto" and dp >= detected_prob:
+                                detected_lang = dl
+                                detected_prob = dp
                             break
                     c_wav.unlink(missing_ok=True)
 
@@ -3206,15 +4711,29 @@ def run_live_check_on_file(
             except subprocess.TimeoutExpired:
                 proc.kill()
 
+    if not detected_lang and all_texts:
+        txt_det = detect_text_language(" ".join(all_texts))
+        txt_lang = str(txt_det.get("detected_language", ""))
+        txt_prob = float(txt_det.get("confidence", 0.0) or 0.0)
+        if txt_lang and txt_prob >= 0.55:
+            detected_lang = txt_lang
+            detected_prob = txt_prob
+
     avg_dbfs = round(sum(dbfs_vals) / len(dbfs_vals), 1) if dbfs_vals else -96.0
     good_cnt = statuses.count("godt")
     low_cnt = statuses.count("lavt")
     silent_cnt = statuses.count("stille")
     clip_cnt = statuses.count("hoyt")
+    lang_msg = (
+        f" | Oppdaget språk: {get_language_display_name(detected_lang, 'no')} ({detected_prob * 100:.0f}%)"
+        if detected_lang
+        else ""
+    )
     log(
         f"==> LYDSJEKK OPPSUMMERING: Snitt {avg_dbfs:.1f} dBFS | "
-        f"Godt: {good_cnt} | Lavt: {low_cnt} | Stille: {silent_cnt} | Høyt/klipp: {clip_cnt}"
+        f"Godt: {good_cnt} | Lavt: {low_cnt} | Stille: {silent_cnt} | Høyt/klipp: {clip_cnt}{lang_msg}"
     )
+    recs = recommend_models_for_language(detected_lang or norm_lang)
     return {
         "ok": True,
         "chunks": len(statuses),
@@ -3224,6 +4743,11 @@ def run_live_check_on_file(
         "clip_chunks": clip_cnt,
         "avg_rms_dbfs": avg_dbfs,
         "lines": lines_out,
+        "detected_language": detected_lang,
+        "language_probability": round(detected_prob, 3),
+        "detected_label_no": get_language_display_name(detected_lang, "no") if detected_lang else "",
+        "detected_label_en": get_language_display_name(detected_lang, "en") if detected_lang else "",
+        "recommended_whisper": recs["default_whisper"],
     }
 
 
@@ -3232,15 +4756,18 @@ def get_checkpoint_status_dict(
     input_path: Path,
     html_name: str = "",
     notes_name: str = "",
+    notes_html_name: str = "",
 ) -> dict[str, Any]:
-    """Return checkpoint completion status for stages 1..5."""
+    """Return checkpoint completion status for stages 1..5 and output file existence."""
     ckpt_dir = get_checkpoint_dir(out_dir, input_path)
     is_trans = is_transcript_file(input_path)
     stem = clean_base_stem(input_path)
     eff_html = html_name.strip() or f"{stem}_transkripsjon.html"
     eff_notes = notes_name.strip() or f"{stem}_referat.md"
+    eff_notes_html = notes_html_name.strip() or f"{stem}_referat.html"
     html_exists = (out_dir / Path(eff_html).name).is_file()
     notes_exists = (out_dir / Path(eff_notes).name).is_file()
+    notes_html_exists = (out_dir / Path(eff_notes_html).name).is_file()
     return {
         "has_input": input_path.is_file(),
         "is_transcript_input": is_trans,
@@ -3248,9 +4775,140 @@ def get_checkpoint_status_dict(
         "s2_align": is_trans or (ckpt_dir / "2_align.json").is_file(),
         "s3_diarize": is_trans or (ckpt_dir / "3_diarize.json").is_file(),
         "s4_names": (ckpt_dir / "4_speakers.json").is_file() or html_exists,
-        "s5_notes": notes_exists,
+        "s5_notes": notes_exists or notes_html_exists,
+        "html_exists": html_exists,
+        "notes_exists": notes_exists,
+        "notes_html_exists": notes_html_exists,
         "ckpt_dir": str(ckpt_dir),
     }
+
+
+def list_resumable_sessions(
+    out_dir: Path | None = None,
+    base_dir: Path | None = None,
+) -> list[dict[str, Any]]:
+    """Discover existing recordings, transcripts, and checkpointed sessions in out_dir and data/."""
+    audio_exts = {".wav", ".m4a", ".opus", ".mp3", ".ogg", ".flac", ".aac", ".mp4", ".webm"}
+    candidate_dirs: list[Path] = []
+    if out_dir is not None and out_dir.is_dir():
+        candidate_dirs.append(out_dir.resolve())
+    if base_dir is not None:
+        data_root = (base_dir / "data").resolve()
+        if data_root.is_dir():
+            candidate_dirs.append(data_root)
+            for child in sorted(data_root.iterdir()):
+                if child.is_dir() and not child.name.startswith("."):
+                    candidate_dirs.append(child.resolve())
+
+    seen_stems: set[tuple[str, str]] = set()
+    sessions: list[dict[str, Any]] = []
+
+    for folder in candidate_dirs:
+        if not folder.is_dir():
+            continue
+        ckpt_root = folder / ".mote_checkpoints"
+        stems_in_folder: dict[str, Path] = {}
+
+        if ckpt_root.is_dir():
+            for ckpt_sub in ckpt_root.iterdir():
+                if ckpt_sub.is_dir():
+                    stems_in_folder[ckpt_sub.name] = ckpt_sub
+
+        for f in folder.iterdir():
+            if not f.is_file() or f.name.startswith("."):
+                continue
+            low_ext = f.suffix.lower()
+            if low_ext in audio_exts or f.name.endswith("_transkripsjon.html"):
+                st = clean_base_stem(f)
+                if st and st not in stems_in_folder:
+                    stems_in_folder[st] = folder / ".mote_checkpoints" / st
+
+        for stem, ckpt_dir in stems_in_folder.items():
+            key = (str(folder), stem)
+            if key in seen_stems:
+                continue
+            seen_stems.add(key)
+
+            # Locate matching audio file or transcript HTML
+            input_file: Path | None = None
+            for ext in (".wav", ".opus", ".m4a", ".mp3", ".ogg", ".flac", ".mp4", ".webm"):
+                cand = folder / f"{stem}{ext}"
+                if cand.is_file():
+                    input_file = cand
+                    break
+            if input_file is None:
+                for f in folder.iterdir():
+                    if (
+                        f.is_file()
+                        and f.suffix.lower() in audio_exts
+                        and clean_base_stem(f) == stem
+                    ):
+                        input_file = f
+                        break
+            if input_file is None:
+                trans_cand = folder / f"{stem}_transkripsjon.html"
+                if trans_cand.is_file():
+                    input_file = trans_cand
+                elif (ckpt_dir / "4_speakers.json").is_file():
+                    input_file = ckpt_dir / "4_speakers.json"
+                elif (ckpt_dir / "3_diarize.json").is_file():
+                    input_file = ckpt_dir / "3_diarize.json"
+                elif (ckpt_dir / "1_asr.json").is_file():
+                    input_file = ckpt_dir / "1_asr.json"
+
+            if input_file is None or not input_file.is_file():
+                continue
+
+            status = get_checkpoint_status_dict(folder, input_file)
+            completed = sum(
+                1
+                for k in ("s1_asr", "s2_align", "s3_diarize", "s4_names", "s5_notes")
+                if status.get(k)
+            )
+            try:
+                mtime = input_file.stat().st_mtime
+            except OSError:
+                mtime = 0.0
+            if ckpt_dir.is_dir():
+                for cf in ckpt_dir.glob("*.json"):
+                    try:
+                        mtime = max(mtime, cf.stat().st_mtime)
+                    except OSError:
+                        pass
+
+            if not status["s1_asr"]:
+                next_no, next_en = "Steg 1: Rå-transkripsjon (ASR)", "Stage 1: Whisper ASR"
+            elif not status["s2_align"]:
+                next_no, next_en = "Steg 2: Ord-tidsjustering", "Stage 2: Alignment"
+            elif not status["s3_diarize"]:
+                next_no, next_en = "Steg 3: Taler-ID (Pyannote)", "Stage 3: Speaker Diarization"
+            elif not status["s4_names"]:
+                next_no, next_en = "Steg 4: Navn & HTML", "Stage 4: Speaker Names & HTML"
+            elif not status["s5_notes"]:
+                next_no, next_en = "Steg 5: Skriv Referat / Notat", "Stage 5: Generate Minutes/Notes"
+            else:
+                next_no, next_en = "Fullført (kan regenerere referat)", "Completed (can regenerate notes)"
+
+            sessions.append(
+                {
+                    "stem": stem,
+                    "audio_path": str(input_file),
+                    "out_dir": str(folder),
+                    "html_name": f"{stem}_transkripsjon.html",
+                    "notes_name": f"{stem}_referat.md",
+                    "notes_html_name": f"{stem}_referat.html",
+                    "is_transcript_input": is_transcript_file(input_file),
+                    "checkpoints": status,
+                    "completed_count": completed,
+                    "next_stage_no": next_no,
+                    "next_stage_en": next_en,
+                    "updated_ts": mtime,
+                    "updated_str": datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M") if mtime > 0 else "",
+                }
+            )
+
+    sessions.sort(key=lambda s: float(s.get("updated_ts", 0.0)), reverse=True)
+    return sessions
 
 
 def run_pipeline(
@@ -3367,6 +5025,15 @@ def run_pipeline(
         wx_stages.append("diarize")
 
     env = build_runtime_env()
+    norm_lang = normalize_audio_language(language)
+    effective_language = norm_lang
+    effective_whisper_model = whisper_model
+    if not is_norwegian_language(norm_lang) and "nb-whisper" in whisper_model.lower():
+        effective_whisper_model = pick_multilingual_whisper_model(whisper_model)
+        log(
+            f"==> Merk: '{whisper_model}' er kun trent for norsk. Byttet automatisk til flerspråklig modell "
+            f"'{effective_whisper_model}' for språk='{norm_lang}'."
+        )
     resolved_min_spk, resolved_max_spk = resolve_speaker_bounds(
         min_speakers, max_speakers, speaker_names_hint
     )
@@ -3405,8 +5072,8 @@ def run_pipeline(
                 "audio_path": str(staged_audio),
                 "ckpt_dir": str(ckpt_dir),
                 "stages": wx_stages,
-                "model": whisper_model,
-                "language": language,
+                "model": effective_whisper_model,
+                "language": norm_lang,
                 "compute_type": "int8",
                 "hf_token": eff_token,
                 "min_speakers": resolved_min_spk,
@@ -3462,8 +5129,17 @@ def run_pipeline(
                         continue
                     if clean == "STAGE:ASR:START":
                         phase = 0
-                        prog(12, f"[Steg 1/5] Transkriberer med {whisper_model}...")
-                        log(f"==> [Steg 1/5] Kjører WhisperX ASR ({whisper_model}) på {resolved_input.name}...")
+                        prog(12, f"[Steg 1/5] Transkriberer med {effective_whisper_model}...")
+                        log(f"==> [Steg 1/5] Kjører WhisperX ASR ({effective_whisper_model}, språk={norm_lang}) på {resolved_input.name}...")
+                        continue
+                    if clean.startswith("STAGE:DETECTED_LANG:"):
+                        det_code = normalize_audio_language(clean.split(":", 2)[2].strip())
+                        if det_code and det_code != "auto":
+                            effective_language = det_code
+                            log(
+                                f"==> [Steg 1/5] Oppdaget talespråk: "
+                                f"{get_language_display_name(det_code, 'no')} ({det_code})"
+                            )
                         continue
                     if clean == "STAGE:ASR:DONE":
                         executed_stages.append("1_asr")
@@ -3665,6 +5341,21 @@ def run_pipeline(
         prog(84, f"[Steg 5/5] Skriver {mode_desc} med {ollama_model}...")
         log(f"==> [Steg 5/5] Genererer {mode_desc} ({ollama_model})...")
 
+        if effective_language == "auto" and asr_json.is_file():
+            try:
+                s1_data = json.loads(asr_json.read_text(encoding="utf-8"))
+                s1_lang = normalize_audio_language(str(s1_data.get("language", "")))
+                if s1_lang and s1_lang != "auto":
+                    effective_language = s1_lang
+            except Exception:
+                pass
+        if effective_language == "auto":
+            txt_det = detect_text_language(clean_transcript)
+            t_lang = str(txt_det.get("detected_language", ""))
+            t_prob = float(txt_det.get("confidence", 0.0) or 0.0)
+            if t_lang and t_prob >= 0.55:
+                effective_language = t_lang
+
         notes_md = generate_notes_via_api(
             clean_transcript,
             ollama_model,
@@ -3675,6 +5366,7 @@ def run_pipeline(
             progress_fn=prog,
             note_mode=effective_mode,
             manual_notes_text=combined_manual_notes,
+            language=effective_language,
         )
         notes_path.write_text(notes_md + "\n", encoding="utf-8")
         prog(99, "Bygger HTML-utgave av referat/notater...")
@@ -4017,20 +5709,11 @@ def run_live_mic_check(
     ffmpeg_bin = ensure_ffmpeg(env, lambda msg: print(msg, flush=True))
     with tempfile.TemporaryDirectory(prefix="mote_mic_check_") as tmp_dir:
         rec_file = Path(tmp_dir) / "mic_live_check.wav"
-        cmd = build_ffmpeg_mic_record_cmd(ffmpeg_bin, rec_file, env=env)
-
         print(
             f"==> GROV SANNTIDS-LYDSJEKK FRA MIKROFON ({duration_sec:.0f}s – trykk Ctrl+C for å avslutte)...",
             flush=True,
         )
-        proc = subprocess.Popen(
-            cmd,
-            env=env,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            text=True,
-        )
+        proc = start_mic_record_process(ffmpeg_bin, rec_file, env=env, gain_db=6.0, auto_gain=True)
         monitor = LiveAudioMonitor(
             wav_path=rec_file,
             whisper_model=whisper_model,
@@ -4142,8 +5825,8 @@ def cli_main(argv: list[str] | None = None) -> int:
         target_out_dir = out_base
     else:
         base_dir = Path(__file__).resolve().parent
-        resolved_input = resolve_moved_audio_path(args.input_file, base_dir)
-        target_out_dir = (args.out_dir or resolved_input.parent).resolve()
+        resolved_input = resolve_moved_audio_path(Path(args.input_file), base_dir)
+        target_out_dir = (Path(args.out_dir) if args.out_dir else resolved_input.parent).resolve()
 
     if args.status:
         st = get_checkpoint_status_dict(target_out_dir, resolved_input)

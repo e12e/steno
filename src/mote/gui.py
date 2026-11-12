@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import shutil
 import signal
 import subprocess
@@ -20,33 +19,56 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from mote.core import (  # noqa: E402
+    LANGUAGE_LABELS,
+    LIVE_CHUNK_WORKER_CODE,
     MODEL_PROFILES,
     WHISPERX_STAGE_RUNNER_CODE,
     LiveAudioMonitor,
+    analyze_pcm16_audio_level,
     build_cli_parser,
-    build_ffmpeg_mic_record_cmd,
     build_runtime_env,
     build_whisper_initial_prompt,
     clean_base_stem,
     cli_main,
+    detect_audio_language,
     detect_hardware_resources,
+    detect_text_language,
     download_media_url_audio,
     ensure_ffmpeg,
+    ensure_pregenerated_voiceover,
     evaluate_model_resource_fit,
     extract_context_from_file,
+    fetch_context_from_url,
+    find_wav_data_offset,
     get_checkpoint_dir,
     get_checkpoint_status_dict,
     get_initial_hf_token,
+    get_language_display_name,
+    get_system_input_volume,
+    get_voiceover_script,
+    get_whisperx_python,
     install_steno_app,
     is_diarization_cached,
     is_media_url,
     is_termux,
     is_transcript_file,
+    list_audio_input_devices,
+    list_resumable_sessions,
+    load_user_preferences,
+    normalize_audio_language,
+    open_system_sound_settings,
+    pick_live_whisper_model,
+    pick_multilingual_whisper_model,
+    recommend_models_for_language,
     resolve_moved_audio_path,
     resolve_speaker_bounds,
     resolve_ui_lang,
     run_live_check_on_file,
     run_pipeline,
+    sanitize_text,
+    save_user_preferences,
+    set_system_input_volume,
+    start_mic_record_process,
     uninstall_steno_app,
     unique_filename,
 )
@@ -76,12 +98,13 @@ class MoteApi:
         self._rec_path: Path | None = None
         self._live_monitor: LiveAudioMonitor | None = None
         self._tts_proc: subprocess.Popen[bytes] | None = None
+        self._play_proc: subprocess.Popen[bytes] | None = None
         self._active_proc: subprocess.Popen[str] | None = None
         self._cancel_requested: bool = False
         self._log_lines: list[str] = []
 
     def shutdown_children(self) -> None:
-        """Stop any running background recording, TTS, or WhisperX/Ollama child processes when GUI closes."""
+        """Stop any running background recording, TTS, playback, or WhisperX/Ollama child processes when GUI closes."""
         self._cancel_requested = True
         if self._live_monitor is not None:
             try:
@@ -90,7 +113,7 @@ class MoteApi:
                 pass
             self._live_monitor = None
 
-        for proc in (self._active_proc, self._rec_proc, self._tts_proc):
+        for proc in (self._active_proc, self._rec_proc, self._tts_proc, self._play_proc):
             if proc and proc.poll() is None:
                 try:
                     proc.terminate()
@@ -105,9 +128,27 @@ class MoteApi:
         today = datetime.now().strftime("%Y-%m-%d")
         base_dir = _get_project_base_dir()
         default_dir = base_dir / "data" if (base_dir / "data").is_dir() else (Path.home() / "Downloads")
-        hw = detect_hardware_resources(default_dir)
+        prefs = load_user_preferences()
+        audio_lang = normalize_audio_language(str(prefs.get("audio_language", "no") or "no"))
+        saved_ui_lang = str(prefs.get("ui_lang", "") or "").strip().lower()
+        ui_lang = saved_ui_lang if saved_ui_lang in ("no", "en") else resolve_ui_lang()
+        hw = detect_hardware_resources(default_dir, language=audio_lang)
+        lang_models = prefs.get("language_models") if isinstance(prefs.get("language_models"), dict) else {}
+        saved_entry = lang_models.get(audio_lang) if isinstance(lang_models, dict) else None
+        rec_whisper = (
+            str(saved_entry.get("whisper_model") or hw["recommended_whisper"])
+            if isinstance(saved_entry, dict)
+            else str(hw["recommended_whisper"])
+        )
+        rec_ollama = (
+            str(saved_entry.get("ollama_model") or hw["recommended_ollama"])
+            if isinstance(saved_entry, dict)
+            else str(hw["recommended_ollama"])
+        )
+        hw["recommended_whisper"] = rec_whisper
+        hw["recommended_ollama"] = rec_ollama
         fit = evaluate_model_resource_fit(
-            hw["recommended_whisper"], hw["recommended_ollama"], hw
+            rec_whisper, rec_ollama, hw, language=audio_lang
         )
         return {
             "hf_token": get_initial_hf_token(),
@@ -117,19 +158,428 @@ class MoteApi:
             "hardware": hw,
             "resource_fit": fit,
             "profiles": MODEL_PROFILES,
-            "ui_lang": resolve_ui_lang(),
+            "ui_lang": ui_lang,
+            "audio_language": audio_lang,
+            "user_prefs": prefs,
+            "supported_languages": [
+                {"code": k, "label_no": v[0], "label_en": v[1]}
+                for k, v in LANGUAGE_LABELS.items()
+            ],
+            "language_recommendations": recommend_models_for_language(
+                audio_lang,
+                profile=str(hw.get("recommended_profile", "recommended")),
+                ram_gb=float(hw.get("ram_gb", 16.0)),
+            ),
+            "audio_inputs": list_audio_input_devices(),
+            "system_input_volume": get_system_input_volume(),
+            "resumable_sessions": list_resumable_sessions(default_dir, base_dir),
         }
+
+    def save_preferences(self, updates: dict[str, Any]) -> dict[str, Any]:
+        """Persist user preferences (ui_lang, audio_language, per-language models) independent of OS locale."""
+        merged = save_user_preferences(updates if isinstance(updates, dict) else {})
+        return {"ok": True, "user_prefs": merged}
+
+    def get_language_recommendations(
+        self,
+        language: str,
+        profile: str = "recommended",
+        out_dir_str: str = "",
+    ) -> dict[str, Any]:
+        """Return recommended & saved Whisper/Ollama models for a selected audio speech language."""
+        norm_lang = normalize_audio_language(language)
+        prefs = load_user_preferences()
+        out_dir = Path(out_dir_str) if out_dir_str else None
+        hw = detect_hardware_resources(out_dir, language=norm_lang)
+        eff_profile = profile if profile in ("light", "recommended", "heavy") else str(hw.get("recommended_profile", "recommended"))
+        recs = recommend_models_for_language(
+            norm_lang,
+            profile=eff_profile,
+            ram_gb=float(hw.get("ram_gb", 16.0)),
+        )
+        lang_models = prefs.get("language_models") if isinstance(prefs.get("language_models"), dict) else {}
+        saved_entry = lang_models.get(norm_lang) if isinstance(lang_models, dict) else None
+        chosen_whisper = (
+            str(saved_entry.get("whisper_model") or recs["default_whisper"])
+            if isinstance(saved_entry, dict) and saved_entry.get("whisper_model")
+            else str(recs["default_whisper"])
+        )
+        chosen_ollama = (
+            str(saved_entry.get("ollama_model") or recs["default_ollama"])
+            if isinstance(saved_entry, dict) and saved_entry.get("ollama_model")
+            else str(recs["default_ollama"])
+        )
+        fit = evaluate_model_resource_fit(chosen_whisper, chosen_ollama, hw, language=norm_lang)
+        return {
+            "ok": True,
+            "language": norm_lang,
+            "label_no": get_language_display_name(norm_lang, "no"),
+            "label_en": get_language_display_name(norm_lang, "en"),
+            "recommendations": recs,
+            "chosen_whisper": chosen_whisper,
+            "chosen_ollama": chosen_ollama,
+            "has_saved_model": bool(isinstance(saved_entry, dict) and saved_entry.get("whisper_model")),
+            "hardware": hw,
+            "resource_fit": fit,
+        }
+
+    def detect_language(self, audio_path_str: str = "") -> dict[str, Any]:
+        """Detect spoken or written language from the selected audio/transcript file or latest mic recording."""
+        raw = (audio_path_str or "").strip()
+        if not raw and self._rec_path and self._rec_path.is_file():
+            raw = str(self._rec_path)
+        if not raw:
+            mictest_wav = Path(tempfile.gettempdir()) / "steno_mictest_latest.wav"
+            if mictest_wav.is_file():
+                raw = str(mictest_wav)
+        if not raw:
+            return {
+                "ok": False,
+                "error": "Velg en lydfil eller kjør mikrofontest først for å oppdage språk.",
+            }
+        base_dir = _get_project_base_dir()
+        target = resolve_moved_audio_path(Path(raw), base_dir)
+        if not target.is_file():
+            return {"ok": False, "error": f"Fant ikke filen: {target.name}"}
+
+        if is_transcript_file(target):
+            try:
+                txt = target.read_text(encoding="utf-8", errors="replace")
+                txt_det = detect_text_language(txt[:8000])
+                t_lang = str(txt_det.get("detected_language", "no"))
+                t_prob = float(txt_det.get("confidence", 0.0) or 0.0)
+                norm = normalize_audio_language(t_lang or "no")
+                recs = recommend_models_for_language(norm)
+                self._log(
+                    f"==> SPRÅKDETEKSJON ({target.name}): Oppdaget {get_language_display_name(norm, 'no')} "
+                    f"({t_prob * 100:.0f}% sikkerhet)"
+                )
+                return {
+                    "ok": bool(t_lang),
+                    "detected_language": norm,
+                    "language_probability": round(t_prob, 3),
+                    "label_no": get_language_display_name(norm, "no"),
+                    "label_en": get_language_display_name(norm, "en"),
+                    "recommended_whisper": recs["default_whisper"],
+                    "snippet": sanitize_text(txt[:160]),
+                }
+            except Exception as exc:
+                return {"ok": False, "error": str(exc)}
+
+        self._log(f"==> Analyserer talespråk i {target.name}...")
+        res = detect_audio_language(target, sample_seconds=15.0, log_fn=self._log)
+        if res.get("ok") and res.get("detected_language"):
+            dl = str(res["detected_language"])
+            prob = float(res.get("language_probability", 0.0) or 0.0)
+            self._log(
+                f"==> SPRÅKDETEKSJON ({target.name}): Oppdaget {get_language_display_name(dl, 'no')} "
+                f"({prob * 100:.0f}% sikkerhet) — anbefalt modell: {res.get('recommended_whisper', '')}"
+            )
+        return res
+
+    def get_audio_input_status(self) -> dict[str, Any]:
+        """Return available audio input devices and current OS microphone volume (0-100)."""
+        return {
+            "devices": list_audio_input_devices(),
+            "volume": get_system_input_volume(),
+        }
+
+    def set_mic_volume(self, volume_pct: int) -> dict[str, Any]:
+        """Set the OS microphone input volume (0-100) and return the new status."""
+        vol = max(0, min(100, int(volume_pct)))
+        res = set_system_input_volume(vol)
+        actual = get_system_input_volume()
+        actual_vol = int(actual.get("volume", vol)) if isinstance(actual, dict) else vol
+        self._log(f"==> Systemets mikrofonvolum satt til {actual_vol}%")
+        return {"ok": bool(res.get("ok", True)) if isinstance(res, dict) else True, "volume": actual_vol}
+
+    def open_sound_settings(self) -> dict[str, Any]:
+        """Open the OS Sound / Microphone input settings pane."""
+        ok = open_system_sound_settings()
+        return {"ok": ok}
+
+    def _emit_mic_test_state(self, state: dict[str, Any]) -> None:
+        if self.window:
+            try:
+                payload = json.dumps(state, ensure_ascii=False)
+                self.window.evaluate_js(f"updateMicTestState({payload})")
+            except Exception:
+                pass
+
+    def test_microphone(
+        self,
+        mic_device: str = "default",
+        gain_db: float = 6.0,
+        auto_gain: bool = True,
+        duration_sec: float = 4.0,
+        whisper_model: str = "NbAiLab/nb-whisper-small",
+        language: str = "no",
+    ) -> dict[str, Any]:
+        """Run a 4s microphone level + live Speech-to-Text (STT) verification in a background thread."""
+        if self._rec_proc and self._rec_proc.poll() is None:
+            return {"ok": False, "error": "Opptak pågår allerede."}
+
+        def _test_worker() -> None:
+            env = build_runtime_env()
+            ffmpeg_bin = ensure_ffmpeg(env, self._log)
+            tmp_wav = Path(tempfile.gettempdir()) / "steno_mictest_latest.wav"
+            tmp_wav.unlink(missing_ok=True)
+            dur = max(2.0, min(8.0, float(duration_sec)))
+            norm_lang = normalize_audio_language(language)
+            eff_model = pick_live_whisper_model(whisper_model, language=norm_lang)
+            self._log(
+                f"==> MIKROFON- & STT-TEST ({dur:.0f}s): enhet={mic_device}, boost=+{float(gain_db):.0f} dB"
+                + (" + auto-gain" if auto_gain else "")
+                + f", STT={eff_model} (språk={norm_lang}) — Snakk en kort setning nå..."
+            )
+            self._emit_mic_test_state(
+                {
+                    "phase": "recording",
+                    "duration_sec": dur,
+                    "remaining_sec": dur,
+                    "model": eff_model,
+                }
+            )
+            proc: subprocess.Popen[str] | None = None
+            stt_proc: subprocess.Popen[str] | None = None
+            stt_tmp_dir = tempfile.TemporaryDirectory(prefix="steno_mic_stt_")
+            try:
+                # 1. Start warming up the Whisper STT worker in parallel with recording so STT is instant after 4s
+                wx_bin = shutil.which("whisperx", path=env["PATH"])
+                if wx_bin:
+                    try:
+                        wx_py = get_whisperx_python(wx_bin)
+                        stt_dir_path = Path(stt_tmp_dir.name)
+                        worker_py = stt_dir_path / "live_worker.py"
+                        worker_py.write_text(LIVE_CHUNK_WORKER_CODE, encoding="utf-8")
+                        cfg_path = stt_dir_path / "live_cfg.json"
+                        cfg_path.write_text(
+                            json.dumps(
+                                {
+                                    "model": eff_model,
+                                    "detect_lang_model": pick_multilingual_whisper_model(),
+                                    "language": norm_lang,
+                                    "compute_type": "int8",
+                                    "initial_prompt": "",
+                                },
+                                ensure_ascii=False,
+                            ),
+                            encoding="utf-8",
+                        )
+                        stt_proc = subprocess.Popen(
+                            [wx_py, "-u", str(worker_py), str(cfg_path)],
+                            env=env,
+                            stdin=subprocess.PIPE,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.DEVNULL,
+                            text=True,
+                            encoding="utf-8",
+                            errors="replace",
+                            bufsize=1,
+                        )
+                    except Exception:
+                        stt_proc = None
+
+                # 2. Capture 4 seconds of microphone audio
+                proc = start_mic_record_process(
+                    ffmpeg_bin,
+                    tmp_wav,
+                    env=env,
+                    mic_device=mic_device,
+                    gain_db=float(gain_db),
+                    auto_gain=bool(auto_gain),
+                )
+                steps = int(dur / 0.5)
+                for idx in range(max(2, steps)):
+                    time.sleep(0.5)
+                    rem = max(0.0, dur - ((idx + 1) * 0.5))
+                    lvl_now: dict[str, Any] | None = None
+                    if tmp_wav.is_file() and tmp_wav.stat().st_size > 1600:
+                        raw = tmp_wav.read_bytes()
+                        data_off = find_wav_data_offset(raw[:4096])
+                        if len(raw) > data_off:
+                            pcm = raw[max(data_off, len(raw) - 32000) :]
+                            lvl_now = analyze_pcm16_audio_level(pcm)
+                            self._on_live_level(lvl_now)
+                    self._emit_mic_test_state(
+                        {
+                            "phase": "recording",
+                            "duration_sec": dur,
+                            "remaining_sec": rem,
+                            "level": lvl_now,
+                            "model": eff_model,
+                        }
+                    )
+
+                if proc.poll() is None:
+                    try:
+                        if proc.stdin:
+                            proc.stdin.write("q\n")
+                            proc.stdin.flush()
+                        proc.wait(timeout=2)
+                    except Exception:
+                        proc.terminate()
+
+                if tmp_wav.is_file() and tmp_wav.stat().st_size > 128:
+                    self._rec_path = tmp_wav
+                    raw_all = tmp_wav.read_bytes()
+                    data_off = find_wav_data_offset(raw_all[:4096])
+                    pcm_all = raw_all[data_off:]
+                    final_lvl = analyze_pcm16_audio_level(pcm_all)
+                    self._on_live_level(final_lvl)
+                    rms_db = float(final_lvl.get("rms_dbfs", -96.0))
+                    st = str(final_lvl.get("status", "lavt"))
+
+                    self._emit_mic_test_state(
+                        {
+                            "phase": "transcribing",
+                            "level": final_lvl,
+                            "model": eff_model,
+                            "audio_path": str(tmp_wav),
+                        }
+                    )
+
+                    stt_text = ""
+                    detected_lang = ""
+                    detected_prob = 0.0
+                    if stt_proc and stt_proc.stdin and stt_proc.stdout and rms_db > -55.0:
+                        try:
+                            for _ in range(60):
+                                ln = stt_proc.stdout.readline()
+                                if not ln or "LIVE_WORKER:READY" in ln:
+                                    break
+                            req = json.dumps(
+                                {
+                                    "wav_path": str(tmp_wav),
+                                    "start": 0.0,
+                                    "end": dur,
+                                    "detect_language": True,
+                                }
+                            )
+                            stt_proc.stdin.write(req + "\n")
+                            stt_proc.stdin.flush()
+                            while True:
+                                r_line = stt_proc.stdout.readline()
+                                if not r_line:
+                                    break
+                                r_clean = r_line.strip()
+                                if r_clean.startswith("LIVE_RESULT:"):
+                                    payload = json.loads(r_clean[len("LIVE_RESULT:") :])
+                                    stt_text = sanitize_text(str(payload.get("text", "")))
+                                    dl = normalize_audio_language(str(payload.get("detected_language", "")))
+                                    dp = float(payload.get("language_probability", 0.0) or 0.0)
+                                    if dl and dl != "auto":
+                                        detected_lang = dl
+                                        detected_prob = dp
+                                    break
+                        except Exception:
+                            pass
+
+                    if not detected_lang and stt_text:
+                        txt_det = detect_text_language(stt_text)
+                        t_lang = str(txt_det.get("detected_language", ""))
+                        t_prob = float(txt_det.get("confidence", 0.0) or 0.0)
+                        if t_lang and t_prob >= 0.55:
+                            detected_lang = t_lang
+                            detected_prob = t_prob
+
+                    recs = recommend_models_for_language(detected_lang or norm_lang)
+                    self._emit_mic_test_state(
+                        {
+                            "phase": "done",
+                            "ok": True,
+                            "level": final_lvl,
+                            "stt_text": stt_text,
+                            "model": eff_model,
+                            "audio_path": str(tmp_wav),
+                            "detected_language": detected_lang,
+                            "language_probability": round(detected_prob, 3),
+                            "detected_label_no": get_language_display_name(detected_lang, "no") if detected_lang else "",
+                            "detected_label_en": get_language_display_name(detected_lang, "en") if detected_lang else "",
+                            "recommended_whisper": recs["default_whisper"],
+                        }
+                    )
+
+                    stt_summary = f' | STT: «{stt_text}»' if stt_text else " | STT: (ingen tydelig tale oppfattet)"
+                    if st == "stille" or rms_db < -48.0:
+                        self._log(
+                            f"==> MIKROFON-TEST RESULTAT: Svært lavt/stille ({rms_db} dBFS){stt_summary}. "
+                            "Sjekk valgt mikrofon, øk systemvolum til 85–100%, eller velg +12 dB boost."
+                        )
+                    elif st == "lavt" or rms_db < -34.0:
+                        self._log(
+                            f"==> MIKROFON-TEST RESULTAT: Lavt lydnivå ({rms_db} dBFS){stt_summary}. "
+                            "Anbefaling: Sett mikrofon-boost til +12 dB."
+                        )
+                    else:
+                        self._log(
+                            f"==> MIKROFON-TEST RESULTAT: Godt lydnivå ({rms_db} dBFS){stt_summary}. Klar til opptak!"
+                        )
+                else:
+                    self._emit_mic_test_state(
+                        {
+                            "phase": "done",
+                            "ok": False,
+                            "error": "Ingen lyd mottatt fra mikrofonen. Sjekk mikrofontilgang i Systeminnstillinger.",
+                        }
+                    )
+                    self._log(
+                        "==> MIKROFON-TEST FEILET: Ingen lyd mottatt fra mikrofonen. Sjekk mikrofontilgang i Systeminnstillinger."
+                    )
+            except Exception as exc:
+                self._emit_mic_test_state({"phase": "done", "ok": False, "error": str(exc)})
+                self._log(f"==> MIKROFON-TEST FEIL: {exc}")
+            finally:
+                if proc and proc.poll() is None:
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
+                if stt_proc and stt_proc.poll() is None:
+                    try:
+                        if stt_proc.stdin:
+                            stt_proc.stdin.write("QUIT\n")
+                            stt_proc.stdin.flush()
+                        stt_proc.wait(timeout=1)
+                    except Exception:
+                        try:
+                            stt_proc.kill()
+                        except Exception:
+                            pass
+                stt_tmp_dir.cleanup()
+
+        threading.Thread(target=_test_worker, daemon=True).start()
+        return {"ok": True}
+
+    def fetch_context_url(self, url: str) -> dict[str, Any]:
+        """Download and extract agenda, slides, or draft notes text from a remote URL or shared document link."""
+        res = fetch_context_from_url(url)
+        if res.get("ok"):
+            txt = str(res.get("text", ""))
+            src = str(res.get("source_name", url))
+            self._log(f"==> Hentet kontekst fra lenke ({src}, {len(txt)} tegn)")
+        else:
+            self._log(f"==> Kunne ikke hente kontekst fra lenke: {res.get('error', 'Ukjent feil')}")
+        return res
+
+    def list_resumable_sessions(self, out_dir_str: str = "") -> list[dict[str, Any]]:
+        """List saved transcription sessions and checkpoints in out_dir and project data folder."""
+        base_dir = _get_project_base_dir()
+        out_dir = Path(out_dir_str) if out_dir_str else None
+        return list_resumable_sessions(out_dir=out_dir, base_dir=base_dir)
 
     def check_model_resources(
         self,
         whisper_model: str,
         ollama_model: str,
         out_dir_str: str = "",
+        language: str = "no",
     ) -> dict[str, Any]:
         """Evaluate whether the selected Whisper + Ollama model combination fits local hardware."""
         out_dir = Path(out_dir_str) if out_dir_str else None
-        hw = detect_hardware_resources(out_dir)
-        fit = evaluate_model_resource_fit(whisper_model, ollama_model, hw)
+        norm_lang = normalize_audio_language(language)
+        hw = detect_hardware_resources(out_dir, language=norm_lang)
+        fit = evaluate_model_resource_fit(whisper_model, ollama_model, hw, language=norm_lang)
         return {"hardware": hw, "resource_fit": fit}
 
     def stop_job(self) -> dict[str, Any]:
@@ -158,6 +608,7 @@ class MoteApi:
         audio_path_str: str,
         html_name_str: str = "",
         notes_name_str: str = "",
+        notes_html_name_str: str = "",
     ) -> dict[str, Any]:
         if not audio_path_str:
             return {
@@ -168,13 +619,18 @@ class MoteApi:
                 "s3_diarize": False,
                 "s4_names": False,
                 "s5_notes": False,
+                "html_exists": False,
+                "notes_exists": False,
+                "notes_html_exists": False,
             }
         base_dir = _get_project_base_dir()
         audio_path = resolve_moved_audio_path(Path(audio_path_str), base_dir)
         out_dir = Path(out_dir_str) if out_dir_str else audio_path.parent
         if not out_dir.exists() and audio_path.parent.is_dir():
             out_dir = audio_path.parent
-        return get_checkpoint_status_dict(out_dir, audio_path, html_name_str, notes_name_str)
+        return get_checkpoint_status_dict(
+            out_dir, audio_path, html_name_str, notes_name_str, notes_html_name_str
+        )
 
     def save_log_dialog(self, log_text: str, out_dir_str: str, audio_path_str: str) -> str | None:
         if not self.window:
@@ -228,28 +684,53 @@ class MoteApi:
             threading.Thread(target=_close_later, daemon=True).start()
         return {"ok": True, "message": msg, **res}
 
-    def speak_intro_prompt(self, ui_lang: str = "no") -> None:
-        """Speak the guided voice introduction prompt using local OS TTS (Norwegian or English)."""
-        is_en = str(ui_lang).strip().lower().startswith("en")
-        prompt_text = (
-            (
-                "Recording is ready. "
-                "Step one: The meeting chair briefly states the meeting topic and today's date. "
-                "Step two: Go around the table so each participant states their full name and role in a complete sentence."
-            )
-            if is_en
-            else (
-                "Opptaket er klart. "
-                "Steg en: Møteleder sier kort hva møtet gjelder og dagens dato. "
-                "Steg to: Ta en runde rundt bordet der hver deltaker sier sitt navn og sin tittel eller rolle."
-            )
-        )
-        if self._tts_proc and self._tts_proc.poll() is None:
-            self._tts_proc.terminate()
-            return
+    def get_voiceover_data_uri(self, ui_lang: str = "no", note_mode: str = "mote") -> str | None:
+        """Return a data:audio/mpeg;base64 URI for the pre-generated neural voiceover guide."""
+        import base64
 
+        vo_path = ensure_pregenerated_voiceover(ui_lang, note_mode)
+        if vo_path and vo_path.is_file():
+            raw = vo_path.read_bytes()
+            mime = "audio/wav" if vo_path.suffix.lower() == ".wav" else "audio/mpeg"
+            b64 = base64.b64encode(raw).decode("ascii")
+            return f"data:{mime};base64,{b64}"
+        return None
+
+    def speak_intro_prompt(self, ui_lang: str = "no", note_mode: str = "mote") -> dict[str, Any]:
+        """Play the pre-generated high-quality neural voiceover guide (or toggle stop if already playing)."""
+        if self._tts_proc and self._tts_proc.poll() is None:
+            try:
+                self._tts_proc.terminate()
+            except Exception:
+                pass
+            return {"ok": True, "playing": False}
+
+        is_en = str(ui_lang).strip().lower().startswith("en")
+        vo_path = ensure_pregenerated_voiceover(ui_lang, note_mode)
+        if vo_path and vo_path.is_file():
+            if sys.platform == "darwin" and shutil.which("afplay"):
+                self._tts_proc = subprocess.Popen(
+                    ["afplay", str(vo_path)],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                return {"ok": True, "playing": True, "audio_path": str(vo_path)}
+            if shutil.which("ffplay"):
+                self._tts_proc = subprocess.Popen(
+                    ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", str(vo_path)],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                return {"ok": True, "playing": True, "audio_path": str(vo_path)}
+
+        prompt_text = get_voiceover_script(ui_lang, note_mode)
         if sys.platform == "darwin":
-            self._tts_proc = subprocess.Popen(["say", prompt_text])
+            voice_flag = "Samantha" if is_en else "Nora"
+            self._tts_proc = subprocess.Popen(
+                ["say", "-v", voice_flag, "-r", "180", prompt_text],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
         elif os.name == "nt":
             ps_cmd = (
                 "Add-Type -AssemblyName System.Speech; "
@@ -268,6 +749,7 @@ class MoteApi:
                 self._tts_proc = subprocess.Popen(["espeak-ng", "-v", voice, prompt_text])
             elif shutil.which("espeak"):
                 self._tts_proc = subprocess.Popen(["espeak", "-v", voice, prompt_text])
+        return {"ok": True, "playing": True}
 
     def _on_live_level(self, lvl: dict[str, Any]) -> None:
         if self.window:
@@ -284,17 +766,27 @@ class MoteApi:
     def start_recording(
         self,
         out_dir_str: str,
-        speak_guide: bool,
+        speak_guide: bool = False,
         live_transcribe: bool = True,
         whisper_model: str = "NbAiLab/nb-whisper-small",
         language: str = "no",
         meeting_title: str = "",
         speaker_names_hint: str = "",
         agenda_text: str = "",
+        mic_device: str = "default",
+        gain_db: float = 0.0,
+        auto_gain: bool = False,
     ) -> dict[str, Any]:
-        """Start recording 16kHz mono WAV audio from the default microphone via ffmpeg + optional live ASR check."""
+        """Start recording 16kHz mono WAV audio from the selected microphone via ffmpeg + optional gain boost & live ASR check."""
         if self._rec_proc and self._rec_proc.poll() is None:
             return {"ok": False, "error": "Opptak pågår allerede."}
+
+        if self._play_proc and self._play_proc.poll() is None:
+            try:
+                self._play_proc.terminate()
+            except Exception:
+                pass
+            self._play_proc = None
 
         env = build_runtime_env()
         ffmpeg_bin = ensure_ffmpeg(env, self._log)
@@ -303,21 +795,25 @@ class MoteApi:
         out_dir.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
         rec_file = out_dir / unique_filename(out_dir, f"moteopptak_{stamp}", ".wav")
-        cmd = build_ffmpeg_mic_record_cmd(ffmpeg_bin, rec_file, env=env)
 
         try:
-            self._rec_proc = subprocess.Popen(
-                cmd,
+            self._rec_proc = start_mic_record_process(
+                ffmpeg_bin,
+                rec_file,
                 env=env,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-                text=True,
+                mic_device=mic_device,
+                gain_db=float(gain_db),
+                auto_gain=bool(auto_gain),
             )
             self._rec_path = rec_file
-            self._log(f"==> OPPTAK STARTET: Lagrer mikrofon-lyd til {rec_file.name}")
+            gain_info = f", boost=+{float(gain_db):.0f}dB" if float(gain_db) > 0 else ""
+            if auto_gain:
+                gain_info += " + auto-gain"
+            self._log(
+                f"==> OPPTAK STARTET: Lagrer mikrofon-lyd ({mic_device}{gain_info}) til {rec_file.name}"
+            )
             if speak_guide:
-                self.speak_intro_prompt()
+                self.speak_intro_prompt(ui_lang=language)
 
             try:
                 init_prompt = build_whisper_initial_prompt(meeting_title, speaker_names_hint, agenda_text)
@@ -419,6 +915,19 @@ class MoteApi:
                     if self.window:
                         ln_payload = json.dumps(ln, ensure_ascii=False)
                         self.window.evaluate_js(f"appendLiveChunk({ln_payload}, {lvl_payload})")
+                if res.get("detected_language") and self.window:
+                    det_payload = json.dumps(
+                        {
+                            "detected_language": res.get("detected_language"),
+                            "language_probability": res.get("language_probability", 0.0),
+                            "label_no": res.get("detected_label_no", ""),
+                            "label_en": res.get("detected_label_en", ""),
+                            "recommended_whisper": res.get("recommended_whisper", ""),
+                            "source": "quick_check",
+                        },
+                        ensure_ascii=False,
+                    )
+                    self.window.evaluate_js(f"onLanguageDetected({det_payload})")
             except Exception as exc:
                 self._log(f"FEIL under lydsjekk: {exc}")
 
@@ -544,6 +1053,113 @@ class MoteApi:
             subprocess.Popen(["termux-open", folder_path])
         else:
             subprocess.Popen(["xdg-open", folder_path])
+
+    def open_file_in_os(self, file_path_str: str, out_dir_str: str = "") -> dict[str, Any]:
+        """Open a generated output file (Transcript HTML, Notes HTML, Notes Markdown, or audio file) in the OS default app."""
+        raw = (file_path_str or "").strip()
+        if not raw:
+            return {"ok": False, "error": "Ingen fil angitt."}
+
+        base_dir = _get_project_base_dir()
+        candidates: list[Path] = []
+        raw_path = Path(raw)
+        if raw_path.is_absolute():
+            candidates.append(raw_path)
+            candidates.append(resolve_moved_audio_path(raw_path, base_dir))
+        if out_dir_str:
+            candidates.append(Path(out_dir_str) / raw_path.name)
+        if self._rec_path:
+            candidates.append(self._rec_path.parent / raw_path.name)
+        candidates.append(base_dir / "data" / raw_path.name)
+        candidates.append(Path.home() / "Downloads" / raw_path.name)
+
+        chosen = next((c for c in candidates if c.is_file()), None)
+        if chosen is None:
+            msg = f"Filen finnes ikke ennå: {raw_path.name}"
+            self._log(f"==> Merk: {msg}")
+            return {"ok": False, "error": msg}
+
+        try:
+            if sys.platform == "darwin":
+                subprocess.Popen(["open", str(chosen)])
+            elif os.name == "nt":
+                os.startfile(str(chosen))  # type: ignore[attr-defined]
+            elif shutil.which("termux-open"):
+                subprocess.Popen(["termux-open", str(chosen)])
+            else:
+                subprocess.Popen(["xdg-open", str(chosen)])
+            self._log(f"==> Åpnet fil: {chosen.name}")
+            return {"ok": True, "path": str(chosen)}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def toggle_play_audio(self, audio_path_str: str = "") -> dict[str, Any]:
+        """Play or stop the currently selected or recorded audio file directly inside Steno."""
+        if self._play_proc and self._play_proc.poll() is None:
+            try:
+                self._play_proc.terminate()
+            except Exception:
+                pass
+            self._play_proc = None
+            self._log("==> Avspilling stoppet.")
+            if self.window:
+                self.window.evaluate_js("setAudioPlaybackState(false)")
+            return {"ok": True, "playing": False}
+
+        raw = (audio_path_str or "").strip() or (str(self._rec_path) if self._rec_path else "")
+        if not raw:
+            msg = "Velg en lydfil eller gjør et opptak først for å spille av."
+            self._log(f"==> {msg}")
+            return {"ok": False, "playing": False, "error": msg}
+
+        base_dir = _get_project_base_dir()
+        target = resolve_moved_audio_path(Path(raw), base_dir)
+        if not target.is_file() or is_transcript_file(target):
+            msg = f"Fant ikke spillbar lydfil: {target.name}"
+            self._log(f"==> {msg}")
+            return {"ok": False, "playing": False, "error": msg}
+
+        play_cmd: list[str] | None = None
+        if sys.platform == "darwin" and shutil.which("afplay"):
+            play_cmd = ["afplay", str(target)]
+        elif shutil.which("ffplay"):
+            play_cmd = ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", str(target)]
+
+        if play_cmd is None:
+            res = self.open_file_in_os(str(target))
+            return {
+                "ok": bool(res.get("ok")),
+                "playing": False,
+                "opened_external": True,
+                "audio_path": str(target),
+            }
+
+        try:
+            proc = subprocess.Popen(
+                play_cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self._play_proc = proc
+            self._log(f"==> Spiller av lydfil: {target.name}")
+
+            def _watch_playback(p: subprocess.Popen[bytes]) -> None:
+                try:
+                    p.wait()
+                except Exception:
+                    pass
+                if self._play_proc is p:
+                    self._play_proc = None
+                    if self.window:
+                        try:
+                            self.window.evaluate_js("setAudioPlaybackState(false)")
+                        except Exception:
+                            pass
+
+            threading.Thread(target=_watch_playback, args=(proc,), daemon=True).start()
+            return {"ok": True, "playing": True, "audio_path": str(target)}
+        except Exception as exc:
+            return {"ok": False, "playing": False, "error": str(exc)}
 
     def start_job(
         self,
@@ -1073,6 +1689,83 @@ def run_browser_gui(api: MoteApi, html_content: str) -> None:
         srv.server_close()
 
 
+def build_native_app_menu(window: Any, ui_lang: str = "no") -> list[Any] | None:
+    """Build native OS menu bar (macOS / desktop pywebview) for File & Session actions."""
+    try:
+        from webview.menu import Menu, MenuAction, MenuSeparator  # type: ignore[import-not-found]
+    except Exception:
+        return None
+
+    is_en = ui_lang == "en"
+    return [
+        Menu(
+            "File" if is_en else "Fil",
+            [
+                MenuAction(
+                    "Open Audio File / Resume Session..." if is_en else "Åpne lydfil / Gjenoppta økt...",
+                    lambda: window.evaluate_js("selectIntent('file'); browseAudio()"),
+                ),
+                MenuAction(
+                    "Fetch from Stream / URL..." if is_en else "Hent fra strøm / nettadresse (URL)...",
+                    lambda: window.evaluate_js("selectIntent('stream'); promptUrlAudio()"),
+                ),
+                MenuSeparator(),
+                MenuAction(
+                    "Open Transcript (.html)" if is_en else "Åpne transkripsjon (.html)",
+                    lambda: window.evaluate_js("openOutputHtml('transcript')"),
+                ),
+                MenuAction(
+                    "Open Meeting Notes (.html)" if is_en else "Åpne møtereferat (.html)",
+                    lambda: window.evaluate_js("openOutputHtml('notes')"),
+                ),
+                MenuAction(
+                    "Open Output Folder" if is_en else "Åpne utdatamappe",
+                    lambda: window.evaluate_js("openFinder()"),
+                ),
+                MenuSeparator(),
+                MenuAction(
+                    "Install Desktop Shortcut" if is_en else "Installer snarvei på maskinen",
+                    lambda: window.evaluate_js("installStenoShortcut()"),
+                ),
+                MenuAction(
+                    "Uninstall Steno..." if is_en else "Avinstaller Steno...",
+                    lambda: window.evaluate_js("openUninstallDialog()"),
+                ),
+            ],
+        ),
+        Menu(
+            "Session" if is_en else "Økt",
+            [
+                MenuAction(
+                    "Meeting (Multi-speaker)" if is_en else "Møte (Flere talere)",
+                    lambda: window.evaluate_js("selectTaskMode('mote')"),
+                ),
+                MenuAction(
+                    "Lecture / Talk (1 speaker)" if is_en else "Forelesning / Foredrag (1 taler)",
+                    lambda: window.evaluate_js("selectTaskMode('foredrag')"),
+                ),
+                MenuSeparator(),
+                MenuAction(
+                    "01 Setup & Source" if is_en else "01 Oppsett & Kilde",
+                    lambda: window.evaluate_js("setUxStep('1_source')"),
+                ),
+                MenuAction(
+                    "02 Audio Studio" if is_en else "02 Lydstudio",
+                    lambda: window.evaluate_js("setUxStep('2_audio')"),
+                ),
+                MenuAction(
+                    "03 Context & Agenda" if is_en else "03 Kontekst & Agenda",
+                    lambda: window.evaluate_js("setUxStep('2_context')"),
+                ),
+                MenuAction(
+                    "04 Pipeline & Run" if is_en else "04 Pipeline & Kjør",
+                    lambda: window.evaluate_js("setUxStep('3_run')"),
+                ),
+            ],
+        ),
+    ]
+
+
 def main() -> None:
     try:
         install_steno_app()
@@ -1090,8 +1783,9 @@ def main() -> None:
         "Steno — A modern annalist for your meetings — an automaton stenographer",
         html=HTML,
         js_api=api,
-        width=820,
-        height=790,
+        width=1200,
+        height=800,
+        min_size=(960, 660),
     )
     api.window = window
     try:
@@ -1099,24 +1793,9 @@ def main() -> None:
     except Exception:
         pass
 
-    app_menu = None
-    try:
-        from webview.menu import Menu, MenuAction, MenuSeparator  # type: ignore[import-not-found]
-
-        app_menu = [
-            Menu(
-                "File",
-                [
-                    MenuAction("Open Audio / Transcript...", lambda: window.evaluate_js("browseAudio()")),
-                    MenuAction("Open Output Folder", lambda: window.evaluate_js("openFinder()")),
-                    MenuSeparator(),
-                    MenuAction("Install Shortcut", lambda: window.evaluate_js("installStenoShortcut()")),
-                    MenuAction("Uninstall Steno...", lambda: window.evaluate_js("openUninstallDialog()")),
-                ],
-            )
-        ]
-    except Exception:
-        app_menu = None
+    prefs = load_user_preferences()
+    ui_lang = str(prefs.get("ui_lang") or resolve_ui_lang())
+    app_menu = build_native_app_menu(window, ui_lang)
 
     try:
         if app_menu:

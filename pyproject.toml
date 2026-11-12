@@ -3,6 +3,8 @@ name = "steno"
 version = "0.2.0"
 description = "Steno - a modern annalist for your meetings - an automaton stenographer."
 readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "e12e", email = "steno@s.hypertekst.net" }]
 requires-python = ">=3.11"
 dependencies = [
     "pywebview>=5.3",
@@ -44,4 +46,5 @@ warn_return_any = false
 warn_unused_configs = true
 ignore_missing_imports = true
 check_untyped_defs = true
+explicit_package_bases = true
 files = ["src/mote/core.py", "src/mote/cli.py", "transcribe.py", "tests/test_cli_and_pipeline.py"]

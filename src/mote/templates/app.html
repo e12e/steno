@@ -1,1204 +1,2948 @@
 <!DOCTYPE html>
 <html lang="no">
 <head>
-<meta charset="utf-8">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light dark">
+<title>Steno — Lokal møte- og forelesningsstenograf</title>
 <style>
   :root {
     color-scheme: light dark;
-    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
-    --accent: #0a84ff;
-    --accent-hover: #0070e0;
-    --accent-soft: rgba(10, 132, 255, 0.10);
-    --danger: #ff453a;
-    --danger-soft: rgba(255, 69, 58, 0.14);
-    --success: #30d158;
-    --success-soft: rgba(48, 209, 88, 0.14);
-    --warn: #ff9f0a;
-    --warn-soft: rgba(255, 159, 10, 0.15);
-    --card-bg: rgba(128, 128, 128, 0.055);
-    --card-border: rgba(128, 128, 128, 0.24);
-    --input-border: rgba(128, 128, 128, 0.34);
+    --bg: #f3f4f6;
+    --surface: #ffffff;
+    --surface-subtle: #f8fafc;
+    --surface-muted: #f1f5f9;
+    --surface-elevated: #ffffff;
+    --border: #d1d5db;
+    --border-strong: #9ca3af;
+    --text: #111827;
+    --muted: #4b5563;
+    --accent: #1d4ed8;
+    --accent-hover: #1e40af;
+    --accent-soft: #eff6ff;
+    --accent-border: #93c5fd;
+    --danger: #dc2626;
+    --danger-hover: #b91c1c;
+    --danger-soft: #fef2f2;
+    --ok: #15803d;
+    --ok-soft: #dcfce7;
+    --warn: #b45309;
+    --warn-soft: #fef3c7;
+    --log-bg: #090d16;
+    --log-fg: #e2e8f0;
+    accent-color: var(--accent);
   }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #090d16;
+      --surface: #111827;
+      --surface-subtle: #161f33;
+      --surface-muted: #1e293b;
+      --surface-elevated: #1f2937;
+      --border: #283548;
+      --border-strong: #475569;
+      --text: #f9fafb;
+      --muted: #9ca3af;
+      --accent: #3b82f6;
+      --accent-hover: #60a5fa;
+      --accent-soft: #172554;
+      --accent-border: #1d4ed8;
+      --danger: #ef4444;
+      --danger-hover: #f87171;
+      --danger-soft: #450a0a;
+      --ok: #22c55e;
+      --ok-soft: #052e16;
+      --warn: #f59e0b;
+      --warn-soft: #451a03;
+      --log-bg: #030712;
+      --log-fg: #e2e8f0;
+    }
+  }
+
+  @supports (color: light-dark(white, black)) {
+    :root {
+      --bg: light-dark(#f3f4f6, #090d16);
+      --surface: light-dark(#ffffff, #111827);
+      --surface-subtle: light-dark(#f8fafc, #161f33);
+      --surface-muted: light-dark(#f1f5f9, #1e293b);
+      --surface-elevated: light-dark(#ffffff, #1f2937);
+      --border: light-dark(#d1d5db, #283548);
+      --border-strong: light-dark(#9ca3af, #475569);
+      --text: light-dark(#111827, #f9fafb);
+      --muted: light-dark(#4b5563, #9ca3af);
+      --accent: light-dark(#1d4ed8, #3b82f6);
+      --accent-hover: light-dark(#1e40af, #60a5fa);
+      --accent-soft: light-dark(#eff6ff, #172554);
+      --accent-border: light-dark(#93c5fd, #1d4ed8);
+    }
+  }
+
   * { box-sizing: border-box; }
-  body {
+  html, body {
+    height: 100dvh;
+    width: 100vw;
     margin: 0;
-    padding: 14px 18px;
-    background: Canvas;
-    color: CanvasText;
-    font-size: 13px;
+    padding: 0;
+    overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 12.5px;
     line-height: 1.4;
     user-select: none;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    height: 100vh;
-    overflow-y: auto;
+    accent-color: var(--accent);
   }
 
-  /* Zone 1: Hero Audio Source & Recording */
-  .top-cards {
-    display: grid;
-    grid-template-columns: 1.2fr 1fr;
-    gap: 12px;
-    align-items: stretch;
+  input[type="checkbox"],
+  input[type="radio"],
+  input[type="range"],
+  progress {
+    accent-color: var(--accent);
   }
-  #dropzone {
-    border: 1.5px dashed rgba(128, 128, 128, 0.45);
-    border-radius: 12px;
-    padding: 12px 14px;
+
+  @supports not (accent-color: #1d4ed8) {
+    input[type="checkbox"],
+    input[type="radio"] {
+      border: 1px solid var(--border-strong);
+    }
+  }
+
+  /* =========================================================================
+     VIEWPORT-LOCKED STUDIO APP SHELL (ZERO OUTER SCROLLBARS)
+     ========================================================================= */
+  .app-shell {
+    display: grid;
+    grid-template-rows: 46px minmax(0, 1fr);
+    height: 100dvh;
+    width: 100vw;
+    overflow: hidden;
+  }
+
+  /* Top Studio Bar */
+  .studio-topbar {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    background: var(--card-bg);
-    transition: border-color 0.15s ease, background-color 0.15s ease;
+    padding: 0 14px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    height: 46px;
+    z-index: 50;
   }
-  #dropzone.dragover {
-    border-color: var(--accent);
-    background: var(--accent-soft);
-  }
-  .dz-text {
-    flex: 1;
+  .brand-cluster {
+    display: flex;
+    align-items: center;
+    gap: 10px;
     min-width: 0;
   }
-  .dz-text strong {
+  .brand-mark {
+    width: 24px;
+    height: 24px;
+    border-radius: 6px;
+    background: var(--text);
+    color: var(--surface);
+    font-weight: 800;
     font-size: 13px;
-    font-weight: 600;
-    display: block;
-    margin-bottom: 3px;
-  }
-  #selected-file {
-    color: GrayText;
-    display: block;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    font-size: 11.5px;
-  }
-  .dz-actions {
-    display: flex;
-    gap: 6px;
+    display: inline-flex;
     align-items: center;
+    justify-content: center;
+    letter-spacing: -0.04em;
     flex-shrink: 0;
   }
-
-  .rec-card {
-    border: 1px solid var(--card-border);
-    border-radius: 12px;
-    padding: 10px 14px;
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-    gap: 6px;
-    background: var(--card-bg);
-  }
-  .rec-controls {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-  }
-  #rec_btn {
-    font-weight: 600;
-  }
-  #rec_btn.recording {
-    background: var(--danger);
-    color: white;
-    border-color: var(--danger);
-  }
-  #rec_timer {
-    font-family: ui-monospace, "SF Mono", Menlo, monospace;
-    font-weight: 600;
-    font-size: 12.5px;
-    color: var(--danger);
-  }
-  .rec-options {
-    display: flex;
-    gap: 12px;
-    flex-wrap: wrap;
-    align-items: center;
-  }
-  .rec-options label {
-    font-size: 11.5px;
-    color: GrayText;
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    cursor: pointer;
-  }
-
-  .live-badge {
-    font-size: 11px;
-    padding: 2px 8px;
-    border-radius: 999px;
-    border: 1px solid var(--card-border);
-    color: GrayText;
-    background: rgba(128, 128, 128, 0.08);
+  .brand-title {
+    margin: 0;
+    font-size: 13.5px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
     white-space: nowrap;
   }
-  .live-badge.godt {
-    border-color: rgba(48, 209, 88, 0.7);
-    background: var(--success-soft);
-    color: CanvasText;
-    font-weight: 600;
-  }
-  .live-badge.lavt {
-    border-color: rgba(255, 159, 10, 0.75);
-    background: var(--warn-soft);
-    color: CanvasText;
-    font-weight: 600;
-  }
-  .live-badge.hoyt {
-    border-color: rgba(255, 69, 58, 0.8);
-    background: var(--danger-soft);
-    color: var(--danger);
-    font-weight: 600;
-  }
-
-  #live_check_panel {
-    display: none;
-    background: rgba(48, 209, 88, 0.07);
-    border: 1px solid rgba(48, 209, 88, 0.45);
-    border-radius: 10px;
-    padding: 8px 12px;
-    font-size: 11.5px;
-    line-height: 1.4;
-    max-height: 76px;
-    overflow-y: auto;
-    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-    white-space: pre-wrap;
-    user-select: text;
-  }
-
-  #prompt_banner {
-    display: none;
-    background: var(--accent-soft);
-    border: 1px solid var(--accent);
-    border-radius: 10px;
-    padding: 8px 12px;
-    font-size: 12px;
-    line-height: 1.45;
-  }
-  #prompt_banner strong { color: var(--accent); }
-
-  /* Zone 2: Meeting Context Card */
-  .context-card {
-    border: 1px solid var(--card-border);
-    border-radius: 12px;
-    padding: 12px 14px;
-    background: var(--card-bg);
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-  }
-  .context-grid {
-    display: grid;
-    grid-template-columns: 1fr 1.25fr;
-    gap: 12px;
-  }
-  .field-group {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    min-width: 0;
-  }
-  .field-group label {
-    font-size: 11.5px;
-    font-weight: 600;
-    color: GrayText;
-  }
-
-  /* Progressive Disclosure Drawers */
-  details.sub-drawer,
-  details.zone-drawer {
-    border: 1px solid var(--card-border);
-    border-radius: 10px;
-    background: rgba(128, 128, 128, 0.03);
-    overflow: hidden;
-  }
-  details.sub-drawer summary,
-  details.zone-drawer summary {
-    padding: 8px 12px;
-    cursor: pointer;
-    font-weight: 600;
-    font-size: 12px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    list-style: none;
-  }
-  details.sub-drawer summary::-webkit-details-marker,
-  details.zone-drawer summary::-webkit-details-marker {
-    display: none;
-  }
-  .summary-title {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .chevron {
-    display: inline-block;
-    font-size: 10px;
-    transition: transform 0.15s ease;
-    color: GrayText;
-  }
-  details[open] > summary .chevron {
-    transform: rotate(90deg);
-  }
-  .drawer-body {
-    padding: 10px 12px 12px;
-    border-top: 1px solid var(--card-border);
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-  .notes-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-  }
-
-  #settings_summary_pill {
-    font-size: 11px;
-    font-weight: 500;
-    color: GrayText;
-    background: rgba(128, 128, 128, 0.10);
-    padding: 2px 9px;
-    border-radius: 999px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 460px;
-  }
-
-  /* Form Elements & Rows */
-  .row {
-    display: flex;
-    gap: 6px;
-    align-items: center;
-    flex-wrap: wrap;
-  }
-  .row label {
-    width: 118px;
-    flex-shrink: 0;
-    font-weight: 500;
-    font-size: 12px;
-    color: GrayText;
-  }
-  input[type="text"],
-  input[type="password"],
-  input[type="number"],
-  select,
-  textarea {
-    flex: 1;
-    padding: 5px 9px;
-    border-radius: 7px;
-    border: 1px solid var(--input-border);
-    background: Field;
-    color: FieldText;
-    font-size: 12.5px;
-    font-family: inherit;
-    min-width: 0;
-  }
-  input:focus, select:focus, textarea:focus {
-    outline: 2px solid var(--accent);
-    outline-offset: -1px;
-  }
-  textarea {
-    resize: vertical;
-    min-height: 58px;
-    max-height: 120px;
-  }
-  input.conflict {
-    border-color: var(--warn);
-    background: rgba(255, 159, 10, 0.08);
-  }
-  button {
-    padding: 5px 11px;
-    border-radius: 7px;
-    border: 1px solid var(--input-border);
-    background: ButtonFace;
-    color: ButtonText;
-    cursor: pointer;
-    font-size: 12px;
-    font-weight: 500;
-    white-space: nowrap;
-    transition: opacity 0.15s ease, border-color 0.15s ease;
-  }
-  button:hover:not(:disabled) {
-    border-color: var(--accent);
-  }
-  button.btn-sm {
-    padding: 3px 8px;
-    font-size: 11.5px;
-  }
-  button.primary {
-    background: var(--accent);
-    color: white;
-    border: none;
-    font-weight: 600;
-    padding: 7px 18px;
-    font-size: 13px;
-  }
-  button.primary:hover:not(:disabled) {
-    background: var(--accent-hover);
-  }
-  button.danger {
-    background: var(--danger-soft);
-    color: var(--danger);
-    border-color: rgba(255, 69, 58, 0.45);
-    font-weight: 600;
-  }
-  button:disabled {
-    opacity: 0.42;
-    cursor: not-allowed;
-  }
-
-  /* Checkpoints & Hardware Banner */
-  .status-strip {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    flex-wrap: wrap;
-    padding: 6px 12px;
-    border-radius: 10px;
-    border: 1px solid var(--card-border);
-    background: var(--card-bg);
-  }
-  .ckpt-bar {
-    display: flex;
-    gap: 5px;
-    align-items: center;
-    flex-wrap: wrap;
-  }
-  .ckpt-pill {
-    font-size: 11px;
-    padding: 2px 9px;
-    border-radius: 999px;
-    border: 1px solid var(--card-border);
-    color: GrayText;
-    background: rgba(128, 128, 128, 0.06);
-    cursor: pointer;
-    transition: all 0.15s ease;
-  }
-  .ckpt-pill.done {
-    border-color: rgba(48, 209, 88, 0.65);
-    background: var(--success-soft);
-    color: CanvasText;
-    font-weight: 600;
-  }
-  .ckpt-pill:hover { border-color: var(--accent); }
-
-  #hw_resource_banner {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    border-radius: 999px;
-    padding: 2px 10px;
-    font-size: 11px;
-    border: 1px solid rgba(48, 209, 88, 0.45);
-    background: rgba(48, 209, 88, 0.08);
-  }
-  #hw_resource_banner.warning {
-    border-color: rgba(255, 159, 10, 0.85);
-    background: var(--warn-soft);
-    font-weight: 500;
-  }
-  #hw_resource_banner.critical {
-    border-color: rgba(255, 69, 58, 0.9);
-    background: var(--danger-soft);
-    color: var(--danger);
-    font-weight: 600;
-  }
-
-  /* Footer Action & Progress Card */
-  .action-card {
-    border: 1px solid var(--card-border);
-    border-radius: 12px;
-    padding: 10px 14px;
-    background: var(--card-bg);
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-  .action-bar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-  }
-  #conflict-msg {
-    color: GrayText;
-    font-size: 11.5px;
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .progress-section {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-  .progress-header {
-    display: flex;
-    justify-content: space-between;
-    font-size: 11.5px;
-    color: GrayText;
-  }
-  .progress-bg {
-    width: 100%;
-    height: 7px;
-    background: rgba(128, 128, 128, 0.22);
-    border-radius: 999px;
-    overflow: hidden;
-  }
-  .progress-fill {
-    height: 100%;
-    width: 0%;
-    background: var(--accent);
-    border-radius: 999px;
-    transition: width 0.3s ease;
-  }
-
-  /* Activity Log Area */
-  .log-container {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    min-height: 95px;
-  }
-  .log-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    font-size: 11px;
-    color: GrayText;
-    padding: 0 2px;
-  }
-  #log {
-    flex: 1;
-    background: rgba(128, 128, 128, 0.08);
-    border-radius: 10px;
-    padding: 9px 11px;
-    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-    font-size: 11.5px;
-    overflow-y: auto;
-    white-space: pre-wrap;
-    user-select: text;
-    border: 1px solid var(--card-border);
-    min-height: 80px;
-  }
-
-  /* --- Top App Menubar & Uninstall Confirmation Modal --- */
-  .app-menubar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 2px 4px 4px 4px;
-    border-bottom: 1px solid var(--card-border);
-    font-size: 12px;
-    position: relative;
-  }
-  .menubar-left {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-  .brand-pill {
-    font-weight: 700;
-    font-size: 12px;
-    letter-spacing: 0.01em;
+  .brand-divider {
+    width: 1px;
+    height: 16px;
+    background: var(--border);
   }
   .brand-sub {
-    color: GrayText;
-    font-size: 11px;
+    margin: 0;
+    font-size: 11.5px;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
-  .menu-dropdown-wrap {
-    position: relative;
+
+  /* Center Storyboard Sequence Strip */
+  .storyboard-strip {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--surface-muted);
+    padding: 3px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
   }
+  .sb-nav-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 6px;
+    border: none;
+    background: transparent;
+    color: var(--muted);
+    font-size: 11.5px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.12s ease;
+  }
+  .sb-nav-pill:hover {
+    color: var(--text);
+  }
+  .sb-nav-pill.active {
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+  }
+  .sb-nav-idx {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 1px 4px;
+    border-radius: 4px;
+    background: var(--surface-muted);
+    color: var(--muted);
+  }
+  .sb-nav-pill.active .sb-nav-idx {
+    background: var(--accent);
+    color: #fff;
+  }
+  .sb-nav-sep {
+    color: var(--border-strong);
+    font-size: 10px;
+    user-select: none;
+  }
+
+  .topbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+
+  @media (max-width: 1120px) {
+    .brand-sub, .brand-divider, #fsm_state_summary {
+      display: none;
+    }
+  }
+  @media (max-height: 740px) {
+    .vo-extra-tip {
+      display: none;
+    }
+  }
+
+  /* File dropdown menu */
+  .menu-wrap { position: relative; }
   .menu-dropdown {
     display: none;
     position: absolute;
-    top: calc(100% + 4px);
     left: 0;
-    min-width: 240px;
-    background: Canvas;
-    color: CanvasText;
-    border: 1px solid var(--card-border);
+    top: calc(100% + 5px);
+    min-width: 230px;
+    background: var(--surface-elevated);
+    border: 1px solid var(--border);
     border-radius: 8px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
-    padding: 4px;
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.18);
     z-index: 1000;
+    padding: 4px;
   }
-  .menu-dropdown.open {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
+  .menu-dropdown.open { display: block; }
   .menu-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
     text-align: left;
     background: transparent;
     border: none;
     padding: 6px 10px;
-    border-radius: 6px;
     font-size: 12px;
-    font-weight: 500;
+    border-radius: 5px;
+    color: var(--text);
     cursor: pointer;
-    color: CanvasText;
+    font-weight: 500;
   }
-  .menu-item:hover {
-    background: var(--subtle-bg);
-  }
-  .menu-item.danger-item {
-    color: #ef4444;
-  }
-  .menu-sep {
-    height: 1px;
-    background: var(--card-border);
-    margin: 3px 0;
-  }
+  .menu-item:hover { background: var(--surface-muted); }
+  .menu-item.danger { color: var(--danger); font-weight: 600; }
+  .menu-item.danger:hover { background: var(--danger-soft); }
+  .menu-sep { height: 1px; background: var(--border); margin: 4px 0; }
+
+  /* Native Modal Dialog */
   dialog#uninstall_modal {
-    border: 1px solid var(--card-border);
+    border: 1px solid var(--border);
     border-radius: 12px;
     padding: 18px 20px;
-    max-width: 430px;
-    background: Canvas;
-    color: CanvasText;
-    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.3);
+    max-width: 420px;
+    width: calc(100% - 32px);
+    background: var(--surface-elevated);
+    color: var(--text);
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
   }
-  dialog#uninstall_modal::backdrop {
-    background: rgba(0, 0, 0, 0.45);
+  dialog:modal { overscroll-behavior: contain; }
+  dialog::backdrop {
+    overflow: hidden;
+    overscroll-behavior: contain;
+    background: rgba(9, 13, 22, 0.6);
+    backdrop-filter: blur(2px);
   }
   .modal-title {
-    margin: 0 0 8px 0;
-    font-size: 15px;
+    font-size: 14.5px;
     font-weight: 700;
+    color: var(--danger);
+    margin: 0 0 8px 0;
   }
   .modal-body {
-    margin: 0 0 16px 0;
     font-size: 12.5px;
-    line-height: 1.45;
-    color: CanvasText;
+    color: var(--text);
+    line-height: 1.5;
+    margin-bottom: 14px;
   }
   .modal-actions {
     display: flex;
     justify-content: flex-end;
     gap: 8px;
   }
+
+  /* =========================================================================
+     2x2 STORYBOARD WORKFLOW CANVAS (FITS 100% OF VIEWPORT HEIGHT)
+     ========================================================================= */
+  .storyboard-board {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 10px;
+    padding: 10px 14px 12px 14px;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  /* Focus Mode: single enlarged Storyboard Frame when user chooses Step Focus */
+  body.focus-mode .storyboard-board {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+  }
+  body.focus-mode .sb-frame {
+    display: none;
+  }
+  body.focus-mode .sb-frame.focused-frame {
+    display: flex;
+  }
+
+  /* Individual Storyboard Frame Card */
+  .sb-frame {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    min-width: 0;
+    overflow: hidden;
+    position: relative;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  .sb-frame.active-scene {
+    border-color: var(--accent-border);
+    box-shadow: 0 0 0 1px var(--accent-border);
+  }
+
+  .sb-frame-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 12px;
+    background: var(--surface-subtle);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .sb-frame-title-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+  .sb-frame-num {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 10.5px;
+    font-weight: 800;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: var(--text);
+    color: var(--surface);
+    letter-spacing: 0.02em;
+  }
+  .sb-frame.active-scene .sb-frame-num {
+    background: var(--accent);
+    color: #fff;
+  }
+  .sb-frame-title {
+    font-size: 11.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .sb-frame-body {
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  /* =========================================================================
+     SCENE 01: INTENT & SESSION FORMAT
+     ========================================================================= */
+  .intent-tiles {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+    flex-shrink: 0;
+  }
+  .intent-tile {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    padding: 7px 9px;
+    background: var(--surface-subtle);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    cursor: pointer;
+    text-align: left;
+    color: var(--text);
+    transition: all 0.12s ease;
+  }
+  .intent-tile:hover {
+    border-color: var(--border-strong);
+    background: var(--surface-muted);
+  }
+  .intent-tile.active {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    box-shadow: inset 0 0 0 1px var(--accent);
+  }
+  .intent-tile-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text);
+    white-space: nowrap;
+  }
+  .intent-tile.active .intent-tile-title {
+    color: var(--accent);
+  }
+  .intent-tile-sub {
+    font-size: 10.5px;
+    color: var(--muted);
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    width: 100%;
+  }
+
+  /* Segmented Format Bar */
+  .segmented-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    background: var(--surface-subtle);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 4px 8px;
+    flex-shrink: 0;
+  }
+  .segmented-label {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .segmented-group {
+    display: inline-flex;
+    background: var(--surface-muted);
+    padding: 2px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    gap: 2px;
+  }
+  .seg-btn {
+    border: none;
+    background: transparent;
+    color: var(--muted);
+    padding: 3px 9px;
+    font-size: 11px;
+    font-weight: 600;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  .seg-btn:hover { color: var(--text); }
+  .seg-btn.active {
+    background: var(--surface);
+    color: var(--accent);
+    font-weight: 700;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+  }
+
+  /* Language Detection Confirmation Banner */
+  .lang-confirm-banner {
+    display: none;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 6px 9px;
+    border-radius: 7px;
+    background: var(--warn-soft);
+    border: 1px solid var(--warn);
+    color: var(--text);
+    font-size: 11px;
+    flex-shrink: 0;
+  }
+  .lang-confirm-banner.open {
+    display: flex;
+  }
+  body:has(#lang_confirm_banner.open) .vo-extra-tip {
+    display: none;
+  }
+
+  /* Dynamic Source Stage inside Frame 01 */
+  .source-stage {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    gap: 8px;
+  }
+
+  /* Voiceover Guide Box */
+  .vo-card {
+    background: var(--accent-soft);
+    border: 1px solid var(--accent-border);
+    border-radius: 7px;
+    padding: 9px 11px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 6px;
+    flex: 1;
+    min-height: 0;
+  }
+  .vo-card-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: nowrap;
+  }
+  .vo-card-title {
+    font-size: 11.5px;
+    font-weight: 700;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .vo-steps {
+    margin: 2px 0 0 0;
+    padding-left: 16px;
+    font-size: 11.5px;
+    color: var(--text);
+    line-height: 1.45;
+  }
+  .vo-steps li + li {
+    margin-top: 3px;
+  }
+
+  /* Compact Dropzone */
+  #dropzone {
+    border: 1.5px dashed var(--border-strong);
+    border-radius: 7px;
+    padding: 7px 10px;
+    background: var(--surface-subtle);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    transition: all 0.12s ease;
+    flex-shrink: 0;
+  }
+  #dropzone:hover, #dropzone.dragover {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+  #dropzone p {
+    margin: 0;
+    font-size: 11.5px;
+    color: var(--muted);
+  }
+  #selected-file {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--accent);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 240px;
+  }
+
+  /* Resumable Sessions List */
+  .resume-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+  }
+  .resume-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 5px 8px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+  }
+  .resume-item-title {
+    font-weight: 700;
+    font-size: 11.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .resume-item-meta {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+    margin-top: 2px;
+  }
+  .stage-dot {
+    font-size: 10px;
+    padding: 0 5px;
+    border-radius: 3px;
+    background: var(--surface-muted);
+    color: var(--muted);
+    font-weight: 600;
+  }
+  .stage-dot.done {
+    background: var(--ok-soft);
+    color: var(--ok);
+  }
+
+  /* =========================================================================
+     SCENE 02: MICROPHONE STUDIO, LEVEL METER & CAPTURE
+     ========================================================================= */
+  .mic-controls-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  .mic-controls-grid > div {
+    min-width: 0;
+  }
+  .vol-gain-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    background: var(--surface-subtle);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 6px 10px;
+    flex-shrink: 0;
+  }
+  .meter-strip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  .mic-meter-track {
+    flex: 1;
+    height: 8px;
+    background: var(--surface-muted);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    overflow: hidden;
+  }
+  .mic-meter-fill {
+    height: 100%;
+    width: 6%;
+    background: linear-gradient(90deg, #16a34a 0%, #22c55e 68%, #eab308 86%, #dc2626 100%);
+    transition: width 0.16s ease-out;
+    border-radius: 999px;
+  }
+  .transport-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 7px 10px;
+    background: var(--surface-subtle);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    flex-shrink: 0;
+  }
+  .btn-rec {
+    background: var(--danger);
+    color: #fff;
+    border: none;
+    font-weight: 700;
+    padding: 6px 13px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .btn-rec:hover { background: var(--danger-hover); }
+  .btn-rec.recording {
+    background: #111827;
+    animation: rec-pulse 1.4s infinite;
+  }
+  @keyframes rec-pulse {
+    0% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.55); }
+    70% { box-shadow: 0 0 0 7px rgba(220, 38, 38, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0); }
+  }
+  .rec-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: #fff;
+    display: inline-block;
+  }
+  .rec-timer {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-weight: 700;
+    font-size: 13px;
+    color: var(--danger);
+    min-width: 44px;
+  }
+  .live-ticker {
+    flex: 1;
+    min-height: 36px;
+    background: var(--log-bg);
+    color: var(--log-fg);
+    border-radius: 6px;
+    padding: 5px 8px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px;
+    overflow-y: auto;
+  }
+
+  /* =========================================================================
+     SCENE 03: CONTEXT, AGENDA, SLIDES & SPEAKERS
+     ========================================================================= */
+  .context-split {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    flex: 1;
+    min-height: 0;
+  }
+  .context-col {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .context-col textarea {
+    flex: 1;
+    min-height: 0;
+    resize: none;
+  }
+  #context_notes_drawer {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+  }
+
+  /* =========================================================================
+     SCENE 04: PIPELINE CHECKPOINTS, MODELS & EXECUTION
+     ========================================================================= */
+  .ckpt-bar {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 4px;
+    flex-shrink: 0;
+  }
+  .ckpt-pill {
+    font-size: 10.5px;
+    padding: 5px 6px;
+    border-radius: 6px;
+    background: var(--surface-subtle);
+    color: var(--muted);
+    border: 1px solid var(--border);
+    font-weight: 600;
+    cursor: pointer;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .ckpt-pill:hover { border-color: var(--accent); color: var(--text); }
+  .ckpt-pill.done {
+    background: var(--ok-soft);
+    color: var(--ok);
+    border-color: #86efac;
+  }
+  .ckpt-pill.selected-stage {
+    border-color: var(--accent);
+    box-shadow: inset 0 0 0 1px var(--accent);
+  }
+
+  /* Floating Overlay Popover for Advanced Settings so it NEVER causes scrollbars */
+  details#advanced_settings_drawer {
+    position: relative;
+  }
+  details#advanced_settings_drawer > summary {
+    list-style: none;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 8px;
+    border-radius: 5px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  details#advanced_settings_drawer > summary::-webkit-details-marker { display: none; }
+  details#advanced_settings_drawer > .settings-popover {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 6px);
+    width: 520px;
+    max-width: 90vw;
+    background: var(--surface-elevated);
+    border: 1px solid var(--border-strong);
+    border-radius: 10px;
+    padding: 12px;
+    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.25);
+    z-index: 500;
+  }
+
+  .hw-banner {
+    padding: 5px 9px;
+    border-radius: 6px;
+    font-size: 11px;
+    background: var(--surface-subtle);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  .run-bar {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    flex-shrink: 0;
+  }
+  .btn-primary {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    padding: 8px 14px;
+    font-size: 12.5px;
+    font-weight: 700;
+    flex: 1;
+    border-radius: 7px;
+    cursor: pointer;
+  }
+  .btn-primary:hover { background: var(--accent-hover); }
+  .btn-primary:disabled { opacity: 0.55; cursor: not-allowed; }
+  .btn-stop {
+    background: var(--danger);
+    color: #fff;
+    border: none;
+    padding: 8px 12px;
+    font-size: 12px;
+    font-weight: 700;
+    border-radius: 7px;
+    display: none;
+  }
+
+  .output-files-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    padding: 4px 8px;
+    background: var(--surface-subtle);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    flex-shrink: 0;
+  }
+  .output-files-label {
+    font-size: 10.5px;
+    font-weight: 700;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .out-file-btn {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .out-file-btn.ready {
+    background: var(--ok-soft);
+    color: var(--ok);
+    border-color: #86efac;
+    font-weight: 700;
+  }
+  .btn-playing {
+    background: var(--accent) !important;
+    color: #fff !important;
+    border-color: var(--accent) !important;
+  }
+
+  .progress-wrap {
+    flex-shrink: 0;
+    background: var(--surface-subtle);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 7px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .progress-bar-bg {
+    width: 100%;
+    height: 10px;
+    background: var(--surface-muted);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    overflow: hidden;
+  }
+  #progress_bar {
+    width: 0%;
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent) 0%, #3b82f6 100%);
+    transition: width 0.25s ease;
+    border-radius: 999px;
+  }
+  .status-line {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11.5px;
+    font-weight: 600;
+    gap: 8px;
+  }
+  #log_drawer_wrap {
+    display: none;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1;
+    min-height: 0;
+  }
+  #log_drawer_wrap.open {
+    display: flex;
+  }
+  #log {
+    background: var(--log-bg);
+    color: var(--log-fg);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px;
+    padding: 7px 9px;
+    border-radius: 6px;
+    flex: 1;
+    min-height: 44px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    margin: 0;
+    user-select: text;
+  }
+
+  /* Shared Compact Controls */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+  .row { display: flex; gap: 6px; align-items: center; }
+  label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 2px;
+    color: var(--text);
+    font-size: 11px;
+  }
+  input[type="text"],
+  input[type="password"],
+  input[type="number"],
+  input[type="url"],
+  select,
+  textarea {
+    width: 100%;
+    padding: 5px 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 12px;
+    background: var(--surface);
+    color: var(--text);
+    font-family: inherit;
+  }
+  input:focus, select:focus, textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(29, 78, 216, 0.18);
+  }
+  button {
+    padding: 4px 9px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    font-weight: 600;
+    cursor: pointer;
+    font-size: 11.5px;
+    white-space: nowrap;
+  }
+  button:hover { background: var(--surface-muted); }
+  .btn-xs { padding: 2px 7px; font-size: 10.5px; border-radius: 5px; }
+  .btn-accent {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+  }
+  .btn-accent:hover { background: var(--accent-hover); }
+  .warning {
+    color: var(--warn);
+    font-size: 11px;
+    font-weight: 600;
+    margin-top: 4px;
+    display: none;
+  }
 </style>
 </head>
 <body>
 
-  <!-- Top File Menu Bar -->
-  <nav class="app-menubar" aria-label="Application Menu">
-    <div class="menubar-left">
-      <div class="menu-dropdown-wrap">
-        <button id="file_menu_btn" class="btn-sm" onclick="toggleFileMenu(event)" aria-haspopup="true" aria-expanded="false">Fil ▾</button>
-        <div id="file_menu_dropdown" class="menu-dropdown" role="menu">
-          <button id="menu_open_btn" class="menu-item" role="menuitem" onclick="closeFileMenu(); browseAudio();">Velg lydfil / transkripsjon...</button>
-          <button id="menu_folder_btn" class="menu-item" role="menuitem" onclick="closeFileMenu(); openFinder();">Åpne utdatamappe</button>
-          <div class="menu-sep"></div>
-          <button id="menu_install_btn" class="menu-item" role="menuitem" onclick="closeFileMenu(); installStenoShortcut();">Installer snarvei (Skrivebord / CLI)</button>
-          <button id="menu_uninstall_btn" class="menu-item danger-item" role="menuitem" onclick="closeFileMenu(); openUninstallDialog();">Avinstaller Steno og fjern mellomlagrede filer...</button>
-        </div>
-      </div>
-      <span class="brand-pill">Steno</span>
-      <span id="lbl_brand_sub" class="brand-sub">A modern annalist for your meetings — an automaton stenographer</span>
-    </div>
-  </nav>
-
-  <!-- Uninstall Confirmation Y/N Dialog -->
-  <dialog id="uninstall_modal" aria-labelledby="uninstall_modal_title">
-    <h3 class="modal-title" id="uninstall_modal_title">Avinstaller Steno?</h3>
-    <p class="modal-body" id="uninstall_modal_body">
-      Er du sikker på at du vil avinstallere Steno og slette alle mellomlagrede filer, kjøremiljøer, modeller og snarveier (<code>~/.local/share/steno</code> og <code>~/.local/share/mote_transcribe</code>)?<br><br>
-      <strong>Dine møteopptak, transkripsjoner og referater slettes ikke.</strong>
-    </p>
-    <div class="modal-actions">
-      <button id="confirm_uninstall_no_btn" onclick="closeUninstallDialog()">Nei, avbryt</button>
-      <button id="confirm_uninstall_yes_btn" class="danger" onclick="confirmUninstallYes()">Ja, avinstaller</button>
-    </div>
-  </dialog>
-
-  <!-- ZONE 1: Audio Input & Live Recording -->
-  <div class="top-cards">
-    <div id="dropzone">
-      <div class="dz-text">
-        <strong id="lbl_step1_title">1. Lydfil eller transkripsjon</strong>
-        <span id="selected-file">Slipp fil her (.m4a, .wav, .opus, .mp3, .html, .json) eller velg...</span>
-      </div>
-      <div class="dz-actions">
-        <button id="check_audio_btn" class="btn-sm" onclick="runQuickAudioCheck()" disabled title="Kjør grov sanntidstranskripsjon og lydnivåsjekk (dBFS) på de første 20 sekundene av valgt lydfil">Lydsjekk (20s)</button>
-        <button id="browse_audio_btn" onclick="browseAudio()">Velg fil...</button>
-        <button id="url_audio_btn" class="btn-sm" onclick="promptAudioUrl()" title="Hent eller strøm lyd fra nettadresse (podcast, video, opptak, strøm)">Nettadresse (URL)...</button>
-      </div>
+<div class="app-shell">
+  <!-- ===================================================================== -->
+  <!-- TOP STUDIO HEADER BAR (46px)                                          -->
+  <!-- ===================================================================== -->
+  <header class="studio-topbar">
+    <div class="brand-cluster">
+      <span class="brand-mark" aria-hidden="true">S</span>
+      <h1 class="brand-title" id="lbl_app_title">Steno</h1>
+      <span class="brand-divider" aria-hidden="true"></span>
+      <p class="brand-sub" id="lbl_app_sub">Lokal møte- og forelesningsstenograf</p>
     </div>
 
-    <div class="rec-card">
-      <div class="rec-controls">
-        <button id="rec_btn" onclick="toggleRecording()">🎙️ Spill inn møte</button>
-        <span id="rec_timer">00:00</span>
-        <span id="live_level_badge" class="live-badge" title="Sanntids lydnivå (dBFS) fra mikrofon">Lyd: klar</span>
-        <button id="speak_guide_btn" class="btn-sm" onclick="speakGuide()" title="Les opp møtestart-instruks høyt">Tale-instruks</button>
-      </div>
-      <div class="rec-options">
-        <label>
-          <input type="checkbox" id="auto_speak_guide" checked>
-          <span id="lbl_auto_speak">Les opp navnerunde-guide</span>
-        </label>
-        <label title="Transkriberer grove 5-sekunders utsnitt fortløpende under opptak for å bekrefte at alle rundt bordet høres tydelig">
-          <input type="checkbox" id="live_transcribe_chk" checked>
-          <span id="lbl_live_chk">Sanntids-lydsjekk</span>
-        </label>
-      </div>
-    </div>
-  </div>
+    <!-- Storyboard Sequence Bar -->
+    <nav class="storyboard-strip" aria-label="Storyboard">
+      <button type="button" id="ux_step_btn_1" class="sb-nav-pill active" onclick="setUxStep('1_source')">
+        <span class="sb-nav-idx">01</span>
+        <span id="lbl_step1_nav">Oppsett &amp; Kilde</span>
+      </button>
+      <span class="sb-nav-sep" aria-hidden="true">›</span>
+      <button type="button" id="ux_step_btn_2" class="sb-nav-pill" onclick="setUxStep('2_audio')">
+        <span class="sb-nav-idx">02</span>
+        <span id="lbl_step2_audio_nav">Lydstudio</span>
+      </button>
+      <span class="sb-nav-sep" aria-hidden="true">›</span>
+      <button type="button" id="ux_step_btn_3" class="sb-nav-pill" onclick="setUxStep('2_context')">
+        <span class="sb-nav-idx">03</span>
+        <span id="lbl_step2_nav">Kontekst &amp; Agenda</span>
+      </button>
+      <span class="sb-nav-sep" aria-hidden="true">›</span>
+      <button type="button" id="ux_step_btn_4" class="sb-nav-pill" onclick="setUxStep('3_run')">
+        <span class="sb-nav-idx">04</span>
+        <span id="lbl_step3_nav">Pipeline &amp; Kjør</span>
+      </button>
+    </nav>
 
-  <div id="prompt_banner">
-    <strong>Møtestart-guide for god talergjenkjenning og lydsjekk:</strong><br>
-    1. <b>Møteleder:</b> Si kort hva møtet gjelder og dagens dato.<br>
-    2. <b>Navnerunde rundt bordet:</b> Hver deltaker sier eget navn og tittel/rolle i én hel setning. Følg med i <b>Sanntids-lydsjekk</b> under for å se at alle rundt bordet fanges opp med <i>Godt lydnivå</i> (slå av macOS «Stemmeisolasjon» hvis noen faller ut).
-  </div>
-
-  <div id="live_check_panel"></div>
-
-  <!-- ZONE 2: Essential Meeting Context + Progressive Disclosure for Agenda/Notes -->
-  <div class="context-card">
-    <div class="context-grid">
-      <div class="field-group">
-        <label for="meeting_title" id="lbl_meeting_title">2. Møtetittel & Dato</label>
-        <input type="text" id="meeting_title" placeholder="F.eks. Prosjektmøte – 2026-10-29">
-      </div>
-      <div class="field-group">
-        <label for="speaker_names_hint" id="lbl_speakers_hint">Deltakere & Roller (setter antall talere automatisk)</label>
-        <input type="text" id="speaker_names_hint" placeholder="F.eks. Ola Nordmann (Møteleder), Kari Hansen (Arkitekt)" oninput="autoCountSpeakersFromHint()">
-      </div>
-    </div>
-
-    <details id="context_notes_drawer" class="sub-drawer">
-      <summary>
-        <span class="summary-title">
-          <span class="chevron">▶</span>
-          <span id="lbl_context_drawer">📎 Agenda, lysbilder & manuelle møtenotater (valgfritt)</span>
-          <span id="context_count_badge" style="font-weight: 500; color: GrayText; font-size: 11px;"></span>
-        </span>
-        <span style="display: inline-flex; gap: 6px;" onclick="event.stopPropagation();">
-          <button id="btn_add_agenda" class="btn-sm" onclick="loadAgendaFile()" title="Last inn agenda eller lysbilder (.pptx, .pdf, .odp, .docx, .md, .txt)">+ Agenda / Lysbilder...</button>
-          <button id="btn_add_notes" class="btn-sm" onclick="loadManualNotesFile()" title="Last inn manuelle møtenotater / referat-utkast (.odt, .docx, .pdf, .md, .txt)">+ Manuelle notater...</button>
-        </span>
-      </summary>
-      <div class="drawer-body">
-        <div class="notes-grid">
-          <div class="field-group">
-            <label for="agenda_text" id="lbl_agenda_text">Agenda / Lysbilder (.pptx, .pdf, .docx, .md)</label>
-            <textarea id="agenda_text" placeholder="Lim inn saksliste eller klikk «+ Agenda / Lysbilder...»" oninput="updateSettingsSummary()"></textarea>
-          </div>
-          <div class="field-group">
-            <label for="manual_notes_text" id="lbl_manual_notes_text">Manuelle møtenotater / Fasit-utkast (.odt, .docx, .md)</label>
-            <textarea id="manual_notes_text" placeholder="Valgfritt: Egne notater fra møtet for å kvalitetssikre navn, saker og vedtak..." oninput="updateSettingsSummary()"></textarea>
-          </div>
-        </div>
-      </div>
-    </details>
-  </div>
-
-  <!-- Compact Checkpoint & Hardware Status Strip -->
-  <div class="status-strip">
-    <div class="ckpt-bar" id="ckpt_bar">
-      <span id="lbl_stages" style="font-size: 11px; font-weight: 600; color: GrayText; margin-right: 2px;">Steg:</span>
-      <span class="ckpt-pill" id="ckpt_s1" onclick="selectTaskMode('only_1_asr')" title="Klikk for å kjøre kun Steg 1 (Whisper ASR)">1. ASR</span>
-      <span class="ckpt-pill" id="ckpt_s2" onclick="selectTaskMode('only_2_align')" title="Klikk for å kjøre kun Steg 2 (Alignment)">2. Align</span>
-      <span class="ckpt-pill" id="ckpt_s3" onclick="selectTaskMode('from_3_diarize')" title="Klikk for å kjøre fra Steg 3 (Pyannote -> Referat)">3. Pyannote</span>
-      <span class="ckpt-pill" id="ckpt_s4" onclick="selectTaskMode('from_4_names')" title="Klikk for å kjøre fra Steg 4 (Navn & HTML -> Referat)">4. Navn & HTML</span>
-      <span class="ckpt-pill" id="ckpt_s5" onclick="selectTaskMode('only_5_notes')" title="Klikk for å kjøre kun Steg 5 (Generer Referat/Notat på nytt)">5. Referat/Notat</span>
-    </div>
-
-    <div style="display: inline-flex; align-items: center; gap: 8px;">
-      <div id="hw_resource_banner">
-        <span id="hw_resource_text">Sjekker maskinvare...</span>
-        <button id="apply_rec_btn" class="btn-sm" onclick="applyRecommendedProfile()" style="display: none;">Bruk anbefalt</button>
-      </div>
-      <select id="ui_lang_select" onchange="setUiLanguage(this.value)" style="max-width: 78px; padding: 2px 6px; font-size: 11px;" title="UI Language / Grensesnittspråk">
-        <option value="no" selected>🇳🇴 NO</option>
-        <option value="en">🇬🇧 EN</option>
+    <div class="topbar-actions">
+      <span id="fsm_state_summary" style="font-size:11px; color:var(--muted); font-weight:600; padding:0 4px;">Opptak · Møte</span>
+      <button type="button" id="toggle_all_steps_btn" class="btn-xs" onclick="toggleAllStepsView()" title="Bytt mellom 2x2 Storyboard-brett og 1-bildes fokusmodus">Fokusmodus</button>
+      <select id="ui_lang_select" aria-label="Menyspråk / Menu language" onchange="setUiLanguage(this.value, true)" style="width:auto; padding:3px 7px; font-size:11px; font-weight:600;" title="Menyspråk (uavhengig av talespråk og system-locale) / Menu language">
+        <option value="no">Meny: NO</option>
+        <option value="en">Menu: EN</option>
       </select>
     </div>
+  </header>
+
+  <!-- ===================================================================== -->
+  <!-- 2x2 STORYBOARD WORKFLOW BOARD (FITS 100% IN VIEWPORT)                 -->
+  <!-- ===================================================================== -->
+  <main class="storyboard-board">
+
+    <!-- =================================================================== -->
+    <!-- SCENE 01: INTENT, SESSION FORMAT & SOURCE SELECTION                 -->
+    <!-- =================================================================== -->
+    <section id="sb_frame_1" class="sb-frame active-scene focused-frame" onclick="highlightFrame(1)">
+      <div class="sb-frame-header">
+        <div class="sb-frame-title-wrap">
+          <span class="sb-frame-num">01</span>
+          <span class="sb-frame-title" id="lbl_step1_title">Oppsett, øktformat og lydkilde</span>
+        </div>
+        <div style="display:flex; gap:6px; align-items:center; min-width:0;">
+          <div id="selected-file" title="Aktiv lyd- eller transkripsjonsfil">Ingen fil valgt</div>
+          <button type="button" class="btn-xs" id="play_selected_btn" onclick="event.stopPropagation(); togglePlaySelectedAudio()" title="Spill av eller stopp valgt lydfil">▶ Spill av</button>
+        </div>
+      </div>
+
+      <div class="sb-frame-body">
+        <!-- 3 Unified Source Intents (Record | Existing File & Resume | Stream/URL) -->
+        <div class="intent-tiles" role="tablist">
+          <button type="button" id="intent_btn_record" class="intent-tile active" onclick="setUxIntent('record')">
+            <span class="intent-tile-title" id="lbl_intent_record">Spill inn nå</span>
+            <span class="intent-tile-sub" id="lbl_intent_record_sub">Lokal mikrofon</span>
+          </button>
+          <button type="button" id="intent_btn_file" class="intent-tile" onclick="setUxIntent('file')">
+            <span class="intent-tile-title" id="lbl_intent_file">Fil / Gjenoppta økt</span>
+            <span class="intent-tile-sub" id="lbl_intent_file_sub">Velg fil eller lagret økt</span>
+          </button>
+          <button type="button" id="intent_btn_stream" class="intent-tile" onclick="setUxIntent('stream')">
+            <span class="intent-tile-title" id="lbl_intent_stream">Strøm / URL</span>
+            <span class="intent-tile-sub" id="lbl_intent_stream_sub">Møtestrøm / lenke</span>
+          </button>
+        </div>
+
+        <!-- Session Format Switch (Meeting vs Lecture) + Audio Speech Language Selector -->
+        <div class="segmented-row" style="gap:6px; flex-wrap:nowrap;">
+          <div style="display:flex; align-items:center; gap:6px; min-width:0;">
+            <span class="segmented-label" id="lbl_format_heading">Økt</span>
+            <div class="segmented-group" role="group" aria-label="Øktformat">
+              <button type="button" id="fmt_btn_mote" class="seg-btn active" onclick="setSessionFormat('mote')">Møte</button>
+              <button type="button" id="fmt_btn_foredrag" class="seg-btn" onclick="setSessionFormat('foredrag')">Forelesning</button>
+              <button type="button" id="fmt_btn_auto" class="seg-btn" onclick="setSessionFormat('auto')">Auto</button>
+            </div>
+          </div>
+
+          <div style="display:flex; align-items:center; gap:5px; min-width:0;">
+            <label for="audio_lang_select" class="segmented-label" id="lbl_audio_lang_heading" style="margin:0;">Tale</label>
+            <select id="audio_lang_select" onchange="onAudioLangSelectChanged(this.value)" style="width:auto; max-width:138px; padding:3px 6px; font-size:11px; font-weight:600;" title="Talespråk i lydopptaket (velger og lagrer anbefalt språkmodell automatisk)">
+              <option value="no" selected>Norsk (no)</option>
+              <option value="en">English (en)</option>
+              <option value="auto">Auto (oppdag)</option>
+              <option value="sv">Svenska (sv)</option>
+              <option value="da">Dansk (da)</option>
+              <option value="de">Deutsch (de)</option>
+              <option value="es">Español (es)</option>
+              <option value="fr">Français (fr)</option>
+              <option value="fi">Suomi (fi)</option>
+              <option value="nl">Nederlands (nl)</option>
+              <option value="pl">Polski (pl)</option>
+              <option value="it">Italiano (it)</option>
+              <option value="pt">Português (pt)</option>
+              <option value="uk">Українська (uk)</option>
+              <option value="ar">العربية (ar)</option>
+              <option value="zh">中文 (zh)</option>
+              <option value="ja">日本語 (ja)</option>
+              <option value="custom">Annet (ISO)...</option>
+            </select>
+            <button type="button" class="btn-xs" id="detect_lang_btn" onclick="event.stopPropagation(); detectAudioLanguageNow()" title="Oppdag talespråk fra valgt fil eller siste mikrofontest og foreslå bytte ved avvik">🔍 Oppdag</button>
+          </div>
+        </div>
+
+        <!-- Language Detection Confirmation Banner (Shown when detected language differs from selected) -->
+        <div id="lang_confirm_banner" class="lang-confirm-banner" role="status" aria-live="polite">
+          <span id="lang_confirm_text" style="min-width:0; overflow:hidden; text-overflow:ellipsis;">Oppdaget annet talespråk i lyden.</span>
+          <div style="display:inline-flex; gap:5px; flex-shrink:0;">
+            <button type="button" class="btn-xs btn-accent" id="lang_confirm_accept_btn" onclick="confirmDetectedLanguageChange()">Bytt språk</button>
+            <button type="button" class="btn-xs" id="lang_confirm_dismiss_btn" onclick="dismissDetectedLanguageChange()">Behold</button>
+          </div>
+        </div>
+
+        <!-- Dynamic Source Stage -->
+        <div class="source-stage">
+          <!-- Mode A: Record — High-Quality Pre-generated Voiceover Guide (Never Autoplays) -->
+          <div id="intent_view_record" class="vo-card">
+            <div id="prompt_banner" style="display:flex; flex-direction:column; justify-content:space-between; height:100%; gap:6px;">
+              <div>
+                <div class="vo-card-top" style="margin-bottom:6px;">
+                  <span class="vo-card-title" id="lbl_vo_title">Anbefalt start på møtet (gir automatiske navn):</span>
+                  <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
+                    <button type="button" class="btn-xs btn-accent" id="speak_guide_btn" onclick="speakIntroPrompt()">Spill av tale-instruks</button>
+                    <label style="display:inline-flex; align-items:center; gap:4px; font-weight:500; font-size:10.5px; margin:0; cursor:pointer; white-space:nowrap;" title="Avkrysset som standard — spilles aldri automatisk med mindre du velger det">
+                      <input type="checkbox" id="auto_speak_guide">
+                      <span id="lbl_auto_speak">Spill ved start</span>
+                    </label>
+                  </div>
+                </div>
+                <ol class="vo-steps" id="vo_steps_list">
+                  <li id="vo_step_1"><strong>Møteleder:</strong> Si kort hva møtet gjelder og dagens dato.</li>
+                  <li id="vo_step_2"><strong>Navnerunde:</strong> Hver deltaker sier sitt fulle navn og sin rolle i en hel setning.</li>
+                </ol>
+              </div>
+              <div class="vo-extra-tip" style="font-size:10.5px; color:var(--muted); border-top:1px solid rgba(147, 197, 253, 0.2); padding-top:5px;">
+                Når deltakerne presenterer seg med en hel setning i starten, kobler Steno automatisk riktig navn til hver stemme (Steg 3–4).
+              </div>
+              <audio id="vo_audio_player" preload="none" style="display:none;"></audio>
+            </div>
+          </div>
+
+          <!-- Mode B: Unified Existing File + Resume Session from Checkpoints -->
+          <div id="intent_view_file_resume" style="display:none; flex:1; min-height:0; flex-direction:column; gap:6px;">
+            <div id="dropzone" onclick="browseAudio()">
+              <p id="lbl_dropzone_hint" style="min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Slipp lyd-, video- eller transkripsjonsfil her, eller velg fra maskinen</p>
+              <button type="button" class="btn-xs btn-accent" id="browse_audio_btn" onclick="event.stopPropagation(); browseAudio()">Velg fil...</button>
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span style="font-size:10.5px; font-weight:700; color:var(--muted);" id="lbl_resume_heading">Tidligere opptak og lagrede økter i mappen</span>
+              <button type="button" class="btn-xs" onclick="refreshResumableSessions()">Oppdater</button>
+            </div>
+            <div id="resumable_list" class="resume-list">
+              <div style="font-size:11px; color:var(--muted);">Søker etter lagrede økter...</div>
+            </div>
+          </div>
+
+          <!-- Mode C: Stream / Media URL -->
+          <div id="intent_view_stream" style="display:none; flex:1; min-height:0; flex-direction:column; justify-content:center; gap:6px;">
+            <label for="stream_url_input" id="lbl_stream_url">Nettadresse til møtestrøm, video eller lydfil (.m3u8, .mp4, .opus, .wav)</label>
+            <div class="row">
+              <input type="url" id="stream_url_input" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="https://example.com/stream.m3u8">
+              <button type="button" class="btn-accent" onclick="fetchStreamFromInput()" id="fetch_stream_btn">Hent lyd</button>
+              <button type="button" class="btn-xs" id="url_audio_btn" onclick="promptAudioUrl()">Lim inn...</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- =================================================================== -->
+    <!-- SCENE 02: MICROPHONE STUDIO, GAIN BOOST & CAPTURE DECK              -->
+    <!-- =================================================================== -->
+    <section id="sb_frame_2" class="sb-frame" onclick="highlightFrame(2)">
+      <div class="sb-frame-header">
+        <div class="sb-frame-title-wrap">
+          <span class="sb-frame-num">02</span>
+          <span class="sb-frame-title" id="lbl_mic_box_title">Lydstudio, mikrofon og opptak</span>
+        </div>
+        <div style="display:flex; gap:5px; align-items:center;">
+          <button type="button" class="btn-xs" id="refresh_mic_btn" onclick="refreshAudioInputs()">Oppdater</button>
+          <button type="button" class="btn-xs" id="test_mic_btn" onclick="testMicrophone()" style="color:var(--accent); border-color:var(--accent-border);">Test mikrofon (4s)</button>
+          <button type="button" class="btn-xs" id="open_sound_settings_btn" onclick="openSoundSettings()">Systemvalg</button>
+        </div>
+      </div>
+
+      <div class="sb-frame-body">
+        <!-- Microphone & Pre-Amp Gain Row -->
+        <div class="mic-controls-grid">
+          <div>
+            <label for="mic_device_select" id="lbl_mic_device">Aktiv mikrofon</label>
+            <select id="mic_device_select" onchange="onMicSettingsChanged()">
+              <option value="default">Standard systemmikrofon (Auto)</option>
+            </select>
+          </div>
+          <div>
+            <label for="mic_gain_select" id="lbl_mic_gain">Forsterkning (Pre-amp Boost)</label>
+            <select id="mic_gain_select" onchange="onMicSettingsChanged()">
+              <option value="0">0 dB (Ingen ekstra boost)</option>
+              <option value="6" selected>+6 dB (Anbefalt på MacBook)</option>
+              <option value="12">+12 dB (Stille rom / bordmikrofon)</option>
+              <option value="18">+18 dB (Lang avstand / stort rom)</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- System Input Volume Slider + Auto-Gain -->
+        <div class="vol-gain-bar">
+          <div style="flex:1; display:flex; align-items:center; gap:8px;">
+            <span id="lbl_sys_mic_vol" style="font-size:11px; font-weight:600; white-space:nowrap;">Systemvolum</span>
+            <input type="range" id="sys_mic_vol" min="0" max="100" step="5" value="85" style="flex:1;" onchange="onSystemMicVolumeSlide(this.value)" oninput="document.getElementById('sys_mic_vol_val').textContent = this.value + '%'">
+            <span id="sys_mic_vol_val" style="font-family:ui-monospace, monospace; font-size:11px; font-weight:700; color:var(--accent); min-width:32px;">85%</span>
+          </div>
+          <label style="display:inline-flex; align-items:center; gap:5px; font-weight:500; font-size:11px; margin:0; cursor:pointer; white-space:nowrap;">
+            <input type="checkbox" id="mic_auto_gain" checked onchange="onMicSettingsChanged()">
+            <span id="lbl_auto_gain">Auto-gain (dynaudnorm)</span>
+          </label>
+        </div>
+
+        <!-- Live dBFS Meter Bar -->
+        <div class="meter-strip">
+          <div class="mic-meter-track" title="Sanntids mikrofon-nivå (dBFS)">
+            <div id="mic_meter_fill" class="mic-meter-fill"></div>
+          </div>
+          <span id="live_level_badge" style="font-size:11px; font-weight:700; padding:2px 8px; border-radius:999px; background:var(--surface-subtle); color:var(--muted); border:1px solid var(--border); white-space:nowrap;">Lydnivå: Klar</span>
+        </div>
+
+        <!-- Recording Transport Bar -->
+        <div class="transport-bar">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <button type="button" class="btn-rec" id="rec_btn" onclick="toggleRecording()">
+              <span class="rec-dot"></span>
+              <span id="rec_btn_label">Start opptak</span>
+            </button>
+            <span class="rec-timer" id="rec_timer">00:00</span>
+            <button type="button" class="btn-xs" id="play_audio_btn" onclick="togglePlaySelectedAudio()" title="Spill av eller stopp gjeldende lydfil">▶ Spill av</button>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <label style="display:inline-flex; align-items:center; gap:4px; font-weight:500; font-size:11px; margin:0; cursor:pointer;">
+              <input type="checkbox" id="live_transcribe_chk" checked>
+              <span id="lbl_live_asr_chk">5s sanntidssjekk</span>
+            </label>
+            <button type="button" class="btn-xs" id="check_audio_btn" onclick="runQuickAudioCheck()" title="Sjekk lydnivå (dBFS) og grovtranskriber de første 20 sekundene av valgt fil">20s filsjekk</button>
+          </div>
+        </div>
+
+        <!-- Live 5s ASR Ticker -->
+        <div id="live_check_panel" class="live-ticker">
+          <div id="live_check_lines" style="color:#94a3b8;">Sanntids lyd- og tekstsjekk vises her under opptak eller 20s filsjekk...</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- =================================================================== -->
+    <!-- SCENE 03: CONTEXT, AGENDA, SLIDES & SPEAKERS                        -->
+    <!-- =================================================================== -->
+    <section id="sb_frame_3" class="sb-frame" onclick="highlightFrame(3)">
+      <div class="sb-frame-header">
+        <div class="sb-frame-title-wrap">
+          <span class="sb-frame-num">03</span>
+          <span class="sb-frame-title" id="lbl_step2_title">Deltakere, agenda, lysbilder og notater</span>
+        </div>
+        <div class="segmented-group" role="group" aria-label="Kontekst">
+          <button type="button" id="ctx_btn_none" class="seg-btn active" onclick="setContextAvailability('none')">Kun lyd</button>
+          <button type="button" id="ctx_btn_has" class="seg-btn" onclick="setContextAvailability('has_context')">Har agenda / lenke</button>
+        </div>
+      </div>
+
+      <div class="sb-frame-body">
+        <div class="grid-2" style="flex-shrink:0;">
+          <div>
+            <label for="meeting_title" id="lbl_meeting_title">Tittel og dato</label>
+            <input type="text" id="meeting_title" placeholder="Styremøte / Forelesning 2026-11-08">
+          </div>
+          <div>
+            <label for="speaker_names_hint" style="display:flex; justify-content:space-between; align-items:center; white-space:nowrap;">
+              <span id="lbl_participants">Deltakere</span>
+              <span style="display:inline-flex; gap:2px; align-items:center;">
+                <button type="button" class="btn-xs" style="padding:0 5px;" onclick="setQuickSpeakers(1,1)">1</button>
+                <button type="button" class="btn-xs" style="padding:0 5px;" onclick="setQuickSpeakers(2,2)">2</button>
+                <button type="button" class="btn-xs" style="padding:0 5px;" onclick="setQuickSpeakers(3,3)">3</button>
+                <button type="button" class="btn-xs" style="padding:0 5px;" onclick="setQuickSpeakers(4,4)">4</button>
+                <button type="button" class="btn-xs" style="padding:0 5px;" onclick="setQuickSpeakers(5,5)">5</button>
+                <button type="button" class="btn-xs" style="padding:0 5px;" onclick="setQuickSpeakers('','')">Auto</button>
+              </span>
+            </label>
+            <input type="text" id="speaker_names_hint" autocorrect="off" spellcheck="false" placeholder="Kari Nordmann (leder), Ola Hansen" oninput="syncSpeakerCountFromNames()">
+          </div>
+        </div>
+
+        <div id="context_notes_drawer">
+          <span id="context_drawer_summary" style="display:none;">Ingen tekst lagt til</span>
+          <div class="context-split">
+            <div class="context-col">
+              <label for="agenda_text" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; white-space:nowrap;">
+                <span id="lbl_agenda">Agenda / Lysbilder</span>
+                <span style="display:inline-flex; gap:3px;">
+                  <button type="button" class="btn-xs" onclick="loadAgendaFile()">+ Fil</button>
+                  <button type="button" class="btn-xs" onclick="fetchContextFromLink('agenda')">Fra lenke</button>
+                </span>
+              </label>
+              <textarea id="agenda_text" placeholder="Lim inn saksliste, åpne .pptx/.pdf/.docx, eller hent fra lenke (Google Docs/Slides, URL)..." oninput="updateContextSummary()"></textarea>
+            </div>
+            <div class="context-col">
+              <label for="manual_notes_text" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; white-space:nowrap;">
+                <span id="lbl_manual_notes">Egne notater / Utkast</span>
+                <span style="display:inline-flex; gap:3px;">
+                  <button type="button" class="btn-xs" onclick="loadManualNotesFile()">+ Fil</button>
+                  <button type="button" class="btn-xs" onclick="fetchContextFromLink('notes')">Fra lenke</button>
+                </span>
+              </label>
+              <textarea id="manual_notes_text" placeholder="Skriv egne stikkord underveis eller hent utkast fra lenke. Flettes inn i referatet..." oninput="updateContextSummary()"></textarea>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- =================================================================== -->
+    <!-- SCENE 04: PIPELINE CHECKPOINTS, MODELS & PRODUCTION                 -->
+    <!-- =================================================================== -->
+    <section id="sb_frame_4" class="sb-frame" onclick="highlightFrame(4)">
+      <div class="sb-frame-header">
+        <div class="sb-frame-title-wrap">
+          <span class="sb-frame-num">04</span>
+          <span class="sb-frame-title" id="lbl_step3_title">Sjekkpunkter (Steg 1–5) og produksjon</span>
+        </div>
+
+        <!-- Floating Advanced Settings Popover Drawer (Zero layout shift) -->
+        <details id="advanced_settings_drawer">
+          <summary>
+            <span id="settings_summary_pill">Anbefalt · no</span>
+            <span>Innstillinger ▾</span>
+          </summary>
+          <div class="settings-popover" onclick="event.stopPropagation()">
+            <div class="grid-2" style="margin-bottom:8px;">
+              <div>
+                <label for="task_mode" id="lbl_task_mode">Oppgavemodus (Sjekkpunkt-styring)</label>
+                <select id="task_mode" onchange="onTaskModeChanged(); updateSettingsSummary();">
+                  <option value="auto_resume" selected>Auto: Fortsett fra siste sjekkpunkt → Ferdig</option>
+                  <option value="full">Full kjøring på nytt fra bunnen (Steg 1–5)</option>
+                  <option value="from_3_diarize">Steg 3–5: Oppdater talere og nytt referat</option>
+                  <option value="names_and_notes">Steg 4–5: Nye navn + nytt referat</option>
+                  <option value="notes_only">Kun Steg 5: Nytt referat fra transkripsjon</option>
+                  <option value="transcribe_s1">Kun Steg 1: Grovtranskripsjon</option>
+                  <option value="transcribe_s2">Steg 1–2: Fintranskripsjon</option>
+                  <option value="transcribe_s3">Steg 1–3: Transkripsjon + Taler-ID</option>
+                  <option value="transcribe_only">Steg 1–4: Transkripsjon med navn</option>
+                </select>
+              </div>
+              <div>
+                <label for="note_mode" id="lbl_note_mode">Dokumenttype</label>
+                <select id="note_mode" onchange="onNoteModeSelectChanged(this.value)">
+                  <option value="auto">Auto (Møte hvis 2+ talere, ellers Foredrag)</option>
+                  <option value="mote" selected>Møtereferat (Beslutninger og tiltak)</option>
+                  <option value="foredrag">Forelesningsnotat (Faglig oppsummering)</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="grid-3" style="margin-bottom:8px;">
+              <div>
+                <label for="model_profile" id="lbl_model_profile">Maskinvareprofil</label>
+                <select id="model_profile" onchange="onProfileSelectChanged(); updateSettingsSummary();">
+                  <option value="recommended" selected>Anbefalt (Auto)</option>
+                  <option value="light">Lett (8 GB RAM)</option>
+                  <option value="standard">Standard</option>
+                  <option value="quality">Maks kvalitet</option>
+                  <option value="custom">Egendefinert...</option>
+                </select>
+              </div>
+              <div>
+                <label for="whisper_model">Whisper-modell</label>
+                <select id="whisper_model" onchange="onModelDropdownChanged(true); updateSettingsSummary();">
+                  <optgroup label="Norsk (NB-Whisper)">
+                    <option value="NbAiLab/nb-whisper-large">nb-whisper-large (Maks norsk)</option>
+                    <option value="NbAiLab/nb-whisper-medium" selected>nb-whisper-medium (Standard norsk)</option>
+                    <option value="NbAiLab/nb-whisper-small">nb-whisper-small (Rask norsk)</option>
+                    <option value="UlrikKoren/nb-whisper-large-distil-turbo-beta-ct2">nb-whisper-distil-turbo</option>
+                  </optgroup>
+                  <optgroup label="Engelsk / Flerspråklig (Multilingual)">
+                    <option value="large-v3-turbo">large-v3-turbo (Anbefalt EN / flerspråklig)</option>
+                    <option value="large-v3">large-v3 (Maks flerspråklig)</option>
+                    <option value="medium">medium (Standard flerspråklig)</option>
+                    <option value="small">small (Lett flerspråklig)</option>
+                    <option value="base">base (Lynrask)</option>
+                  </optgroup>
+                </select>
+              </div>
+              <div>
+                <label for="ollama_model">Ollama-modell</label>
+                <input type="text" id="ollama_model" value="qwen2.5:7b" autocorrect="off" autocapitalize="off" spellcheck="false" oninput="onModelDropdownChanged(true); updateSettingsSummary();">
+              </div>
+            </div>
+
+            <div class="grid-3" style="margin-bottom:8px;">
+              <div>
+                <label for="language">Talespråk (ISO / auto)</label>
+                <input type="text" id="language" value="no" autocorrect="off" autocapitalize="off" spellcheck="false" onchange="setAudioLanguage(this.value, {persist: true, applyRecommended: true})" oninput="updateSettingsSummary()">
+              </div>
+              <div>
+                <label for="min_speakers">Min. talere</label>
+                <input type="number" id="min_speakers" min="1" max="20" placeholder="Auto">
+              </div>
+              <div>
+                <label for="max_speakers">Maks. talere</label>
+                <input type="number" id="max_speakers" min="1" max="20" placeholder="Auto">
+              </div>
+            </div>
+
+            <div class="grid-2" style="margin-bottom:8px;">
+              <div>
+                <label for="hf_token">HuggingFace Token (kun 1. gang)</label>
+                <input type="password" id="hf_token" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Valgfritt hvis bufret">
+              </div>
+              <div>
+                <label for="out_dir">Utdatamappe</label>
+                <div class="row">
+                  <input type="text" id="out_dir" autocorrect="off" autocapitalize="off" spellcheck="false" oninput="checkConflicts(); refreshCheckpointBar();">
+                  <button type="button" class="btn-xs" onclick="browseOutDir()">Mappe...</button>
+                  <button type="button" class="btn-xs" onclick="openFinder()">Åpne</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="grid-3">
+              <div>
+                <label for="html_name">Transkripsjon (HTML)</label>
+                <input type="text" id="html_name" autocorrect="off" autocapitalize="off" spellcheck="false" oninput="checkConflicts(); refreshCheckpointBar();">
+              </div>
+              <div>
+                <label for="notes_name">Referat (MD)</label>
+                <input type="text" id="notes_name" autocorrect="off" autocapitalize="off" spellcheck="false" oninput="checkConflicts(); refreshCheckpointBar();">
+              </div>
+              <div>
+                <label for="notes_html_name">Referat (HTML)</label>
+                <input type="text" id="notes_html_name" autocorrect="off" autocapitalize="off" spellcheck="false" oninput="checkConflicts()">
+              </div>
+            </div>
+            <div id="conflict-msg" class="warning"></div>
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-top:10px; padding-top:8px; border-top:1px solid var(--border);">
+              <button type="button" class="btn-xs" id="menu_install_btn" onclick="installStenoShortcut()">Installer snarvei på maskinen</button>
+              <button type="button" class="btn-xs" id="menu_uninstall_btn" style="color:var(--danger); border-color:var(--danger);" onclick="document.getElementById('advanced_settings_drawer').open = false; openUninstallDialog();">Avinstaller Steno og slett modeller...</button>
+            </div>
+          </div>
+        </details>
+      </div>
+
+      <div class="sb-frame-body">
+        <!-- 5-Stage Storyboard Checkpoint Track (Click any pill to start/re-run from that stage) -->
+        <div id="ckpt_bar" class="ckpt-bar">
+          <span class="ckpt-pill" id="ckpt_s1" onclick="selectPipelineStage('s1')" title="Klikk for å kjøre alt på nytt fra Steg 1 (Grovtranskripsjon → Referat)">1. Grov</span>
+          <span class="ckpt-pill" id="ckpt_s2" onclick="selectPipelineStage('s2')" title="Klikk for å kjøre Steg 1–2 (Fintranskripsjon)">2. Fin</span>
+          <span class="ckpt-pill" id="ckpt_s3" onclick="selectPipelineStage('s3')" title="Klikk for å oppdatere talere (f.eks. Møte ↔ Forelesning) og lage nytt referat (Steg 3–5)">3. Talere</span>
+          <span class="ckpt-pill" id="ckpt_s4" onclick="selectPipelineStage('s4')" title="Klikk for å oppdatere deltakernavn og lage nytt referat (Steg 4–5)">4. Navn</span>
+          <span class="ckpt-pill" id="ckpt_s5" onclick="selectPipelineStage('s5')" title="Klikk for å kun skrive nytt referat / forelesningsnotat fra eksisterende transkripsjon (Steg 5)">5. Referat</span>
+        </div>
+
+        <!-- Hardware Fit Bar -->
+        <div id="hw_resource_banner" class="hw-banner">
+          <span id="hw_resource_text" style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">Sjekker maskinvare (RAM, disk og GPU/MPS)...</span>
+          <button type="button" id="apply_rec_btn" class="btn-xs" style="display:none;" onclick="applyRecommendedModels()">Bruk anbefalt</button>
+        </div>
+
+        <!-- Primary Run, Stop & Fresh Re-run Buttons -->
+        <div class="run-bar">
+          <button type="button" class="btn-stop" id="stop_btn" onclick="stopJob()">Stopp / Pause</button>
+          <button type="button" class="btn-primary" id="run_btn" onclick="runJob()">Start transkripsjon og møtereferat</button>
+          <button type="button" class="btn-xs" id="rerun_full_btn" onclick="runFreshFromStart()" style="padding:8px 10px; font-weight:700;" title="Start full transkripsjon helt på nytt fra Steg 1 (ignorerer lagrede sjekkpunkter)">↻ Ny kjøring (1–5)</button>
+        </div>
+
+        <!-- Regular Progress Bar with Expandable Log Toggle -->
+        <div class="progress-wrap">
+          <div class="status-line">
+            <span id="progress_label" style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">Klar til start</span>
+            <span style="display:inline-flex; gap:6px; align-items:center; flex-shrink:0;">
+              <span id="progress_val" style="font-family:ui-monospace, monospace; font-weight:700; color:var(--accent);">0%</span>
+              <button type="button" class="btn-xs" id="toggle_log_btn" onclick="toggleLogDrawer()" aria-expanded="false">Vis logg ▾</button>
+            </span>
+          </div>
+          <div class="progress-bar-bg"><div id="progress_bar"></div></div>
+        </div>
+
+        <!-- Open Generated Files Action Bar -->
+        <div class="output-files-bar">
+          <span class="output-files-label" id="lbl_open_outputs">Åpne ferdige filer:</span>
+          <div style="display:flex; gap:5px; flex:1; min-width:0;">
+            <button type="button" class="btn-xs out-file-btn" id="open_transcript_btn" onclick="openGeneratedFile('html')" title="Åpne ferdig HTML-transkripsjon i nettleser">Transkripsjon (.html)</button>
+            <button type="button" class="btn-xs out-file-btn" id="open_notes_html_btn" onclick="openGeneratedFile('notes_html')" title="Åpne ferdig møtereferat / forelesningsnotat (HTML) i nettleser">Referat (.html)</button>
+            <button type="button" class="btn-xs out-file-btn" id="open_notes_md_btn" onclick="openGeneratedFile('notes_md')" title="Åpne referat i Markdown-format (.md)">Referat (.md)</button>
+            <button type="button" class="btn-xs" id="open_folder_btn" onclick="openFinder()" title="Åpne utdatamappen i Finder / Filutforsker">Mappe</button>
+          </div>
+        </div>
+
+        <!-- Collapsible Terminal Output Log (Hidden by default) -->
+        <div id="log_drawer_wrap">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <span style="font-size:10.5px; font-weight:700; color:var(--muted);">Detaljert kjørelogg</span>
+            <span style="display:inline-flex; gap:4px;">
+              <button type="button" class="btn-xs" onclick="copyLog()">Kopier</button>
+              <button type="button" class="btn-xs" onclick="saveLog()">Lagre logg</button>
+            </span>
+          </div>
+          <pre id="log">Klar.
+</pre>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- Native Uninstall Modal Dialog (modern-web-guidance: dialog + light-dismiss-a-dialog) -->
+<dialog id="uninstall_modal" closedby="any" aria-labelledby="uninstall_modal_title">
+  <h2 class="modal-title" id="uninstall_modal_title">Avinstaller Steno?</h2>
+  <div class="modal-body" id="uninstall_modal_body">
+    Er du sikker på at du vil avinstallere Steno og slette nedlastede AI-modeller, hurtiglager og snarveier?<br><br>
+    <em>Dine lagrede møteopptak og referater i utdatamappen blir ikke slettet.</em>
   </div>
-
-  <!-- ZONE 3: Collapsible Advanced Settings, Models & Output Files -->
-  <details id="advanced_settings_drawer" class="zone-drawer">
-    <summary>
-      <span class="summary-title">
-        <span class="chevron">▶</span>
-        <span id="lbl_adv_drawer">⚙️ Innstillinger, Modeller & Utdatafiler</span>
-      </span>
-      <span id="settings_summary_pill">★ Anbefalt (Auto) • Auto-modus • Fortsett fra sjekkpunkt</span>
-    </summary>
-    <div class="drawer-body">
-      <div class="row">
-        <label id="lbl_row_speakers">Talere & Modus:</label>
-        <input type="number" id="min_speakers" placeholder="Min" min="1" max="20" style="max-width: 58px;" oninput="updateSettingsSummary()">
-        <input type="number" id="max_speakers" placeholder="Maks" min="1" max="20" style="max-width: 58px;" oninput="updateSettingsSummary()">
-        <button class="btn-sm" onclick="setExactSpeakers(1)" title="1 taler – Foredrag / Presentasjon">1</button>
-        <button class="btn-sm" onclick="setExactSpeakers(2)" title="2 talere">2</button>
-        <button class="btn-sm" onclick="setExactSpeakers(3)" title="3 talere">3</button>
-        <button class="btn-sm" onclick="setExactSpeakers(4)" title="4 talere">4</button>
-        <button class="btn-sm" onclick="setExactSpeakers(5)" title="5 talere">5</button>
-        <select id="note_mode" onchange="onModeChanged()" title="Velg eller overstyr modus før du genererer transkripsjon og notater">
-          <option value="auto" selected>Modus: Auto (Foredrag ved 1 taler, ellers Møte)</option>
-          <option value="mote">Modus: Møtereferat (flere deltakere & aksjonspunkter)</option>
-          <option value="foredrag">Modus: Foredrag / Presentasjon (faglige hovedpoenger)</option>
-        </select>
-      </div>
-
-      <div class="row">
-        <label id="lbl_row_models">Modeller & Språk:</label>
-        <select id="model_profile" onchange="onProfileChanged()" style="max-width: 195px;" title="Velg ferdig modellprofil tilpasset maskinvaren eller velg modeller manuelt">
-          <option value="auto" selected>★ Anbefalt (Auto ut fra PC/Mac)</option>
-          <option value="recommended">Profil: Testvinner #1 (Small + Gemma 4)</option>
-          <option value="fast">Profil: Alternativ #2 (Distil-Turbo + Gemma 4)</option>
-          <option value="light">Profil: Lettvekt / 8 GB RAM (Small + Llama 3.2)</option>
-          <option value="custom">Profil: Egendefinert</option>
-        </select>
-        <select id="whisper_model" onchange="onManualModelChanged()">
-          <option value="NbAiLab/nb-whisper-small" selected>NB-Whisper Small (Anbefalt Testvinner – 244M)</option>
-          <option value="UlrikKoren/nb-whisper-large-distil-turbo-beta-ct2">NB-Whisper Large Distil-Turbo (756M)</option>
-          <option value="NbAiLab/nb-whisper-medium">NB-Whisper Medium (769M)</option>
-          <option value="NbAiLab/nb-whisper-large">NB-Whisper Large (1.55B – Manuell)</option>
-        </select>
-        <input type="text" id="ollama_model" value="gemma4:e4b" placeholder="Ollama-modell" style="max-width: 115px;" oninput="onManualModelChanged()">
-        <select id="language" style="max-width: 60px;" onchange="updateSettingsSummary()">
-          <option value="no" selected>NO</option>
-          <option value="en">EN</option>
-          <option value="sv">SV</option>
-          <option value="da">DA</option>
-        </select>
-        <input type="password" id="hf_token" placeholder="HF Token (hf_...)" style="max-width: 115px;">
-      </div>
-
-      <div class="row">
-        <label id="lbl_row_task">Steg-oppgave:</label>
-        <select id="task_mode" onchange="validateNames()" title="Velg om du vil fortsette fra siste sjekkpunkt, kjøre alt på nytt, eller kjøre enkeltoppgaver">
-          <option value="auto_resume" selected>Fortsett fra sjekkpunkt (hopp over ferdige steg)</option>
-          <option value="full_fresh">Kjør alt på nytt (Steg 1–5)</option>
-          <option value="from_3_diarize">Fra Steg 3 -> 5 (Pyannote + Navn + Referat)</option>
-          <option value="from_4_names">Fra Steg 4 -> 5 (Navn & HTML + Referat)</option>
-          <option value="only_5_notes">Kun Steg 5: Generer Referat / Notater på nytt</option>
-          <option value="only_4_names">Kun Steg 4: Taler-navn & HTML-transkripsjon</option>
-          <option value="only_3_diarize">Kun Steg 3: Taler-ID (Pyannote)</option>
-          <option value="only_2_align">Kun Steg 2: Ord-tidsjustering (Alignment)</option>
-          <option value="only_1_asr">Kun Steg 1: Rå-transkripsjon (ASR)</option>
-        </select>
-      </div>
-
-      <div class="row">
-        <label id="lbl_row_folder">Lagre i mappe:</label>
-        <input type="text" id="out_dir" placeholder="Velg mappe..." oninput="validateNames()">
-        <button id="btn_browse_folder" class="btn-sm" onclick="browseFolder()">Velg...</button>
-        <button id="btn_open_folder_row" class="btn-sm" onclick="openFinder()" title="Vis i filutforsker">Åpne</button>
-      </div>
-
-      <div class="row">
-        <label id="lbl_row_outfiles">Utdatafiler:</label>
-        <input type="text" id="html_name" placeholder="transkripsjon.html" oninput="validateNames()" title="HTML Transkripsjon">
-        <input type="text" id="notes_name" placeholder="referat.md" oninput="validateNames()" title="Markdown Referat">
-        <input type="text" id="notes_html_name" placeholder="referat.html" oninput="validateNames()" title="HTML Referat">
-        <button id="btn_unique_names" class="btn-sm" onclick="autoIncrementNames()" title="Foreslå nye ledige filnavn hvis du ikke vil overskrive">Ledig navn</button>
-      </div>
-    </div>
-  </details>
-
-  <!-- Primary Action & Progress Card -->
-  <div class="action-card">
-    <div class="action-bar">
-      <span id="conflict-msg"></span>
-      <div style="display: flex; gap: 8px; align-items: center;">
-        <button class="danger" id="stop_btn" onclick="stopJob()" disabled title="Stopp/pause pågående steg (fullførte steg er lagret i sjekkpunkt)">Stopp / Pause</button>
-        <button class="primary" id="run_btn" onclick="runPipeline()" disabled>▶ Start / Fortsett</button>
-      </div>
-    </div>
-
-    <div class="progress-section">
-      <div class="progress-header">
-        <span id="progress_label">Klar</span>
-        <span id="progress_val">0%</span>
-      </div>
-      <div class="progress-bg">
-        <div id="progress_bar" class="progress-fill"></div>
-      </div>
-    </div>
+  <div class="modal-actions">
+    <button type="button" id="confirm_uninstall_no_btn" onclick="closeUninstallDialog()">Nei, avbryt</button>
+    <button type="button" id="confirm_uninstall_yes_btn" style="background:var(--danger); color:#fff; border-color:var(--danger);" onclick="confirmUninstallApp()">Ja, avinstaller</button>
   </div>
-
-  <!-- Activity Log -->
-  <div class="log-container">
-    <div class="log-header">
-      <span id="lbl_log_header">Aktivitetslogg</span>
-      <span style="display: inline-flex; gap: 6px;">
-        <button id="btn_open_folder_log" class="btn-sm" onclick="openFinder()" title="Åpne utdatamappen i Finder / Utforsker">📂 Åpne mappe</button>
-        <button id="btn_copy_log" class="btn-sm" onclick="copyLog()" title="Kopier hele loggen til utklippstavlen">Kopier logg</button>
-        <button id="btn_save_log" class="btn-sm" onclick="saveLog()" title="Lagre loggen til en .txt-fil">Lagre logg...</button>
-      </span>
-    </div>
-    <div id="log">Klar. Start et opptak, eller velg en lydfil (.wav/.m4a/.opus/.mp3) eller en eksisterende transkripsjonsfil (.html/.json/.txt/.srt).</div>
-  </div>
+</dialog>
 
 <script>
-  let currentAudioPath = "";
-  let isJobRunning = false;
-  let isRecording = false;
-  let recStartTime = 0;
-  let recTimerInterval = null;
-  let cachedHwInfo = null;
-  let cachedProfiles = {};
-  let currentUiLang = "no";
+  // =========================================================================
+  // EXPLICIT FINITE STATE MACHINE & STORYBOARD CONTROLLER (UX_STATE_MACHINE)
+  // =========================================================================
+  const UX_STATE_MACHINE = {
+    step: '1_source',              // '1_source' | '2_audio' | '2_context' | '3_run'
+    intent: 'record',              // 'record' | 'file' | 'stream' | 'resume'
+    sessionFormat: 'mote',         // 'mote' | 'foredrag' | 'auto'
+    audioLanguage: 'no',           // 'no' | 'en' | 'auto' | 'sv' | 'da' | 'de' | 'es' | 'fr' | ...
+    contextAvailability: 'none',   // 'none' | 'has_context'
+    focusMode: false,              // false = 2x2 Storyboard Board (no scrollbars), true = single frame
+    recording: false
+  };
 
-  const UI_I18N = {
+  let currentAudioPath = "";
+  let lastCheckpointStatus = null;
+  let recTimerInterval = null;
+  let recStartTime = 0;
+  let cachedProfiles = {};
+  let lastRecommendedWhisper = "NbAiLab/nb-whisper-medium";
+  let lastRecommendedOllama = "qwen2.5:7b";
+  let currentUiLang = "no";
+  let pendingDetectedLang = null;
+
+  const I18N = {
     no: {
-      lbl_step1_title: "1. Lydfil eller transkripsjon",
-      selected_file_empty: "Slipp fil her (.m4a, .wav, .opus, .mp3, .html, .json) eller velg...",
-      check_audio_btn: "Lydsjekk (20s)",
-      browse_audio_btn: "Velg fil...",
-      url_audio_btn: "Nettadresse (URL)...",
-      rec_start: "🎙️ Spill inn møte",
-      rec_stop: "⏹ Stopp opptak",
-      live_ready: "Lyd: klar",
-      speak_guide_btn: "Tale-instruks",
-      lbl_auto_speak: "Les opp navnerunde-guide",
-      lbl_live_chk: "Sanntids-lydsjekk",
-      prompt_banner_html: "<strong>Møtestart-guide for god talergjenkjenning og lydsjekk:</strong><br>1. <b>Møteleder:</b> Si kort hva møtet gjelder og dagens dato.<br>2. <b>Navnerunde rundt bordet:</b> Hver deltaker sier eget navn og tittel/rolle i én hel setning. Følg med i <b>Sanntids-lydsjekk</b> under for å se at alle rundt bordet fanges opp med <i>Godt lydnivå</i> (slå av macOS «Stemmeisolasjon» hvis noen faller ut).",
-      lbl_meeting_title: "2. Møtetittel & Dato",
-      meeting_title_ph: "F.eks. Prosjektmøte – 2026-10-29",
-      lbl_speakers_hint: "Deltakere & Roller (setter antall talere automatisk)",
-      speakers_hint_ph: "F.eks. Ola Nordmann (Møteleder), Kari Hansen (Arkitekt)",
-      lbl_context_drawer: "📎 Agenda, lysbilder & manuelle møtenotater (valgfritt)",
-      btn_add_agenda: "+ Agenda / Lysbilder...",
-      btn_add_notes: "+ Manuelle notater...",
-      lbl_agenda_text: "Agenda / Lysbilder (.pptx, .pdf, .docx, .md)",
-      agenda_ph: "Lim inn saksliste eller klikk «+ Agenda / Lysbilder...»",
-      lbl_manual_notes_text: "Manuelle møtenotater / Fasit-utkast (.odt, .docx, .md)",
-      manual_notes_ph: "Valgfritt: Egne notater fra møtet for å kvalitetssikre navn, saker og vedtak...",
-      lbl_stages: "Steg:",
-      apply_rec_btn: "Bruk anbefalt",
-      lbl_adv_drawer: "⚙️ Innstillinger, Modeller & Utdatafiler",
-      lbl_row_speakers: "Talere & Modus:",
-      lbl_row_models: "Modeller & Språk:",
-      lbl_row_task: "Steg-oppgave:",
-      lbl_row_folder: "Lagre i mappe:",
-      lbl_row_outfiles: "Utdatafiler:",
-      btn_browse_folder: "Velg...",
-      btn_open_folder_row: "Åpne",
-      btn_unique_names: "Ledig navn",
-      stop_btn: "Stopp / Pause",
-      run_btn_idle: "▶ Start / Fortsett",
-      run_btn_busy: "Arbeider...",
-      progress_ready: "Klar",
-      lbl_log_header: "Aktivitetslogg",
-      btn_open_folder_log: "📂 Åpne mappe",
-      btn_copy_log: "Kopier logg",
-      btn_save_log: "Lagre logg...",
-      log_ready: "Klar. Start et opptak, eller velg en lydfil (.wav/.m4a/.opus/.mp3) eller en eksisterende transkripsjonsfil (.html/.json/.txt/.srt).",
-      ckpt_labels: ["1. ASR", "2. Align", "3. Pyannote", "4. Navn & HTML", "5. Referat/Notat"],
-      conflict_dup: "Alle tre utdatafiler må ha ulike filnavn.",
-      conflict_overwrite: "Merk: Eksisterende utdatafil oppdateres ved kjøring (eller åpne ⚙️ Innstillinger -> «Ledig navn»).",
-      auto_speakers: "Auto talere",
-      speakers_unit: "taler(e)",
-      file_menu_btn: "Fil ▾",
-      menu_open_btn: "Velg lydfil / transkripsjon...",
-      menu_folder_btn: "Åpne utdatamappe",
-      menu_install_btn: "Installer snarvei (Skrivebord / CLI)",
-      menu_uninstall_btn: "Avinstaller Steno og fjern mellomlagrede filer...",
-      uninstall_modal_title: "Avinstaller Steno?",
-      uninstall_modal_body_html: "Er du sikker på at du vil avinstallere Steno og slette alle mellomlagrede filer, kjøremiljøer, modeller og snarveier (<code>~/.local/share/steno</code> og <code>~/.local/share/mote_transcribe</code>)?<br><br><strong>Dine møteopptak, transkripsjoner og referater slettes ikke.</strong>",
-      confirm_uninstall_no_btn: "Nei, avbryt",
-      confirm_uninstall_yes_btn: "Ja, avinstaller"
+      app_title: "Steno",
+      app_sub: "Lokal møte- og forelesningsstenograf",
+      file_menu: "Fil ▾",
+      step1_nav: "Oppsett & Kilde",
+      step2_audio_nav: "Lydstudio",
+      step2_nav: "Kontekst & Agenda",
+      step3_nav: "Pipeline & Kjør",
+      intent_record: "Spill inn nå",
+      intent_record_sub: "Lokal mikrofon",
+      intent_file: "Fil / Gjenoppta økt",
+      intent_file_sub: "Velg fil eller lagret økt",
+      intent_stream: "Strøm / URL",
+      intent_stream_sub: "Møtestrøm / lenke",
+      intent_resume: "Fil / Gjenoppta økt",
+      intent_resume_sub: "Velg fil eller lagret økt",
+      vo_title_mote: "Anbefalt start på møtet:",
+      vo_s1_mote: "<strong>Møteleder:</strong> Si kort hva møtet gjelder og dagens dato.",
+      vo_s2_mote: "<strong>Navnerunde:</strong> Hver deltaker sier sitt fulle navn og sin rolle i en hel setning.",
+      vo_title_foredrag: "Anbefalt start på forelesningen:",
+      vo_s1_foredrag: "<strong>Foreleser:</strong> Si navnet ditt, temaet for forelesningen og dagens dato.",
+      vo_s2_foredrag: "<strong>Foredrag:</strong> Hold forelesningen som normalt — Steno lager strukturert fagnotat.",
+      speak_btn: "Spill av tale-instruks",
+      rec_start: "Start opptak",
+      rec_stop: "Stopp opptak",
+      run_default: "Start transkripsjon og møtereferat",
+      run_default_lecture: "Start transkripsjon og forelesningsnotat",
+      run_resume: "Fortsett fra lagret sjekkpunkt",
+      run_full: "Kjør ny transkripsjon fra start (Steg 1–5)",
+      run_from_s3_mote: "Oppdater til møte (flere talere + nytt referat, Steg 3–5)",
+      run_from_s3_lecture: "Oppdater til forelesning (1 taler + nytt fagnotat, Steg 3–5)",
+      run_from_s4: "Oppdater navn og lag nytt referat (Steg 4–5)",
+      run_notes_only: "Lag nytt referat / notat fra transkripsjon (Steg 5)"
     },
     en: {
-      lbl_step1_title: "1. Audio File or Transcript",
-      selected_file_empty: "Drop file here (.m4a, .wav, .opus, .mp3, .html, .json) or browse...",
-      check_audio_btn: "Audio Check (20s)",
-      browse_audio_btn: "Browse...",
-      url_audio_btn: "URL / Stream...",
-      rec_start: "🎙️ Record Meeting",
-      rec_stop: "⏹ Stop Recording",
-      live_ready: "Audio: ready",
-      speak_guide_btn: "Voice Guide",
-      lbl_auto_speak: "Speak round-table intro guide",
-      lbl_live_chk: "Live audio check",
-      prompt_banner_html: "<strong>Meeting Start Guide for Speaker Identification & Audio Check:</strong><br>1. <b>Meeting Chair:</b> Briefly state the meeting topic and today's date.<br>2. <b>Round-Table Intro:</b> Each participant states their full name and role in a complete sentence. Watch the <b>Live audio check</b> below to confirm everyone is captured at a <i>Good audio level</i> (disable OS Voice Isolation if anyone drops out).",
-      lbl_meeting_title: "2. Meeting Title & Date",
-      meeting_title_ph: "E.g. Project Sync – 2026-10-29",
-      lbl_speakers_hint: "Participants & Roles (auto-sets speaker count)",
-      speakers_hint_ph: "E.g. Ola Nordmann (Chair), Kari Hansen (Architect)",
-      lbl_context_drawer: "📎 Agenda, Slides & Manual Notes (optional)",
-      btn_add_agenda: "+ Agenda / Slides...",
-      btn_add_notes: "+ Manual Notes...",
-      lbl_agenda_text: "Agenda / Slides (.pptx, .pdf, .docx, .md)",
-      agenda_ph: "Paste agenda or click '+ Agenda / Slides...'",
-      lbl_manual_notes_text: "Manual Meeting Notes / Draft Minutes (.odt, .docx, .md)",
-      manual_notes_ph: "Optional: Your own notes to ground speaker names, topics, and decisions...",
-      lbl_stages: "Stage:",
-      apply_rec_btn: "Use Recommended",
-      lbl_adv_drawer: "⚙️ Settings, Models & Output Files",
-      lbl_row_speakers: "Speakers & Mode:",
-      lbl_row_models: "Models & Lang:",
-      lbl_row_task: "Stage Task:",
-      lbl_row_folder: "Output Folder:",
-      lbl_row_outfiles: "Output Files:",
-      btn_browse_folder: "Browse...",
-      btn_open_folder_row: "Open",
-      btn_unique_names: "Unique Name",
-      stop_btn: "Stop / Pause",
-      run_btn_idle: "▶ Start / Resume",
-      run_btn_busy: "Working...",
-      progress_ready: "Ready",
-      lbl_log_header: "Activity Log",
-      btn_open_folder_log: "📂 Open Folder",
-      btn_copy_log: "Copy Log",
-      btn_save_log: "Save Log...",
-      log_ready: "Ready. Start a recording, or select an audio file (.wav/.m4a/.opus/.mp3) or existing transcript (.html/.json/.txt/.srt).",
-      ckpt_labels: ["1. ASR", "2. Align", "3. Pyannote", "4. Names & HTML", "5. Minutes/Notes"],
-      conflict_dup: "All three output files must have distinct filenames.",
-      conflict_overwrite: "Note: Existing output file will be updated (or open ⚙️ Settings -> 'Unique Name').",
-      auto_speakers: "Auto speakers",
-      speakers_unit: "speaker(s)",
-      file_menu_btn: "File ▾",
-      menu_open_btn: "Open Audio / Transcript...",
-      menu_folder_btn: "Open Output Folder",
-      menu_install_btn: "Install Shortcut (Desktop / CLI)",
-      menu_uninstall_btn: "Uninstall Steno & Remove Cached Files...",
-      uninstall_modal_title: "Uninstall Steno?",
-      uninstall_modal_body_html: "Are you sure you want to uninstall Steno and remove all cached files, runtime environments, models, and shortcuts (<code>~/.local/share/steno</code> and <code>~/.local/share/mote_transcribe</code>)?<br><br><strong>Your meeting recordings, transcripts, and minutes will NOT be deleted.</strong>",
-      confirm_uninstall_no_btn: "No, Cancel",
-      confirm_uninstall_yes_btn: "Yes, Uninstall"
+      app_title: "Steno",
+      app_sub: "Local Meeting & Lecture Stenographer",
+      file_menu: "File ▾",
+      step1_nav: "Setup & Source",
+      step2_audio_nav: "Audio Studio",
+      step2_nav: "Context & Agenda",
+      step3_nav: "Pipeline & Run",
+      intent_record: "Record Now",
+      intent_record_sub: "Local microphone",
+      intent_file: "File / Resume Session",
+      intent_file_sub: "Pick file or saved session",
+      intent_stream: "Stream / URL",
+      intent_stream_sub: "Stream or link",
+      intent_resume: "File / Resume Session",
+      intent_resume_sub: "Pick file or saved session",
+      vo_title_mote: "Recommended start of meeting (enables automatic speaker names):",
+      vo_s1_mote: "<strong>Chair:</strong> Briefly state the meeting topic and today's date.",
+      vo_s2_mote: "<strong>Round the table:</strong> Each participant states their full name and role in a complete sentence.",
+      vo_title_foredrag: "Recommended start of lecture / presentation:",
+      vo_s1_foredrag: "<strong>Lecturer:</strong> State your name, lecture topic, and today's date.",
+      vo_s2_foredrag: "<strong>Presentation:</strong> Proceed as normal — Steno generates structured lecture notes.",
+      speak_btn: "Play Voice Guide",
+      rec_start: "Start Recording",
+      rec_stop: "Stop Recording",
+      run_default: "Start Transcription & Meeting Notes",
+      run_default_lecture: "Start Transcription & Lecture Notes",
+      run_resume: "Resume from Checkpoint",
+      run_full: "Run Fresh Transcription from Start (Stages 1–5)",
+      run_from_s3_mote: "Update as Meeting (Multi-speaker + Notes, Stages 3–5)",
+      run_from_s3_lecture: "Update as Lecture (1 Speaker + Lecture Notes, Stages 3–5)",
+      run_from_s4: "Update Speaker Names & Notes (Stages 4–5)",
+      run_notes_only: "Regenerate Notes from Transcript (Stage 5)"
     }
   };
 
-  function setUiLanguage(lang) {
+  // Light-dismiss fallback for browsers without native dialog[closedby] support
+  if (typeof HTMLDialogElement !== 'undefined' && !('closedBy' in HTMLDialogElement.prototype)) {
+    document.addEventListener('click', (e) => {
+      const dlg = document.getElementById('uninstall_modal');
+      if (dlg && dlg.open && e.target === dlg) {
+        const rect = dlg.getBoundingClientRect();
+        const inDialog = (
+          e.clientX >= rect.left &&
+          e.clientX <= rect.right &&
+          e.clientY >= rect.top &&
+          e.clientY <= rect.bottom
+        );
+        if (!inDialog) dlg.close();
+      }
+    });
+  }
+
+  function highlightFrame(frameNum) {
+    for (let i = 1; i <= 4; i++) {
+      const f = document.getElementById('sb_frame_' + i);
+      const b = document.getElementById('ux_step_btn_' + i);
+      if (f) {
+        f.classList.toggle('active-scene', i === frameNum);
+        f.classList.toggle('focused-frame', i === frameNum);
+      }
+      if (b) {
+        b.classList.toggle('active', i === frameNum);
+      }
+    }
+  }
+
+  function setUxStep(stepId) {
+    UX_STATE_MACHINE.step = stepId;
+    const map = { '1_source': 1, '2_audio': 2, '2_context': 3, '3_run': 4 };
+    highlightFrame(map[stepId] || 1);
+    updateFsmSummaryBadge();
+  }
+
+  function toggleAllStepsView() {
+    UX_STATE_MACHINE.focusMode = !UX_STATE_MACHINE.focusMode;
+    document.body.classList.toggle('focus-mode', UX_STATE_MACHINE.focusMode);
+    const btn = document.getElementById('toggle_all_steps_btn');
+    if (btn) {
+      btn.textContent = UX_STATE_MACHINE.focusMode
+        ? (currentUiLang === 'en' ? '2x2 Storyboard' : '2x2 Storyboard')
+        : (currentUiLang === 'en' ? 'Focus mode' : 'Fokusmodus');
+    }
+  }
+
+  function setUxIntent(intentId) {
+    const normalized = (intentId === 'resume') ? 'file' : intentId;
+    UX_STATE_MACHINE.intent = normalized;
+    ['record', 'file', 'stream'].forEach((id) => {
+      const btn = document.getElementById('intent_btn_' + id);
+      if (btn) btn.classList.toggle('active', id === normalized);
+    });
+    const vRec = document.getElementById('intent_view_record');
+    const vFileRes = document.getElementById('intent_view_file_resume');
+    const vStr = document.getElementById('intent_view_stream');
+    if (vRec) vRec.style.display = (normalized === 'record') ? 'flex' : 'none';
+    if (vFileRes) vFileRes.style.display = (normalized === 'file') ? 'flex' : 'none';
+    if (vStr) vStr.style.display = (normalized === 'stream') ? 'flex' : 'none';
+
+    highlightFrame(1);
+    if (normalized === 'file') {
+      refreshResumableSessions();
+    }
+    updateFsmSummaryBadge();
+  }
+
+  function setSessionFormat(fmt) {
+    const prevFmt = UX_STATE_MACHINE.sessionFormat;
+    UX_STATE_MACHINE.sessionFormat = fmt;
+    ['mote', 'foredrag', 'auto'].forEach((id) => {
+      const btn = document.getElementById('fmt_btn_' + id);
+      if (btn) btn.classList.toggle('active', id === fmt);
+    });
+    const noteSel = document.getElementById('note_mode');
+    if (noteSel && noteSel.value !== fmt) {
+      noteSel.value = fmt;
+    }
+    if (fmt === 'foredrag') {
+      setQuickSpeakers(1, 1);
+    } else if (fmt === 'mote') {
+      const minEl = document.getElementById('min_speakers');
+      const maxEl = document.getElementById('max_speakers');
+      if (minEl && minEl.value === '1' && maxEl && maxEl.value === '1') {
+        minEl.value = '';
+        maxEl.value = '';
+      }
+    }
+    // If checkpoints already exist and user switches format (e.g. Møte <-> Forelesning),
+    // automatically cue Stage 3-5 update so clicking Start immediately re-assigns speakers & regenerates notes!
+    if (prevFmt !== fmt && lastCheckpointStatus && (lastCheckpointStatus.s3_diarize || lastCheckpointStatus.s4_names || lastCheckpointStatus.s5_notes)) {
+      const tm = document.getElementById('task_mode');
+      if (tm) {
+        tm.value = lastCheckpointStatus.is_transcript_input ? 'notes_only' : 'from_3_diarize';
+      }
+    }
+    updateVoiceoverGuideCopy();
+    updateSettingsSummary();
+    updateFsmSummaryBadge();
+    onTaskModeChanged(lastCheckpointStatus);
+  }
+
+  function onNoteModeSelectChanged(val) {
+    setSessionFormat(val);
+  }
+
+  function setContextAvailability(avail) {
+    UX_STATE_MACHINE.contextAvailability = avail;
+    const bNone = document.getElementById('ctx_btn_none');
+    const bHas = document.getElementById('ctx_btn_has');
+    if (bNone) bNone.classList.toggle('active', avail === 'none');
+    if (bHas) bHas.classList.toggle('active', avail === 'has_context');
+    const drawer = document.getElementById('context_notes_drawer');
+    if (drawer) {
+      drawer.open = true;
+    }
+    if (avail === 'has_context') {
+      highlightFrame(3);
+      const ag = document.getElementById('agenda_text');
+      if (ag) ag.focus();
+    }
+    updateFsmSummaryBadge();
+  }
+
+  function updateVoiceoverGuideCopy() {
+    const t = I18N[currentUiLang] || I18N.no;
+    const isLecture = (UX_STATE_MACHINE.sessionFormat === 'foredrag');
+    const titleEl = document.getElementById('lbl_vo_title');
+    const s1El = document.getElementById('vo_step_1');
+    const s2El = document.getElementById('vo_step_2');
+    if (titleEl) titleEl.innerHTML = isLecture ? t.vo_title_foredrag : t.vo_title_mote;
+    if (s1El) s1El.innerHTML = isLecture ? t.vo_s1_foredrag : t.vo_s1_mote;
+    if (s2El) s2El.innerHTML = isLecture ? t.vo_s2_foredrag : t.vo_s2_mote;
+  }
+
+  function updateFsmSummaryBadge() {
+    const badge = document.getElementById('fsm_state_summary');
+    if (!badge) return;
+    const intentNames = {
+      record: currentUiLang === 'en' ? 'Record' : 'Opptak',
+      file: currentUiLang === 'en' ? 'File' : 'Fil',
+      stream: currentUiLang === 'en' ? 'Stream' : 'Strøm',
+      resume: currentUiLang === 'en' ? 'Resume' : 'Gjenoppta'
+    };
+    const fmtNames = {
+      mote: currentUiLang === 'en' ? 'Meeting' : 'Møte',
+      foredrag: currentUiLang === 'en' ? 'Lecture' : 'Forelesning',
+      auto: 'Auto'
+    };
+    const langCode = (UX_STATE_MACHINE.audioLanguage || 'no').toUpperCase();
+    badge.textContent = `${intentNames[UX_STATE_MACHINE.intent] || 'Opptak'} · ${fmtNames[UX_STATE_MACHINE.sessionFormat] || 'Møte'} · ${langCode}`;
+  }
+
+  function setUiLanguage(lang, persist = false) {
     currentUiLang = (lang === 'en') ? 'en' : 'no';
     const sel = document.getElementById('ui_lang_select');
     if (sel && sel.value !== currentUiLang) sel.value = currentUiLang;
-    const d = UI_I18N[currentUiLang];
-    const textIds = [
-      'lbl_step1_title', 'check_audio_btn', 'browse_audio_btn', 'url_audio_btn', 'speak_guide_btn',
-      'lbl_auto_speak', 'lbl_live_chk', 'lbl_meeting_title', 'lbl_speakers_hint',
-      'lbl_context_drawer', 'btn_add_agenda', 'btn_add_notes', 'lbl_agenda_text',
-      'lbl_manual_notes_text', 'lbl_stages', 'apply_rec_btn', 'lbl_adv_drawer',
-      'lbl_row_speakers', 'lbl_row_models', 'lbl_row_task', 'lbl_row_folder',
-      'lbl_row_outfiles', 'btn_browse_folder', 'btn_open_folder_row', 'btn_unique_names',
-      'stop_btn', 'lbl_log_header', 'btn_open_folder_log', 'btn_copy_log', 'btn_save_log',
-      'file_menu_btn', 'menu_open_btn', 'menu_folder_btn', 'menu_install_btn', 'menu_uninstall_btn',
-      'uninstall_modal_title', 'confirm_uninstall_no_btn', 'confirm_uninstall_yes_btn'
-    ];
-    for (const id of textIds) {
+    const t = I18N[currentUiLang];
+    const isEn = (currentUiLang === 'en');
+    const map = {
+      lbl_app_title: t.app_title,
+      lbl_app_sub: t.app_sub,
+      lbl_step1_nav: t.step1_nav,
+      lbl_step2_audio_nav: t.step2_audio_nav,
+      lbl_step2_nav: t.step2_nav,
+      lbl_step3_nav: t.step3_nav,
+      lbl_intent_record: t.intent_record,
+      lbl_intent_record_sub: t.intent_record_sub,
+      lbl_intent_file: t.intent_file,
+      lbl_intent_file_sub: t.intent_file_sub,
+      lbl_intent_stream: t.intent_stream,
+      lbl_intent_stream_sub: t.intent_stream_sub,
+      lbl_intent_resume: t.intent_resume,
+      lbl_intent_resume_sub: t.intent_resume_sub,
+      speak_guide_btn: t.speak_btn,
+      lbl_format_heading: isEn ? 'Session' : 'Økt',
+      lbl_audio_lang_heading: isEn ? 'Speech' : 'Tale',
+      fmt_btn_mote: isEn ? 'Meeting' : 'Møte',
+      fmt_btn_foredrag: isEn ? 'Lecture' : 'Forelesning',
+      detect_lang_btn: isEn ? '🔍 Detect' : '🔍 Oppdag',
+      menu_install_btn: isEn ? 'Install desktop shortcut' : 'Installer snarvei på maskinen',
+      menu_uninstall_btn: isEn ? 'Uninstall Steno & remove models...' : 'Avinstaller Steno og slett modeller...'
+    };
+    for (const [id, text] of Object.entries(map)) {
       const el = document.getElementById(id);
-      if (el && d[id]) el.textContent = d[id];
+      if (el) el.textContent = text;
     }
-    const umBody = document.getElementById('uninstall_modal_body');
-    if (umBody && d.uninstall_modal_body_html) umBody.innerHTML = d.uninstall_modal_body_html;
-    if (!currentAudioPath) {
-      const sf = document.getElementById('selected-file');
-      if (sf) sf.textContent = d.selected_file_empty;
+    if (!UX_STATE_MACHINE.recording) {
+      const rb = document.getElementById('rec_btn_label');
+      if (rb) rb.textContent = t.rec_start;
     }
-    const recBtn = document.getElementById('rec_btn');
-    if (recBtn) recBtn.textContent = isRecording ? d.rec_stop : d.rec_start;
-    const runBtn = document.getElementById('run_btn');
-    if (runBtn) runBtn.textContent = isJobRunning ? d.run_btn_busy : d.run_btn_idle;
-    const pb = document.getElementById('prompt_banner');
-    if (pb) pb.innerHTML = d.prompt_banner_html;
-    document.getElementById('meeting_title').placeholder = d.meeting_title_ph;
-    document.getElementById('speaker_names_hint').placeholder = d.speakers_hint_ph;
-    document.getElementById('agenda_text').placeholder = d.agenda_ph;
-    document.getElementById('manual_notes_text').placeholder = d.manual_notes_ph;
-    const ckptIds = ['ckpt_s1', 'ckpt_s2', 'ckpt_s3', 'ckpt_s4', 'ckpt_s5'];
-    ckptIds.forEach((cid, i) => {
-      const el = document.getElementById(cid);
-      if (el) {
-        const done = el.classList.contains('done');
-        el.textContent = (done ? "✓ " : "") + d.ckpt_labels[i];
+    updateVoiceoverGuideCopy();
+    updateFsmSummaryBadge();
+    updateSettingsSummary();
+    if (persist && window.pywebview && window.pywebview.api && window.pywebview.api.save_preferences) {
+      window.pywebview.api.save_preferences({ ui_lang: currentUiLang }).catch(() => {});
+    }
+  }
+  const setUiLang = setUiLanguage;
+
+  // =========================================================================
+  // AUDIO SPEECH LANGUAGE SELECTION, MODEL SUGGESTIONS & DETECTION CONFIRMATION
+  // =========================================================================
+  function ensureSelectOption(selectEl, val, label) {
+    if (!selectEl || !val) return;
+    const exists = [...selectEl.options].some(o => o.value === val);
+    if (!exists) {
+      const opt = document.createElement('option');
+      opt.value = val;
+      opt.textContent = label || val;
+      selectEl.insertBefore(opt, selectEl.lastElementChild);
+    }
+  }
+
+  async function onAudioLangSelectChanged(val) {
+    if (val === 'custom') {
+      const msg = currentUiLang === 'en'
+        ? 'Enter ISO 639-1 language code for audio speech (e.g. no, en, sv, da, de, es, fr, fi, nl, pl, it, pt, uk, ar, zh, ja, or auto):'
+        : 'Skriv inn ISO-språkkode for talespråket i lyden (f.eks. no, en, sv, da, de, es, fr, fi, nl, pl, it, pt, uk, ar, zh, ja, eller auto):';
+      const entered = window.prompt(msg, UX_STATE_MACHINE.audioLanguage || 'en');
+      if (!entered || !entered.trim()) {
+        const sel = document.getElementById('audio_lang_select');
+        if (sel) sel.value = UX_STATE_MACHINE.audioLanguage || 'no';
+        return;
       }
-    });
+      await setAudioLanguage(entered.trim().toLowerCase(), { persist: true, applyRecommended: true });
+      return;
+    }
+    await setAudioLanguage(val, { persist: true, applyRecommended: true });
+  }
+
+  async function setAudioLanguage(langCode, opts = {}) {
+    const raw = String(langCode || 'no').trim().toLowerCase();
+    const norm = (raw === 'nb' || raw === 'nn' || raw === 'norsk' || raw === 'norwegian') ? 'no'
+      : ((raw === 'eng' || raw === 'english' || raw === 'engelsk') ? 'en' : (raw || 'no'));
+    const prevLang = UX_STATE_MACHINE.audioLanguage;
+    UX_STATE_MACHINE.audioLanguage = norm;
+
+    const langInput = document.getElementById('language');
+    if (langInput && langInput.value !== norm) {
+      langInput.value = norm;
+    }
+    const langSel = document.getElementById('audio_lang_select');
+    if (langSel) {
+      ensureSelectOption(langSel, norm, `${norm.toUpperCase()} (${norm})`);
+      langSel.value = norm;
+    }
+
+    // Dismiss any pending confirmation banner if user now switched to that language
+    if (pendingDetectedLang && pendingDetectedLang.detected_language === norm) {
+      dismissDetectedLanguageChange();
+    }
+
+    if (window.pywebview && window.pywebview.api && window.pywebview.api.get_language_recommendations) {
+      try {
+        const prof = document.getElementById('model_profile').value || 'recommended';
+        const outDir = document.getElementById('out_dir').value || '';
+        const recData = await window.pywebview.api.get_language_recommendations(norm, prof, outDir);
+        if (recData && recData.ok) {
+          lastRecommendedWhisper = recData.chosen_whisper || (recData.recommendations && recData.recommendations.default_whisper) || lastRecommendedWhisper;
+          lastRecommendedOllama = recData.chosen_ollama || (recData.recommendations && recData.recommendations.default_ollama) || lastRecommendedOllama;
+          if (opts.applyRecommended !== false) {
+            const wSel = document.getElementById('whisper_model');
+            if (wSel) {
+              ensureSelectOption(wSel, lastRecommendedWhisper, lastRecommendedWhisper);
+              wSel.value = lastRecommendedWhisper;
+            }
+            const oInp = document.getElementById('ollama_model');
+            if (oInp && lastRecommendedOllama) {
+              oInp.value = lastRecommendedOllama;
+            }
+          }
+          if (recData.hardware && recData.resource_fit) {
+            renderHardwareFitBanner(recData.hardware, recData.resource_fit);
+          }
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    if (opts.persist && window.pywebview && window.pywebview.api && window.pywebview.api.save_preferences) {
+      window.pywebview.api.save_preferences({ audio_language: norm }).catch(() => {});
+    }
+
+    // If Stage 1 checkpoint already exists and audio language changed, cue full re-run if user clicks Start
+    if (prevLang !== norm && lastCheckpointStatus && lastCheckpointStatus.s1_asr && !lastCheckpointStatus.is_transcript_input) {
+      const tm = document.getElementById('task_mode');
+      if (tm && tm.value === 'auto_resume') {
+        tm.value = 'full';
+        onTaskModeChanged(lastCheckpointStatus);
+      }
+    }
+
+    updateFsmSummaryBadge();
     updateSettingsSummary();
   }
 
-  function updateSettingsSummary() {
-    const d = UI_I18N[currentUiLang] || UI_I18N.no;
-    const pill = document.getElementById('settings_summary_pill');
-    if (pill) {
-      const wVal = document.getElementById('whisper_model').value || '';
-      const shortW = wVal.split('/').pop().replace('nb-whisper-', 'whisper-');
-      const mVal = document.getElementById('ollama_model').value.trim() || 'gemma4:e4b';
-      const minS = document.getElementById('min_speakers').value;
-      const maxS = document.getElementById('max_speakers').value;
-      const spkTxt = (minS && minS === maxS) ? `${minS} ${d.speakers_unit}` : ((minS || maxS) ? `${minS || '?'}-${maxS || '?'} ${d.speakers_unit}` : d.auto_speakers);
-      const taskSel = document.getElementById('task_mode');
-      const taskTxt = taskSel && taskSel.options[taskSel.selectedIndex]
-        ? taskSel.options[taskSel.selectedIndex].text.split('(')[0].trim()
-        : 'Resume';
-      pill.textContent = `${shortW} + ${mVal} • ${spkTxt} • ${taskTxt}`;
+  function onLanguageDetected(det) {
+    if (!det || !det.detected_language) return;
+    const detCode = String(det.detected_language).trim().toLowerCase();
+    if (!detCode || detCode === 'auto') return;
+    const curLang = UX_STATE_MACHINE.audioLanguage || (document.getElementById('language').value || 'no').trim().toLowerCase();
+    const isEn = (currentUiLang === 'en');
+    const detLabel = isEn ? (det.label_en || det.detected_label_en || detCode) : (det.label_no || det.detected_label_no || detCode);
+    const probPct = typeof det.language_probability === 'number' && det.language_probability > 0
+      ? Math.round(det.language_probability * 100) + '%'
+      : '';
+    const recModel = det.recommended_whisper || (detCode === 'no' ? 'NbAiLab/nb-whisper-medium' : 'large-v3-turbo');
+    const shortModel = String(recModel).split('/').pop();
+
+    const banner = document.getElementById('lang_confirm_banner');
+    const txt = document.getElementById('lang_confirm_text');
+    const acceptBtn = document.getElementById('lang_confirm_accept_btn');
+    const dismissBtn = document.getElementById('lang_confirm_dismiss_btn');
+
+    if (detCode === curLang) {
+      // Matches current language — show brief confirmation in status bar
+      if (banner) banner.classList.remove('open');
+      pendingDetectedLang = null;
+      return;
     }
-    const badge = document.getElementById('context_count_badge');
-    if (badge) {
-      const ag = document.getElementById('agenda_text').value.trim();
-      const mn = document.getElementById('manual_notes_text').value.trim();
-      const parts = [];
-      if (ag) parts.push(`Agenda (${ag.length})`);
-      if (mn) parts.push(`Notes (${mn.length})`);
-      badge.textContent = parts.length ? `— ${parts.join(' + ')}` : '';
+
+    pendingDetectedLang = {
+      detected_language: detCode,
+      label_no: det.label_no || det.detected_label_no || detCode,
+      label_en: det.label_en || det.detected_label_en || detCode,
+      recommended_whisper: recModel,
+      probability: det.language_probability || 0
+    };
+
+    if (banner && txt && acceptBtn && dismissBtn) {
+      const probStr = probPct ? `, ${probPct}` : '';
+      txt.innerHTML = isEn
+        ? `🌐 <strong>Detected ${detLabel} (${detCode}${probStr})</strong> — current is <strong>${curLang}</strong>. Switch language &amp; model (<code>${shortModel}</code>)?`
+        : `🌐 <strong>Oppdaget ${detLabel} (${detCode}${probStr})</strong> — valgt er <strong>${curLang}</strong>. Bytte talespråk og modell (<code>${shortModel}</code>)?`;
+      acceptBtn.textContent = isEn ? `Switch to ${detCode.toUpperCase()}` : `Bytt til ${detCode.toUpperCase()}`;
+      dismissBtn.textContent = isEn ? `Keep ${curLang.toUpperCase()}` : `Behold ${curLang.toUpperCase()}`;
+      banner.classList.add('open');
     }
   }
 
-  function updateHardwareBanner(hw, fit) {
-    const banner = document.getElementById('hw_resource_banner');
-    const txt = document.getElementById('hw_resource_text');
-    const btn = document.getElementById('apply_rec_btn');
-    if (!banner || !txt || !fit) return;
-    banner.className = fit.level === 'critical' ? 'critical' : (fit.level === 'warning' ? 'warning' : '');
-    txt.textContent = fit.message || '';
-    if (btn) {
-      btn.style.display = (fit.level === 'critical' || fit.level === 'warning') ? 'inline-block' : 'none';
+  async function confirmDetectedLanguageChange() {
+    if (!pendingDetectedLang || !pendingDetectedLang.detected_language) {
+      dismissDetectedLanguageChange();
+      return;
     }
-    updateSettingsSummary();
+    const targetLang = pendingDetectedLang.detected_language;
+    const isEn = (currentUiLang === 'en');
+    const lbl = isEn ? pendingDetectedLang.label_en : pendingDetectedLang.label_no;
+    dismissDetectedLanguageChange();
+    await setAudioLanguage(targetLang, { persist: true, applyRecommended: true });
+    const wModel = document.getElementById('whisper_model').value;
+    appendLog(
+      isEn
+        ? `==> Audio language switched to ${lbl} (${targetLang}) with model ${wModel}.`
+        : `==> Talespråk endret til ${lbl} (${targetLang}) med modell ${wModel}.`
+    );
   }
 
-  async function refreshResourceFit() {
-    const w = document.getElementById('whisper_model').value;
-    const m = document.getElementById('ollama_model').value.trim();
-    const outDir = document.getElementById('out_dir').value.trim();
-    updateSettingsSummary();
-    if (window.pywebview && pywebview.api && pywebview.api.check_model_resources) {
-      const res = await pywebview.api.check_model_resources(w, m, outDir);
-      if (res) {
-        cachedHwInfo = res.hardware;
-        updateHardwareBanner(res.hardware, res.resource_fit);
+  function dismissDetectedLanguageChange() {
+    pendingDetectedLang = null;
+    const banner = document.getElementById('lang_confirm_banner');
+    if (banner) banner.classList.remove('open');
+  }
+
+  async function detectAudioLanguageNow(opts = {}) {
+    if (!window.pywebview || !window.pywebview.api || !window.pywebview.api.detect_language) return;
+    const btn = document.getElementById('detect_lang_btn');
+    const isEn = (currentUiLang === 'en');
+    if (btn && !opts.silent) {
+      btn.disabled = true;
+      btn.textContent = isEn ? '⏳ Detecting...' : '⏳ Oppdager...';
+    }
+    try {
+      const res = await window.pywebview.api.detect_language(currentAudioPath);
+      if (res && res.ok && res.detected_language) {
+        const curLang = UX_STATE_MACHINE.audioLanguage || (document.getElementById('language').value || 'no').trim().toLowerCase();
+        const detCode = String(res.detected_language).toLowerCase();
+        const detLbl = isEn ? (res.label_en || detCode) : (res.label_no || detCode);
+        const probPct = Math.round((res.language_probability || 0) * 100);
+        if (detCode === curLang) {
+          const pLbl = document.getElementById('progress_label');
+          if (pLbl && !opts.silent) {
+            pLbl.textContent = isEn
+              ? `✓ Confirmed speech language: ${detLbl} (${probPct}%)`
+              : `✓ Bekreftet talespråk: ${detLbl} (${probPct}%)`;
+          }
+        } else {
+          onLanguageDetected(res);
+        }
+      } else if (res && res.error && !opts.silent) {
+        appendLog('==> ' + res.error);
+        alert(res.error);
+      }
+    } catch (err) {
+      if (!opts.silent) appendLog('FEIL ved språkdeteksjon: ' + err);
+    } finally {
+      if (btn && !opts.silent) {
+        btn.disabled = false;
+        btn.textContent = isEn ? '🔍 Detect' : '🔍 Oppdag';
       }
     }
   }
 
-  function applyRecommendedProfile() {
-    const profSel = document.getElementById('model_profile');
-    if (profSel) profSel.value = 'auto';
-    onProfileChanged();
-  }
-
-  function onProfileChanged() {
-    const prof = document.getElementById('model_profile').value;
-    const wSel = document.getElementById('whisper_model');
-    const mInp = document.getElementById('ollama_model');
-    if (prof === 'auto' && cachedHwInfo) {
-      wSel.value = cachedHwInfo.recommended_whisper || 'NbAiLab/nb-whisper-small';
-      mInp.value = cachedHwInfo.recommended_ollama || 'gemma4:e4b';
-    } else if (cachedProfiles && cachedProfiles[prof]) {
-      wSel.value = cachedProfiles[prof].whisper_model;
-      mInp.value = cachedProfiles[prof].ollama_model;
+  // =========================================================================
+  // MICROPHONE DISCOVERY, SYSTEM VOLUME & 4-SECOND MIC TEST
+  // =========================================================================
+  function populateAudioInputs(devices, sysVolume) {
+    const sel = document.getElementById('mic_device_select');
+    if (sel && Array.isArray(devices) && devices.length > 0) {
+      const prev = sel.value || 'default';
+      sel.innerHTML = '';
+      for (const d of devices) {
+        const opt = document.createElement('option');
+        opt.value = d.id;
+        const lbl = (currentUiLang === 'en' && d.label_en) ? d.label_en : (d.label_no || d.name);
+        opt.textContent = lbl + (d.is_default && d.id !== 'default' && !lbl.includes('Standard') && !lbl.includes('Default') ? ' ★' : '');
+        sel.appendChild(opt);
+      }
+      if ([...sel.options].some(o => o.value === prev)) {
+        sel.value = prev;
+      }
     }
-    refreshResourceFit();
-  }
-
-  function onManualModelChanged() {
-    const profSel = document.getElementById('model_profile');
-    if (profSel) profSel.value = 'custom';
-    refreshResourceFit();
-  }
-
-  window.addEventListener('pywebviewready', async () => {
-    const defs = await pywebview.api.get_defaults();
-    if (defs.hf_token) document.getElementById('hf_token').value = defs.hf_token;
-    if (defs.diarization_cached && !defs.hf_token) {
-      document.getElementById('hf_token').placeholder = "HF bufret lokalt";
-    }
-    document.getElementById('out_dir').value = defs.default_out_dir;
-    if (defs.default_meeting_title) {
-      document.getElementById('meeting_title').value = defs.default_meeting_title;
-    }
-    if (defs.profiles) cachedProfiles = defs.profiles;
-    if (defs.hardware) {
-      cachedHwInfo = defs.hardware;
-      document.getElementById('whisper_model').value = defs.hardware.recommended_whisper || 'NbAiLab/nb-whisper-small';
-      document.getElementById('ollama_model').value = defs.hardware.recommended_ollama || 'gemma4:e4b';
-      updateHardwareBanner(defs.hardware, defs.resource_fit);
-    }
-    if (defs.ui_lang) {
-      setUiLanguage(defs.ui_lang);
-    }
-    updateSettingsSummary();
-  });
-
-  const dz = document.getElementById('dropzone');
-  dz.addEventListener('dragover', (e) => { e.preventDefault(); dz.classList.add('dragover'); });
-  dz.addEventListener('dragleave', () => dz.classList.remove('dragover'));
-  dz.addEventListener('drop', (e) => { e.preventDefault(); dz.classList.remove('dragover'); });
-
-  function selectTaskMode(mode) {
-    const sel = document.getElementById('task_mode');
-    if (sel) {
-      sel.value = mode;
-      validateNames();
-      updateSettingsSummary();
+    const volNum = (sysVolume && typeof sysVolume === 'object' && typeof sysVolume.volume === 'number')
+      ? sysVolume.volume
+      : (typeof sysVolume === 'number' ? sysVolume : -1);
+    if (volNum >= 0) {
+      const volSlider = document.getElementById('sys_mic_vol');
+      const volLabel = document.getElementById('sys_mic_vol_val');
+      if (volSlider) volSlider.value = String(volNum);
+      if (volLabel) volLabel.textContent = volNum + '%';
     }
   }
 
-  function setExactSpeakers(n) {
-    document.getElementById('min_speakers').value = n;
-    document.getElementById('max_speakers').value = n;
+  async function refreshAudioInputs() {
+    if (!window.pywebview || !window.pywebview.api) return;
+    try {
+      const status = await window.pywebview.api.get_audio_input_status();
+      if (status) {
+        populateAudioInputs(status.devices || [], status.volume);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  async function onSystemMicVolumeSlide(val) {
+    const lbl = document.getElementById('sys_mic_vol_val');
+    if (lbl) lbl.textContent = val + '%';
+    if (!window.pywebview || !window.pywebview.api) return;
+    try {
+      await window.pywebview.api.set_mic_volume(parseInt(val, 10));
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  async function openSoundSettings() {
+    if (!window.pywebview || !window.pywebview.api) return;
+    try {
+      await window.pywebview.api.open_sound_settings();
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  function onMicSettingsChanged() {
     updateSettingsSummary();
   }
 
-  function onModeChanged() {
-    const mode = document.getElementById('note_mode').value;
-    if (mode === 'foredrag' && !document.getElementById('min_speakers').value && !document.getElementById('max_speakers').value) {
-      document.getElementById('min_speakers').value = 1;
-      document.getElementById('max_speakers').value = 1;
+  function updateMicTestState(state) {
+    if (!state) return;
+    const btn = document.getElementById('test_mic_btn');
+    const badge = document.getElementById('live_level_badge');
+    const container = document.getElementById('live_check_lines');
+    const isEn = (currentUiLang === 'en');
+
+    if (state.level) {
+      updateLiveLevel(state.level);
     }
-    updateSettingsSummary();
-  }
 
-  function autoCountSpeakersFromHint() {
-    const raw = document.getElementById('speaker_names_hint').value.trim();
-    if (!raw) return;
-    const parts = raw.split(/[,;\n]+/).map(s => s.trim()).filter(Boolean);
-    if (parts.length >= 1 && parts.length <= 20) {
-      document.getElementById('min_speakers').value = parts.length;
-      document.getElementById('max_speakers').value = parts.length;
-      updateSettingsSummary();
+    if (state.phase === 'recording') {
+      const rem = Math.max(1, Math.ceil(typeof state.remaining_sec === 'number' ? state.remaining_sec : 4));
+      if (btn) {
+        btn.textContent = isEn ? `Listening (${rem}s)...` : `Lytter (${rem}s)...`;
+        btn.classList.add('btn-playing');
+      }
+      if (badge && !state.level) {
+        badge.textContent = isEn ? `Listening (${rem}s)...` : `Lytter (${rem}s)...`;
+      }
+      if (container) {
+        container.style.color = '#e2e8f0';
+        container.innerHTML = (
+          `<div style="font-weight:700; color:#93c5fd;">🎙️ ${isEn ? 'MICROPHONE & STT TEST (' + rem + 's left)' : 'MIKROFON- & STT-TEST PÅGÅR (' + rem + 's igjen)'}</div>` +
+          `<div style="margin-top:3px;">${isEn ? 'Speak a short sentence now to test audio level and Speech-to-Text (STT)...' : 'Snakk en kort setning med vanlig stemme nå for å teste lydnivå og talegjenkjenning (STT)...'}</div>`
+        );
+      }
+      return;
+    }
+
+    if (state.phase === 'transcribing') {
+      if (btn) {
+        btn.textContent = isEn ? 'Running STT...' : 'Tolker tale (STT)...';
+        btn.classList.add('btn-playing');
+      }
+      const lvl = state.level || {};
+      const db = typeof lvl.rms_dbfs === 'number' ? lvl.rms_dbfs : -60;
+      if (container) {
+        container.style.color = '#e2e8f0';
+        container.innerHTML = (
+          `<div style="font-weight:700; color:#93c5fd;">⏳ ${isEn ? 'Running Speech-to-Text (Whisper STT)...' : 'Kjører talegjenkjenning (Whisper STT) på opptaket...'}</div>` +
+          `<div style="margin-top:3px;">${isEn ? 'Measured audio level:' : 'Målt lydnivå:'} <strong>${lvl.label || ''} (${db} dBFS)</strong></div>`
+        );
+      }
+      return;
+    }
+
+    if (state.phase === 'done') {
+      if (btn) {
+        btn.textContent = isEn ? 'Test mic (4s)' : 'Test mikrofon (4s)';
+        btn.classList.remove('btn-playing');
+      }
+      if (state.audio_path && !currentAudioPath) {
+        currentAudioPath = state.audio_path;
+        const selEl = document.getElementById('selected-file');
+        if (selEl) {
+          selEl.textContent = isEn ? 'Mic test (4s)' : 'Mikrofontest (4s)';
+          selEl.title = state.audio_path;
+        }
+      }
+      if (!container) return;
+      if (state.ok === false) {
+        container.innerHTML = `<div style="color:#f87171; font-weight:700;">⚠️ ${state.error || (isEn ? 'Microphone test failed.' : 'Mikrofontest feilet.')}</div>`;
+        return;
+      }
+      const lvl = state.level || {};
+      const db = typeof lvl.rms_dbfs === 'number' ? lvl.rms_dbfs : -60;
+      const st = lvl.status || 'lavt';
+      const lvlColor = (st === 'godt') ? '#4ade80' : ((st === 'lavt') ? '#fbbf24' : '#f87171');
+      const sttText = (state.stt_text || '').trim();
+      const sttHtml = sttText
+        ? `<div style="margin-top:4px; color:#4ade80; font-weight:700;">✓ ${isEn ? 'STT recognized:' : 'STT oppfattet tale:'} <span style="color:#ffffff; font-weight:600;">«${sttText}»</span></div>`
+        : `<div style="margin-top:4px; color:#fbbf24; font-weight:600;">⚠️ ${isEn ? 'STT: No clear speech recognized (speak closer to mic or increase gain to +12 dB).' : 'STT: Ingen tydelig tale oppfattet (snakk nærmere mikrofonen eller øk forsterkning til +12 dB).'}</div>`;
+
+      let langHtml = '';
+      if (state.detected_language) {
+        const detCode = String(state.detected_language).toLowerCase();
+        const detLbl = isEn ? (state.detected_label_en || detCode) : (state.detected_label_no || detCode);
+        const probPct = typeof state.language_probability === 'number' && state.language_probability > 0
+          ? ` (${Math.round(state.language_probability * 100)}%)`
+          : '';
+        const curLang = UX_STATE_MACHINE.audioLanguage || (document.getElementById('language').value || 'no').trim().toLowerCase();
+        if (detCode !== curLang) {
+          onLanguageDetected(state);
+          langHtml = `<div style="margin-top:4px; color:#fbbf24; font-weight:700;">🌐 ${isEn ? 'Detected language:' : 'Oppdaget talespråk:'} ${detLbl}${probPct} ` +
+            `<button type="button" class="btn-xs btn-accent" style="margin-left:6px; padding:1px 7px;" onclick="confirmDetectedLanguageChange()">${isEn ? 'Switch to ' + detCode.toUpperCase() : 'Bytt til ' + detCode.toUpperCase()}</button></div>`;
+        } else {
+          langHtml = `<div style="margin-top:3px; color:#93c5fd; font-weight:600;">🌐 ${isEn ? 'Detected language:' : 'Oppdaget talespråk:'} ${detLbl}${probPct} ✓</div>`;
+        }
+      }
+
+      container.innerHTML = (
+        `<div style="color:${lvlColor}; font-weight:700;">${st === 'godt' ? '✓' : '⚠️'} ${isEn ? 'Audio level:' : 'Lydnivå:'} ${lvl.label || st} (${db} dBFS)</div>` +
+        sttHtml +
+        langHtml +
+        `<div style="margin-top:3px; font-size:10.5px; color:#94a3b8;">${isEn ? 'Tip: Click "▶ Play" above to listen to your 4s test clip.' : 'Tips: Trykk «▶ Spill av» over for å lytte til 4s-testopptaket.'}</div>`
+      );
     }
   }
 
-  function speakGuide() {
-    document.getElementById('prompt_banner').style.display = 'block';
-    pywebview.api.speak_intro_prompt(currentUiLang);
+  async function testMicrophone() {
+    if (!window.pywebview || !window.pywebview.api) return;
+    const micDev = document.getElementById('mic_device_select').value || 'default';
+    const gainDb = parseFloat(document.getElementById('mic_gain_select').value || '6');
+    const autoGain = document.getElementById('mic_auto_gain').checked;
+    const whisperModel = document.getElementById('whisper_model').value || 'NbAiLab/nb-whisper-small';
+    const lang = document.getElementById('language').value || 'no';
+    updateMicTestState({ phase: 'recording', duration_sec: 4, remaining_sec: 4 });
+    await window.pywebview.api.test_microphone(micDev, gainDb, autoGain, 4.0, whisperModel, lang);
   }
 
+  // =========================================================================
+  // PRE-GENERATED HIGH-QUALITY VOICEOVER PLAYBACK (NO AUTOPLAY)
+  // =========================================================================
+  async function speakIntroPrompt() {
+    const audioEl = document.getElementById('vo_audio_player');
+    if (audioEl && !audioEl.paused) {
+      audioEl.pause();
+      audioEl.currentTime = 0;
+      return;
+    }
+    if (!window.pywebview || !window.pywebview.api) return;
+    const fmt = UX_STATE_MACHINE.sessionFormat === 'foredrag' ? 'foredrag' : 'mote';
+    try {
+      const res = await window.pywebview.api.speak_intro_prompt(currentUiLang, fmt);
+      if (res && res.playing === false) {
+        return;
+      }
+      if (!res || !res.audio_path) {
+        const uri = await window.pywebview.api.get_voiceover_data_uri(currentUiLang, fmt);
+        if (uri && audioEl) {
+          audioEl.src = uri;
+          audioEl.play().catch(() => {});
+        }
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  // =========================================================================
+  // RECORDING & LIVE LEVEL MONITOR
+  // =========================================================================
   function updateLiveLevel(lvl) {
     const badge = document.getElementById('live_level_badge');
-    if (!badge || !lvl) return;
-    badge.className = 'live-badge ' + (lvl.status || '');
-    const stMap = { godt: 'Godt', lavt: 'Lavt!', stille: 'Stille', hoyt: 'Høyt/Klipp!' };
-    const stTxt = stMap[lvl.status] || lvl.status;
-    badge.textContent = `Lyd: ${lvl.rms_dbfs} dBFS (${stTxt})`;
-    badge.title = lvl.label || '';
+    const fill = document.getElementById('mic_meter_fill');
+    if (!lvl) return;
+    const db = typeof lvl.rms_dbfs === 'number' ? lvl.rms_dbfs : -60;
+    const pct = Math.max(4, Math.min(100, Math.round(((db + 60) / 60) * 100)));
+    if (fill) fill.style.width = pct + '%';
+
+    if (!badge) return;
+    badge.textContent = `${lvl.label || 'Lyd'} (${db} dBFS)`;
+    if (lvl.status === 'godt') {
+      badge.style.background = 'var(--ok-soft)';
+      badge.style.color = 'var(--ok)';
+    } else if (lvl.status === 'stille' || lvl.status === 'lavt') {
+      badge.style.background = 'var(--warn-soft)';
+      badge.style.color = 'var(--warn)';
+    } else {
+      badge.style.background = 'var(--danger-soft)';
+      badge.style.color = 'var(--danger)';
+    }
   }
 
   function appendLiveChunk(line, lvl) {
-    const panel = document.getElementById('live_check_panel');
-    if (!panel) return;
-    panel.style.display = 'block';
     if (lvl) updateLiveLevel(lvl);
-    panel.textContent = (panel.textContent ? panel.textContent + "\n" : "") + line;
+    const panel = document.getElementById('live_check_panel');
+    const container = document.getElementById('live_check_lines');
+    if (!panel || !container) return;
+    if (container.textContent.startsWith('Sanntids') || container.textContent.startsWith('Venter')) {
+      container.textContent = '';
+      container.style.color = '#e2e8f0';
+    }
+    const row = document.createElement('div');
+    row.textContent = line;
+    container.appendChild(row);
     panel.scrollTop = panel.scrollHeight;
   }
 
-  async function runQuickAudioCheck() {
-    if (!currentAudioPath) return;
-    const panel = document.getElementById('live_check_panel');
-    if (panel) {
-      panel.style.display = 'block';
-      panel.textContent = "Starter grov sanntids-lydsjekk (første 20 sekunder)...";
+  async function toggleRecording() {
+    const btn = document.getElementById('rec_btn');
+    const lbl = document.getElementById('rec_btn_label');
+    const timerEl = document.getElementById('rec_timer');
+    const outDir = document.getElementById('out_dir').value;
+    const speakGuide = document.getElementById('auto_speak_guide').checked;
+    const liveChk = document.getElementById('live_transcribe_chk').checked;
+    const micDev = document.getElementById('mic_device_select').value || 'default';
+    const gainDb = parseFloat(document.getElementById('mic_gain_select').value || '0');
+    const autoGain = document.getElementById('mic_auto_gain').checked;
+    const t = I18N[currentUiLang] || I18N.no;
+
+    if (!UX_STATE_MACHINE.recording) {
+      const liveLines = document.getElementById('live_check_lines');
+      if (liveLines) liveLines.textContent = 'Venter på tale...';
+
+      const res = await window.pywebview.api.start_recording(
+        outDir,
+        speakGuide,
+        liveChk,
+        document.getElementById('whisper_model').value,
+        document.getElementById('language').value,
+        document.getElementById('meeting_title').value,
+        document.getElementById('speaker_names_hint').value,
+        document.getElementById('agenda_text').value,
+        micDev,
+        gainDb,
+        autoGain
+      );
+      if (res && res.ok) {
+        UX_STATE_MACHINE.recording = true;
+        btn.classList.add('recording');
+        if (lbl) lbl.textContent = t.rec_stop;
+        recStartTime = Date.now();
+        recTimerInterval = setInterval(() => {
+          const sec = Math.floor((Date.now() - recStartTime) / 1000);
+          const m = String(Math.floor(sec / 60)).padStart(2, '0');
+          const s = String(sec % 60).padStart(2, '0');
+          timerEl.textContent = `${m}:${s}`;
+        }, 500);
+      } else {
+        appendLog('FEIL ved opptaksstart: ' + (res ? res.error : 'Ukjent feil'));
+      }
+    } else {
+      clearInterval(recTimerInterval);
+      UX_STATE_MACHINE.recording = false;
+      btn.classList.remove('recording');
+      if (lbl) lbl.textContent = t.rec_start;
+      const suggestion = await window.pywebview.api.stop_recording(outDir);
+      if (suggestion) {
+        applyAudioSuggestion(suggestion);
+      }
     }
-    await pywebview.api.run_quick_audio_check(
+  }
+
+  // =========================================================================
+  // FILE, STREAM URL, CONTEXT LINK & RESUMABLE SESSIONS
+  // =========================================================================
+  async function applyAudioSuggestion(res) {
+    if (!res) return;
+    currentAudioPath = res.audio_path;
+    const selEl = document.getElementById('selected-file');
+    const parts = String(res.audio_path).split(/[\\/]/);
+    const shortName = parts[parts.length - 1] || res.audio_path;
+    if (res.is_transcript_input) {
+      selEl.textContent = 'Transkripsjon: ' + shortName;
+      selEl.title = res.audio_path;
+      document.getElementById('task_mode').value = 'notes_only';
+    } else {
+      selEl.textContent = shortName;
+      selEl.title = res.audio_path;
+    }
+    if (!document.getElementById('out_dir').value) {
+      document.getElementById('out_dir').value = res.out_dir;
+    }
+    document.getElementById('html_name').value = res.html_name;
+    document.getElementById('notes_name').value = res.notes_name;
+    if (res.notes_html_name) {
+      document.getElementById('notes_html_name').value = res.notes_html_name;
+    }
+    await checkConflicts();
+    await refreshCheckpointBar();
+    updateSettingsSummary();
+    detectAudioLanguageNow({ silent: true }).catch(() => {});
+  }
+
+  async function browseAudio() {
+    const res = await window.pywebview.api.pick_audio_file();
+    if (res) {
+      await applyAudioSuggestion(res);
+    }
+  }
+
+  async function fetchStreamFromInput() {
+    const inp = document.getElementById('stream_url_input');
+    const url = inp ? inp.value.trim() : '';
+    if (!url) {
+      await promptAudioUrl();
+      return;
+    }
+    appendLog('==> Henter lyd fra nettadresse: ' + url + ' ...');
+    try {
+      const outDir = document.getElementById('out_dir').value;
+      const res = await window.pywebview.api.fetch_media_url(url, outDir);
+      if (res) {
+        await applyAudioSuggestion(res);
+      } else {
+        appendLog('FEIL: Ugyldig nettadresse.');
+      }
+    } catch (err) {
+      appendLog('FEIL ved nedlasting fra URL: ' + err);
+    }
+  }
+
+  async function promptAudioUrl() {
+    const promptMsg = currentUiLang === 'en'
+      ? 'Paste audio/video stream URL (e.g. https://.../meeting.opus or .m3u8):'
+      : 'Lim inn nettadresse (URL) til lyd, video eller møtestrøm:';
+    const entered = window.prompt(promptMsg, 'https://');
+    if (!entered || !entered.trim() || entered.trim() === 'https://') return;
+    const inp = document.getElementById('stream_url_input');
+    if (inp) inp.value = entered.trim();
+    await fetchStreamFromInput();
+  }
+
+  async function handleDroppedAudio(path) {
+    const lower = path.toLowerCase();
+    if (lower.endsWith('.pptx') || lower.endsWith('.pdf') || lower.endsWith('.odp') || lower.endsWith('.docx') || lower.endsWith('.odt')) {
+      const extracted = await window.pywebview.api.load_context_file_path(path);
+      if (extracted) {
+        const box = document.getElementById('agenda_text');
+        box.value = box.value ? (box.value + '\n\n' + extracted) : extracted;
+        setContextAvailability('has_context');
+        updateContextSummary();
+      }
+      return;
+    }
+    const outDir = document.getElementById('out_dir').value;
+    const res = await window.pywebview.api.suggest_output_names(path, outDir);
+    await applyAudioSuggestion(res);
+  }
+
+  async function loadAgendaFile() {
+    const content = await window.pywebview.api.pick_agenda_file();
+    if (content) {
+      const box = document.getElementById('agenda_text');
+      box.value = box.value ? (box.value + '\n\n' + content) : content;
+      setContextAvailability('has_context');
+      updateContextSummary();
+    }
+  }
+
+  async function loadManualNotesFile() {
+    const content = await window.pywebview.api.pick_agenda_file();
+    if (content) {
+      const box = document.getElementById('manual_notes_text');
+      box.value = box.value ? (box.value + '\n\n' + content) : content;
+      setContextAvailability('has_context');
+      updateContextSummary();
+    }
+  }
+
+  async function fetchContextFromLink(targetField) {
+    const msg = currentUiLang === 'en'
+      ? 'Paste URL to agenda, slides (.pptx/.pdf), Google Docs/Slides, or notes:'
+      : 'Lim inn lenke (URL) til agenda, lysbilder (.pptx/.pdf), Google Docs/Slides eller notater:';
+    const url = window.prompt(msg, 'https://');
+    if (!url || !url.trim() || url.trim() === 'https://') return;
+    try {
+      const res = await window.pywebview.api.fetch_context_url(url.trim());
+      if (res && res.ok && res.text) {
+        const boxId = (targetField === 'notes') ? 'manual_notes_text' : 'agenda_text';
+        const box = document.getElementById(boxId);
+        if (box) {
+          box.value = box.value ? (box.value + '\n\n' + res.text) : res.text;
+        }
+        setContextAvailability('has_context');
+        updateContextSummary();
+      } else {
+        appendLog('FEIL ved henting av kontekst-lenke: ' + (res ? res.error : 'Ukjent feil'));
+      }
+    } catch (err) {
+      appendLog('FEIL ved henting av kontekst-lenke: ' + err);
+    }
+  }
+
+  function updateContextSummary() {
+    const ag = (document.getElementById('agenda_text').value || '').trim();
+    const mn = (document.getElementById('manual_notes_text').value || '').trim();
+    const sumEl = document.getElementById('context_drawer_summary');
+    if (!sumEl) return;
+    const totalChars = ag.length + mn.length;
+    if (totalChars === 0) {
+      sumEl.textContent = currentUiLang === 'en' ? 'No text added' : 'Ingen tekst lagt til';
+    } else {
+      sumEl.textContent = `${totalChars} tegn`;
+    }
+  }
+
+  function renderResumableSessions(sessions) {
+    const container = document.getElementById('resumable_list');
+    if (!container) return;
+    if (!Array.isArray(sessions) || sessions.length === 0) {
+      container.innerHTML = '<div style="font-size:11px; color:var(--muted);">Ingen lagrede sjekkpunkter funnet ennå.</div>';
+      return;
+    }
+    container.innerHTML = '';
+    for (const item of sessions) {
+      const row = document.createElement('div');
+      row.className = 'resume-item';
+      const stages = [
+        { k: 's1_asr', lbl: '1.Grov' },
+        { k: 's2_align', lbl: '2.Fin' },
+        { k: 's3_diarize', lbl: '3.Talere' },
+        { k: 's4_names', lbl: '4.Navn' },
+        { k: 's5_notes', lbl: '5.Referat' }
+      ];
+      const badgesHtml = stages.map(s =>
+        `<span class="stage-dot ${item[s.k] ? 'done' : ''}">${item[s.k] ? '✓' : ''}${s.lbl}</span>`
+      ).join('');
+
+      const info = document.createElement('div');
+      info.style.minWidth = '0';
+      info.style.flex = '1';
+      info.innerHTML = `<div class="resume-item-title">${item.stem || 'Økt'}</div><div class="resume-item-meta">${badgesHtml}</div>`;
+
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn-xs btn-accent';
+      btn.textContent = currentUiLang === 'en' ? 'Resume' : 'Fortsett';
+      btn.onclick = async () => {
+        const outDir = item.out_dir || document.getElementById('out_dir').value;
+        const suggestion = await window.pywebview.api.suggest_output_names(item.audio_path, outDir);
+        await applyAudioSuggestion(suggestion);
+        highlightFrame(4);
+      };
+
+      row.appendChild(info);
+      row.appendChild(btn);
+      container.appendChild(row);
+    }
+  }
+
+  async function refreshResumableSessions() {
+    if (!window.pywebview || !window.pywebview.api) return;
+    try {
+      const outDir = document.getElementById('out_dir').value;
+      const sessions = await window.pywebview.api.list_resumable_sessions(outDir);
+      renderResumableSessions(sessions || []);
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  // =========================================================================
+  // SPEAKERS, HARDWARE PROFILES & CHECKPOINT BAR
+  // =========================================================================
+  function setQuickSpeakers(minVal, maxVal) {
+    document.getElementById('min_speakers').value = minVal;
+    document.getElementById('max_speakers').value = maxVal;
+    updateSettingsSummary();
+  }
+
+  function syncSpeakerCountFromNames() {
+    const raw = document.getElementById('speaker_names_hint').value || '';
+    const parts = raw.split(/[,;\n]+/).map(s => s.trim()).filter(Boolean);
+    if (parts.length >= 1) {
+      const minEl = document.getElementById('min_speakers');
+      const maxEl = document.getElementById('max_speakers');
+      if (!minEl.value && !maxEl.value) {
+        minEl.placeholder = `Auto (${parts.length})`;
+        maxEl.placeholder = `Auto (${parts.length})`;
+      }
+    }
+  }
+
+  function renderHardwareFitBanner(hw, fit) {
+    const banner = document.getElementById('hw_resource_banner');
+    const txt = document.getElementById('hw_resource_text');
+    const btn = document.getElementById('apply_rec_btn');
+    if (!banner || !txt || !hw || !fit) return;
+    lastRecommendedWhisper = fit.recommended_whisper || hw.recommended_whisper || lastRecommendedWhisper;
+    lastRecommendedOllama = fit.recommended_ollama || hw.recommended_ollama || lastRecommendedOllama;
+    txt.textContent = fit.message;
+    txt.title = fit.message;
+    const curW = document.getElementById('whisper_model').value;
+    const curO = document.getElementById('ollama_model').value.trim();
+    const differs = (curW !== lastRecommendedWhisper) || (curO !== lastRecommendedOllama);
+    btn.style.display = (fit.status !== 'ok' || differs) ? 'inline-block' : 'none';
+  }
+
+  async function onProfileSelectChanged() {
+    const prof = document.getElementById('model_profile').value;
+    const curLang = UX_STATE_MACHINE.audioLanguage || (document.getElementById('language').value || 'no').trim().toLowerCase();
+    if (prof === 'recommended') {
+      document.getElementById('whisper_model').value = lastRecommendedWhisper;
+      document.getElementById('ollama_model').value = lastRecommendedOllama;
+    } else if (window.pywebview && window.pywebview.api && window.pywebview.api.get_language_recommendations) {
+      const profKey = (prof === 'quality') ? 'heavy' : (prof === 'light' ? 'light' : 'recommended');
+      const outDir = document.getElementById('out_dir').value || '';
+      const recData = await window.pywebview.api.get_language_recommendations(curLang, profKey, outDir);
+      if (recData && recData.recommendations) {
+        const wSel = document.getElementById('whisper_model');
+        ensureSelectOption(wSel, recData.recommendations.default_whisper, recData.recommendations.default_whisper);
+        wSel.value = recData.recommendations.default_whisper;
+        document.getElementById('ollama_model').value = recData.recommendations.default_ollama;
+      }
+    } else if (cachedProfiles && cachedProfiles[prof]) {
+      document.getElementById('whisper_model').value = cachedProfiles[prof].whisper_model;
+      document.getElementById('ollama_model').value = cachedProfiles[prof].ollama_model;
+    }
+    await refreshHardwareCheck();
+  }
+
+  async function onModelDropdownChanged(userInitiated = false) {
+    const curW = document.getElementById('whisper_model').value;
+    const curO = document.getElementById('ollama_model').value.trim();
+    const curLang = UX_STATE_MACHINE.audioLanguage || (document.getElementById('language').value || 'no').trim().toLowerCase();
+    let matched = 'custom';
+    if (curW === lastRecommendedWhisper && curO === lastRecommendedOllama) {
+      matched = 'recommended';
+    } else if (cachedProfiles) {
+      for (const [k, v] of Object.entries(cachedProfiles)) {
+        if (v.whisper_model === curW && v.ollama_model === curO) {
+          matched = k;
+          break;
+        }
+      }
+    }
+    document.getElementById('model_profile').value = matched;
+    if (userInitiated && window.pywebview && window.pywebview.api && window.pywebview.api.save_preferences) {
+      window.pywebview.api.save_preferences({
+        language_models: {
+          [curLang]: { whisper_model: curW, ollama_model: curO }
+        }
+      }).catch(() => {});
+    }
+    await refreshHardwareCheck();
+  }
+
+  async function applyRecommendedModels() {
+    document.getElementById('model_profile').value = 'recommended';
+    const wSel = document.getElementById('whisper_model');
+    ensureSelectOption(wSel, lastRecommendedWhisper, lastRecommendedWhisper);
+    wSel.value = lastRecommendedWhisper;
+    document.getElementById('ollama_model').value = lastRecommendedOllama;
+    await refreshHardwareCheck();
+    updateSettingsSummary();
+  }
+
+  async function refreshHardwareCheck() {
+    if (!window.pywebview || !window.pywebview.api) return;
+    const w = document.getElementById('whisper_model').value;
+    const o = document.getElementById('ollama_model').value.trim();
+    const outDir = document.getElementById('out_dir').value;
+    const lang = document.getElementById('language').value || UX_STATE_MACHINE.audioLanguage || 'no';
+    const res = await window.pywebview.api.check_model_resources(w, o, outDir, lang);
+    if (res) renderHardwareFitBanner(res.hardware, res.resource_fit);
+  }
+
+  function updateSettingsSummary() {
+    const pill = document.getElementById('settings_summary_pill');
+    if (!pill) return;
+    const profSel = document.getElementById('model_profile');
+    const profText = profSel && profSel.selectedIndex >= 0
+      ? profSel.options[profSel.selectedIndex].text.split('(')[0].trim()
+      : 'Standard';
+    const lang = document.getElementById('language').value || 'no';
+    pill.textContent = `${profText} · ${lang}`;
+  }
+
+  function selectPipelineStage(stageKey) {
+    const map = {
+      s1: 'full',
+      s2: 'transcribe_s2',
+      s3: 'from_3_diarize',
+      s4: 'names_and_notes',
+      s5: 'notes_only'
+    };
+    const tm = document.getElementById('task_mode');
+    if (tm && map[stageKey]) {
+      tm.value = map[stageKey];
+      onTaskModeChanged(lastCheckpointStatus);
+      updateSettingsSummary();
+    }
+    for (const k of ['s1', 's2', 's3', 's4', 's5']) {
+      const pill = document.getElementById('ckpt_' + k);
+      if (pill) pill.classList.toggle('selected-stage', k === stageKey);
+    }
+  }
+
+  function runFreshFromStart() {
+    const tm = document.getElementById('task_mode');
+    if (tm) {
+      tm.value = 'full';
+      onTaskModeChanged(lastCheckpointStatus);
+      updateSettingsSummary();
+    }
+    runJob();
+  }
+
+  async function refreshCheckpointBar() {
+    if (!window.pywebview || !window.pywebview.api) return;
+    const outDir = document.getElementById('out_dir').value;
+    const htmlName = document.getElementById('html_name').value;
+    const notesName = document.getElementById('notes_name').value;
+    const notesHtmlName = document.getElementById('notes_html_name').value;
+    const st = await window.pywebview.api.get_checkpoint_status(outDir, currentAudioPath, htmlName, notesName, notesHtmlName);
+    lastCheckpointStatus = st;
+    const stages = [
+      ['ckpt_s1', st.s1_asr, '1. Grov'],
+      ['ckpt_s2', st.s2_align, '2. Fin'],
+      ['ckpt_s3', st.s3_diarize, '3. Talere'],
+      ['ckpt_s4', st.s4_names, '4. Navn'],
+      ['ckpt_s5', st.s5_notes, '5. Referat']
+    ];
+    for (const [id, done, label] of stages) {
+      const el = document.getElementById(id);
+      if (!el) continue;
+      el.classList.toggle('done', !!done);
+      el.textContent = (done ? '✓ ' : '') + label;
+    }
+    const outBtns = [
+      ['open_transcript_btn', st.html_exists, currentUiLang === 'en' ? 'Transcript (.html)' : 'Transkripsjon (.html)'],
+      ['open_notes_html_btn', st.notes_html_exists, currentUiLang === 'en' ? 'Notes (.html)' : 'Referat (.html)'],
+      ['open_notes_md_btn', st.notes_exists, currentUiLang === 'en' ? 'Notes (.md)' : 'Referat (.md)']
+    ];
+    for (const [btnId, exists, label] of outBtns) {
+      const b = document.getElementById(btnId);
+      if (!b) continue;
+      b.classList.toggle('ready', !!exists);
+      b.textContent = (exists ? '✓ ' : '') + label;
+    }
+    onTaskModeChanged(st);
+  }
+
+  function setAudioPlaybackState(playing) {
+    const label = playing
+      ? (currentUiLang === 'en' ? '⏹ Stop' : '⏹ Stopp')
+      : (currentUiLang === 'en' ? '▶ Play' : '▶ Spill av');
+    for (const id of ['play_audio_btn', 'play_selected_btn']) {
+      const btn = document.getElementById(id);
+      if (btn) {
+        btn.textContent = label;
+        btn.classList.toggle('btn-playing', !!playing);
+      }
+    }
+  }
+
+  async function togglePlaySelectedAudio() {
+    if (!window.pywebview || !window.pywebview.api) return;
+    try {
+      const res = await window.pywebview.api.toggle_play_audio(currentAudioPath);
+      if (res && typeof res.playing === 'boolean') {
+        setAudioPlaybackState(res.playing);
+      }
+    } catch (err) {
+      appendLog('FEIL ved avspilling: ' + err);
+    }
+  }
+
+  async function openGeneratedFile(kind) {
+    if (!window.pywebview || !window.pywebview.api) return;
+    const outDir = document.getElementById('out_dir').value;
+    let targetName = '';
+    if (kind === 'html') {
+      targetName = document.getElementById('html_name').value;
+    } else if (kind === 'notes_html') {
+      targetName = document.getElementById('notes_html_name').value;
+    } else if (kind === 'notes_md') {
+      targetName = document.getElementById('notes_name').value;
+    } else if (kind === 'audio') {
+      targetName = currentAudioPath;
+    }
+    if (!targetName) {
+      appendLog('==> Ingen fil valgt ennå.');
+      return;
+    }
+    await window.pywebview.api.open_file_in_os(targetName, outDir);
+  }
+
+  function onTaskModeChanged(st) {
+    const mode = document.getElementById('task_mode').value;
+    const btn = document.getElementById('run_btn');
+    const t = I18N[currentUiLang] || I18N.no;
+    const isLecture = (UX_STATE_MACHINE.sessionFormat === 'foredrag');
+    if (!btn) return;
+    if (mode === 'full') {
+      btn.textContent = t.run_full;
+    } else if (mode === 'from_3_diarize') {
+      btn.textContent = isLecture ? t.run_from_s3_lecture : t.run_from_s3_mote;
+    } else if (mode === 'names_and_notes') {
+      btn.textContent = t.run_from_s4;
+    } else if (mode === 'notes_only') {
+      btn.textContent = t.run_notes_only;
+    } else if (mode === 'auto_resume' && st && (st.s1_asr || st.s2_align || st.s3_diarize || st.s4_names) && !st.s5_notes) {
+      btn.textContent = t.run_resume;
+    } else {
+      btn.textContent = isLecture ? t.run_default_lecture : t.run_default;
+    }
+  }
+
+  async function browseOutDir() {
+    const res = await window.pywebview.api.pick_output_dir(currentAudioPath);
+    if (res) {
+      document.getElementById('out_dir').value = res.out_dir;
+      if (res.html_name) document.getElementById('html_name').value = res.html_name;
+      if (res.notes_name) document.getElementById('notes_name').value = res.notes_name;
+      if (res.notes_html_name) document.getElementById('notes_html_name').value = res.notes_html_name;
+      await checkConflicts();
+      await refreshCheckpointBar();
+    }
+  }
+
+  async function checkConflicts() {
+    const outDir = document.getElementById('out_dir').value;
+    const htmlName = document.getElementById('html_name').value;
+    const notesName = document.getElementById('notes_name').value;
+    const notesHtmlName = document.getElementById('notes_html_name').value;
+    if (!outDir) return;
+    const conflicts = await window.pywebview.api.check_conflicts(outDir, htmlName, notesName, notesHtmlName);
+    const msgEl = document.getElementById('conflict-msg');
+    if (conflicts && conflicts.length > 0) {
+      msgEl.style.display = 'block';
+      msgEl.textContent = 'Fil finnes allerede (' + conflicts.join(', ') + '). Fullførte sjekkpunkter gjenbrukes.';
+    } else {
+      msgEl.style.display = 'none';
+    }
+  }
+
+  function openFinder() {
+    const outDir = document.getElementById('out_dir').value;
+    window.pywebview.api.reveal_in_finder(outDir);
+  }
+
+  function toggleLogDrawer() {
+    const wrap = document.getElementById('log_drawer_wrap');
+    const btn = document.getElementById('toggle_log_btn');
+    if (!wrap) return;
+    const isOpen = wrap.classList.toggle('open');
+    if (btn) {
+      btn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+      btn.textContent = isOpen
+        ? (currentUiLang === 'en' ? 'Hide log ▴' : 'Skjul logg ▴')
+        : (currentUiLang === 'en' ? 'Show log ▾' : 'Vis logg ▾');
+    }
+  }
+
+  function appendLog(line) {
+    const log = document.getElementById('log');
+    if (log) {
+      log.textContent += line + '\n';
+      log.scrollTop = log.scrollHeight;
+    }
+    if (typeof line === 'string' && line.startsWith('==>')) {
+      const lbl = document.getElementById('progress_label');
+      if (lbl) {
+        lbl.textContent = line.replace(/^==>\s*/, '');
+        lbl.title = line;
+      }
+    }
+  }
+
+  async function copyLog() {
+    const txt = document.getElementById('log').textContent;
+    try {
+      await navigator.clipboard.writeText(txt);
+      appendLog('==> Logg kopiert til utklippstavlen.');
+    } catch (_e) {}
+  }
+
+  async function saveLog() {
+    const txt = document.getElementById('log').textContent;
+    const outDir = document.getElementById('out_dir').value;
+    await window.pywebview.api.save_log_dialog(txt, outDir, currentAudioPath);
+  }
+
+  function updateProgress(percent, label) {
+    document.getElementById('progress_bar').style.width = percent + '%';
+    document.getElementById('progress_val').textContent = percent + '%';
+    if (label) document.getElementById('progress_label').textContent = label;
+  }
+
+  function setRunning(running) {
+    const btn = document.getElementById('run_btn');
+    const stopBtn = document.getElementById('stop_btn');
+    btn.disabled = running;
+    stopBtn.style.display = running ? 'inline-block' : 'none';
+    if (!running) {
+      refreshCheckpointBar();
+    } else {
+      btn.textContent = 'Kjører... (trykk Stopp/Pause når som helst)';
+    }
+  }
+
+  async function stopJob() {
+    await window.pywebview.api.stop_job();
+  }
+
+  function runQuickAudioCheck() {
+    if (!currentAudioPath) {
+      appendLog('Velg en lydfil eller ta opp møtelyd først for å kjøre 20s lydsjekk.');
+      return;
+    }
+    const liveLines = document.getElementById('live_check_lines');
+    if (liveLines) liveLines.textContent = 'Analyserer første 20 sekunder...';
+    window.pywebview.api.run_quick_audio_check(
       currentAudioPath,
       document.getElementById('whisper_model').value,
       document.getElementById('language').value,
@@ -1208,263 +2952,60 @@
     );
   }
 
-  async function toggleRecording() {
-    const btn = document.getElementById('rec_btn');
-    const outDir = document.getElementById('out_dir').value;
-    if (!isRecording) {
-      const autoSpeak = document.getElementById('auto_speak_guide').checked;
-      const liveTranscribe = document.getElementById('live_transcribe_chk').checked;
-      document.getElementById('prompt_banner').style.display = 'block';
-      const panel = document.getElementById('live_check_panel');
-      if (panel && liveTranscribe) {
-        panel.style.display = 'block';
-        panel.textContent = "Lytter på mikrofon (oppdaterer lydnivå hvert sekund og grov transkripsjon hvert 5. sekund)...";
-      }
-      const res = await pywebview.api.start_recording(
-        outDir,
-        autoSpeak,
-        liveTranscribe,
-        document.getElementById('whisper_model').value,
-        document.getElementById('language').value,
-        document.getElementById('meeting_title').value,
-        document.getElementById('speaker_names_hint').value,
-        document.getElementById('agenda_text').value
-      );
-      if (!res || !res.ok) {
-        appendLog("FEIL ved opptaksstart: " + (res ? res.error : "Ukjent feil"));
-        return;
-      }
-      isRecording = true;
-      btn.textContent = "⏹ Stopp opptak";
-      btn.classList.add('recording');
-      recStartTime = Date.now();
-      recTimerInterval = setInterval(() => {
-        const elapsed = Math.floor((Date.now() - recStartTime) / 1000);
-        const mins = String(Math.floor(elapsed / 60)).padStart(2, '0');
-        const secs = String(elapsed % 60).padStart(2, '0');
-        document.getElementById('rec_timer').textContent = mins + ":" + secs;
-      }, 500);
-    } else {
-      clearInterval(recTimerInterval);
-      isRecording = false;
-      btn.textContent = "🎙️ Spill inn møte";
-      btn.classList.remove('recording');
-      const info = await pywebview.api.stop_recording(outDir);
-      if (info) {
-        await applySelection(info);
-      }
-    }
-  }
-
-  async function loadAgendaFile() {
-    const content = await pywebview.api.pick_agenda_file();
-    if (content) {
-      const box = document.getElementById('agenda_text');
-      box.value = box.value.trim() ? (box.value.trim() + "\n\n" + content) : content;
-      const drawer = document.getElementById('context_notes_drawer');
-      if (drawer) drawer.open = true;
-      updateSettingsSummary();
-    }
-  }
-
-  async function loadManualNotesFile() {
-    const content = await pywebview.api.pick_agenda_file();
-    if (content) {
-      const box = document.getElementById('manual_notes_text');
-      box.value = box.value.trim() ? (box.value.trim() + "\n\n" + content) : content;
-      const drawer = document.getElementById('context_notes_drawer');
-      if (drawer) drawer.open = true;
-      updateSettingsSummary();
-    }
-  }
-
-  async function refreshCheckpointBar() {
-    if (!currentAudioPath) return;
-    const outDir = document.getElementById('out_dir').value;
-    const htmlName = document.getElementById('html_name').value;
-    const notesName = document.getElementById('notes_name').value;
-    const st = await pywebview.api.get_checkpoint_status(outDir, currentAudioPath, htmlName, notesName);
-    const map = [
-      ['ckpt_s1', st.s1_asr, '1. ASR'],
-      ['ckpt_s2', st.s2_align, '2. Align'],
-      ['ckpt_s3', st.s3_diarize, '3. Pyannote'],
-      ['ckpt_s4', st.s4_names, '4. Navn & HTML'],
-      ['ckpt_s5', st.s5_notes, '5. Referat/Notat'],
-    ];
-    for (const [id, done, label] of map) {
-      const el = document.getElementById(id);
-      if (el) {
-        el.classList.toggle('done', !!done);
-        el.textContent = (done ? "✓ " : "") + label;
-      }
-    }
-  }
-
-  async function applySelection(info) {
-    currentAudioPath = info.audio_path;
-    document.getElementById('selected-file').textContent = info.audio_path + (info.is_transcript_input ? " (Transkripsjon)" : "");
-    if (info.out_dir) document.getElementById('out_dir').value = info.out_dir;
-    if (info.html_name) document.getElementById('html_name').value = info.html_name;
-    if (info.notes_name) document.getElementById('notes_name').value = info.notes_name;
-    if (info.notes_html_name) document.getElementById('notes_html_name').value = info.notes_html_name;
-    if (info.is_transcript_input) {
-      document.getElementById('task_mode').value = 'auto_resume';
-    }
-    await refreshCheckpointBar();
-    await validateNames();
-    updateSettingsSummary();
-  }
-
-  async function handleDroppedAudio(fullPath) {
-    const low = fullPath.toLowerCase();
-    if (low.endsWith('.pptx') || low.endsWith('.pdf') || low.endsWith('.odp') || low.endsWith('.docx') || low.endsWith('.odt')) {
-      const ctx = await pywebview.api.load_context_file_path(fullPath);
-      if (ctx) {
-        const box = document.getElementById('agenda_text');
-        box.value = box.value.trim() ? (box.value.trim() + "\n\n" + ctx) : ctx;
-        const drawer = document.getElementById('context_notes_drawer');
-        if (drawer) drawer.open = true;
-        updateSettingsSummary();
-      }
+  function runJob() {
+    if (UX_STATE_MACHINE.recording) {
+      alert('Stopp opptaket først før du starter transkripsjonen.');
       return;
     }
-    const info = await pywebview.api.suggest_output_names(
-      fullPath,
-      document.getElementById('out_dir').value
-    );
-    await applySelection(info);
-  }
-
-  async function browseAudio() {
-    const info = await pywebview.api.pick_audio_file();
-    if (info) await applySelection(info);
-  }
-
-  async function promptAudioUrl() {
-    const isEn = (currentUiLang === 'en');
-    const promptMsg = isEn
-      ? "Enter URL to audio file, video stream, podcast, or broadcast (HTTP/HTTPS/RTMP/HLS):"
-      : "Oppgi nettadresse til lydfil, videostrøm, podcast eller kringkasting (HTTP/HTTPS/RTMP/HLS):";
-    const url = window.prompt(promptMsg, "");
-    if (!url || !url.trim()) return;
-    const outDir = document.getElementById('out_dir') ? document.getElementById('out_dir').value : '';
-    const selEl = document.getElementById('selected-file');
-    const prevText = selEl ? selEl.textContent : '';
-    if (selEl) {
-      selEl.textContent = (isEn ? "⏳ Extracting audio from URL: " : "⏳ Henter og trekker ut lyd fra nettadresse: ") + url.trim();
+    if (!currentAudioPath) {
+      alert('Velg en lyd-/transkripsjonsfil eller gjør et opptak i Scene 01/02 først.');
+      setUxStep('1_source');
+      return;
     }
-    try {
-      const info = await pywebview.api.fetch_media_url(url.trim(), outDir);
-      if (info && info.audio_path) {
-        await applySelection(info);
-      } else {
-        if (selEl) selEl.textContent = prevText;
-        alert(isEn ? "Could not extract audio from URL." : "Kunne ikke hente lyd fra oppgitt nettadresse.");
-      }
-    } catch (err) {
-      console.error(err);
-      if (selEl) selEl.textContent = prevText;
-      alert((isEn ? "Error fetching URL: " : "Feil ved henting av nettadresse: ") + err);
-    }
-  }
-
-  async function browseFolder() {
-    const res = await pywebview.api.pick_output_dir(currentAudioPath);
-    if (res) {
-      document.getElementById('out_dir').value = res.out_dir;
-      if (res.html_name) document.getElementById('html_name').value = res.html_name;
-      if (res.notes_name) document.getElementById('notes_name').value = res.notes_name;
-      if (res.notes_html_name) document.getElementById('notes_html_name').value = res.notes_html_name;
-      await refreshCheckpointBar();
-      await validateNames();
-    }
-  }
-
-  async function autoIncrementNames() {
-    if (!currentAudioPath) return;
-    const info = await pywebview.api.suggest_output_names(
+    document.getElementById('log').textContent = '';
+    window.pywebview.api.start_job(
       currentAudioPath,
-      document.getElementById('out_dir').value
+      document.getElementById('out_dir').value,
+      document.getElementById('html_name').value,
+      document.getElementById('notes_name').value,
+      document.getElementById('notes_html_name').value,
+      document.getElementById('whisper_model').value,
+      document.getElementById('ollama_model').value,
+      document.getElementById('language').value,
+      document.getElementById('hf_token').value,
+      document.getElementById('min_speakers').value,
+      document.getElementById('max_speakers').value,
+      document.getElementById('speaker_names_hint').value,
+      document.getElementById('meeting_title').value,
+      document.getElementById('agenda_text').value,
+      document.getElementById('note_mode').value,
+      document.getElementById('task_mode').value,
+      document.getElementById('manual_notes_text').value
     );
-    document.getElementById('html_name').value = info.html_name;
-    document.getElementById('notes_name').value = info.notes_name;
-    document.getElementById('notes_html_name').value = info.notes_html_name;
-    await refreshCheckpointBar();
-    await validateNames();
   }
 
-  async function validateNames() {
-    const outDir = document.getElementById('out_dir').value;
-    const htmlInput = document.getElementById('html_name');
-    const notesInput = document.getElementById('notes_name');
-    const notesHtmlInput = document.getElementById('notes_html_name');
-    const msg = document.getElementById('conflict-msg');
-    const btn = document.getElementById('run_btn');
-    const checkBtn = document.getElementById('check_audio_btn');
-    if (checkBtn) checkBtn.disabled = !currentAudioPath || isJobRunning;
-    updateSettingsSummary();
+  // Settings popover & native <dialog> Uninstall handlers
+  function closeSettingsDrawer() {
+    const adv = document.getElementById('advanced_settings_drawer');
+    if (adv) adv.open = false;
+  }
 
-    const htmlName = htmlInput.value.trim();
-    const notesName = notesInput.value.trim();
-    const notesHtmlName = notesHtmlInput.value.trim();
-
-    if (!currentAudioPath || !htmlName || !notesName || !notesHtmlName) {
-      btn.disabled = true;
-      return;
+  document.addEventListener('click', (e) => {
+    const adv = document.getElementById('advanced_settings_drawer');
+    if (adv && adv.open && !adv.contains(e.target)) {
+      adv.open = false;
     }
-
-    const uniqueSet = new Set([htmlName, notesName, notesHtmlName]);
-    if (uniqueSet.size < 3) {
-      msg.textContent = "Alle tre utdatafiler må ha ulike filnavn.";
-      htmlInput.classList.add('conflict');
-      notesInput.classList.add('conflict');
-      notesHtmlInput.classList.add('conflict');
-      btn.disabled = true;
-      return;
-    }
-
-    const conflicts = await pywebview.api.check_conflicts(outDir, htmlName, notesName, notesHtmlName);
-    htmlInput.classList.toggle('conflict', conflicts.includes(htmlName));
-    notesInput.classList.toggle('conflict', conflicts.includes(notesName));
-    notesHtmlInput.classList.toggle('conflict', conflicts.includes(notesHtmlName));
-
-    if (conflicts.length > 0) {
-      msg.textContent = "Merk: Eksisterende utdatafil oppdateres ved kjøring (eller åpne ⚙️ Innstillinger -> «Ledig navn»).";
-    } else {
-      msg.textContent = "";
-    }
-    btn.disabled = isJobRunning;
-    await refreshCheckpointBar();
-  }
-
-  function openFinder() {
-    pywebview.api.reveal_in_finder(document.getElementById('out_dir').value);
-  }
-
-  function toggleFileMenu(e) {
-    if (e) e.stopPropagation();
-    const dd = document.getElementById('file_menu_dropdown');
-    const btn = document.getElementById('file_menu_btn');
-    const isOpen = dd.classList.toggle('open');
-    if (btn) btn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
-  }
-
-  function closeFileMenu() {
-    const dd = document.getElementById('file_menu_dropdown');
-    const btn = document.getElementById('file_menu_btn');
-    if (dd) dd.classList.remove('open');
-    if (btn) btn.setAttribute('aria-expanded', 'false');
-  }
-
-  document.addEventListener('click', () => closeFileMenu());
+  });
 
   async function installStenoShortcut() {
-    if (window.pywebview && pywebview.api && pywebview.api.install_app) {
-      await pywebview.api.install_app(currentUiLang);
-    }
+    closeSettingsDrawer();
+    if (!window.pywebview || !window.pywebview.api) return;
+    const res = await window.pywebview.api.install_app(currentUiLang);
+    if (res && res.message) alert(res.message);
   }
 
   function openUninstallDialog() {
+    closeSettingsDrawer();
     const dlg = document.getElementById('uninstall_modal');
     if (dlg && typeof dlg.showModal === 'function') {
       dlg.showModal();
@@ -1482,86 +3023,59 @@
     }
   }
 
-  async function confirmUninstallYes() {
+  async function confirmUninstallApp() {
     closeUninstallDialog();
-    if (window.pywebview && pywebview.api && pywebview.api.uninstall_app) {
-      const res = await pywebview.api.uninstall_app(currentUiLang);
-      if (res && res.message) {
-        appendLog("==> " + res.message);
+    if (!window.pywebview || !window.pywebview.api) return;
+    const res = await window.pywebview.api.uninstall_app(currentUiLang);
+    if (res && res.message) alert(res.message);
+  }
+
+  window.addEventListener('pywebviewready', async () => {
+    const defs = await window.pywebview.api.get_defaults();
+    if (defs.ui_lang) setUiLanguage(defs.ui_lang, false);
+    if (defs.audio_language) {
+      UX_STATE_MACHINE.audioLanguage = defs.audio_language;
+      const langInput = document.getElementById('language');
+      if (langInput) langInput.value = defs.audio_language;
+      const langSel = document.getElementById('audio_lang_select');
+      if (langSel) {
+        ensureSelectOption(langSel, defs.audio_language, `${defs.audio_language.toUpperCase()} (${defs.audio_language})`);
+        langSel.value = defs.audio_language;
       }
     }
-  }
-
-  async function copyLog() {
-    const text = document.getElementById('log').textContent;
-    try {
-      await navigator.clipboard.writeText(text);
-      appendLog("==> Logg kopiert til utklippstavlen.");
-    } catch (e) {
-      appendLog("Merk: Kunne ikke kopiere automatisk – marker teksten i loggen med Cmd+A / Ctrl+A.");
+    if (defs.hf_token) {
+      document.getElementById('hf_token').value = defs.hf_token;
+    } else if (defs.diarization_cached) {
+      document.getElementById('hf_token').placeholder = '✓ Taler-modell er bufret lokalt';
     }
-  }
-
-  async function saveLog() {
-    const text = document.getElementById('log').textContent;
-    const outDir = document.getElementById('out_dir').value;
-    await pywebview.api.save_log_dialog(text, outDir, currentAudioPath);
-  }
-
-  async function stopJob() {
-    if (!isJobRunning) return;
-    await pywebview.api.stop_job();
-  }
-
-  function appendLog(line) {
-    const log = document.getElementById('log');
-    log.textContent += "\n" + line;
-    log.scrollTop = log.scrollHeight;
-  }
-
-  function updateProgress(percent, label) {
-    const clamped = Math.max(0, Math.min(100, percent));
-    document.getElementById('progress_bar').style.width = clamped + "%";
-    document.getElementById('progress_val').textContent = clamped + "%";
-    if (label) document.getElementById('progress_label').textContent = label;
-  }
-
-  function setRunning(running) {
-    isJobRunning = running;
-    const btn = document.getElementById('run_btn');
-    const stopBtn = document.getElementById('stop_btn');
-    btn.textContent = running ? "Arbeider..." : "▶ Start / Fortsett";
-    stopBtn.disabled = !running;
-    validateNames();
-  }
-
-  async function runPipeline() {
-    await validateNames();
-    if (document.getElementById('run_btn').disabled) return;
-
-    const taskMode = document.getElementById('task_mode').value;
-    updateProgress(0, "Starter jobb...");
-    document.getElementById('log').textContent = "Starter jobb (" + taskMode + ")...";
-    pywebview.api.start_job(
-      currentAudioPath,
-      document.getElementById('out_dir').value,
-      document.getElementById('html_name').value,
-      document.getElementById('notes_name').value,
-      document.getElementById('notes_html_name').value,
-      document.getElementById('whisper_model').value,
-      document.getElementById('ollama_model').value,
-      document.getElementById('language').value,
-      document.getElementById('hf_token').value,
-      document.getElementById('min_speakers').value,
-      document.getElementById('max_speakers').value,
-      document.getElementById('speaker_names_hint').value,
-      document.getElementById('meeting_title').value,
-      document.getElementById('agenda_text').value,
-      document.getElementById('note_mode').value,
-      taskMode,
-      document.getElementById('manual_notes_text').value
-    );
-  }
+    if (defs.default_out_dir) {
+      document.getElementById('out_dir').value = defs.default_out_dir;
+    }
+    if (defs.default_meeting_title) {
+      document.getElementById('meeting_title').value = defs.default_meeting_title;
+    }
+    if (defs.profiles) {
+      cachedProfiles = defs.profiles;
+    }
+    if (defs.hardware && defs.resource_fit) {
+      lastRecommendedWhisper = defs.hardware.recommended_whisper || lastRecommendedWhisper;
+      lastRecommendedOllama = defs.hardware.recommended_ollama || lastRecommendedOllama;
+      const wSel = document.getElementById('whisper_model');
+      ensureSelectOption(wSel, lastRecommendedWhisper, lastRecommendedWhisper);
+      wSel.value = lastRecommendedWhisper;
+      document.getElementById('ollama_model').value = lastRecommendedOllama;
+      document.getElementById('model_profile').value = 'recommended';
+      renderHardwareFitBanner(defs.hardware, defs.resource_fit);
+    }
+    if (defs.audio_inputs) {
+      populateAudioInputs(defs.audio_inputs, defs.system_input_volume);
+    }
+    if (defs.resumable_sessions) {
+      renderResumableSessions(defs.resumable_sessions);
+    }
+    updateFsmSummaryBadge();
+    updateSettingsSummary();
+  });
 </script>
 </body>
 </html>

@@ -137,6 +137,8 @@ def generate_single_file_content() -> str:
     tpl_app = (SRC_DIR / "templates" / "app.html").read_text(encoding="utf-8")
     tpl_transcript = (SRC_DIR / "templates" / "transcript.html").read_text(encoding="utf-8")
     tpl_notes = (SRC_DIR / "templates" / "notes.html").read_text(encoding="utf-8")
+    tpl_vo_no = (SRC_DIR / "templates" / "voiceover_no.b64").read_text(encoding="utf-8")
+    tpl_vo_en = (SRC_DIR / "templates" / "voiceover_en.b64").read_text(encoding="utf-8")
 
     core_code = (SRC_DIR / "core.py").read_text(encoding="utf-8")
     gui_code = (SRC_DIR / "gui.py").read_text(encoding="utf-8")
@@ -163,6 +165,8 @@ _EMBEDDED_TEMPLATES: dict[str, str] = {{
     "app.html": {tpl_app!r},
     "transcript.html": {tpl_transcript!r},
     "notes.html": {tpl_notes!r},
+    "voiceover_no.b64": {tpl_vo_no!r},
+    "voiceover_en.b64": {tpl_vo_en!r},
 }}
 
 

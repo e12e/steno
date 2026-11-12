@@ -15,6 +15,7 @@ import time
 import unittest
 import zipfile
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 # Add src/ to sys.path
@@ -28,10 +29,10 @@ from mote import gui as mote_gui
 FEATURE_FILE = Path(__file__).resolve().parent / "features" / "cli_and_pipeline.feature"
 
 
-def parse_gherkin_feature(feature_path: Path) -> list[dict[str, object]]:
+def parse_gherkin_feature(feature_path: Path) -> list[dict[str, Any]]:
     """Minimal zero-dependency Gherkin .feature parser returning a list of scenarios with steps."""
-    scenarios: list[dict[str, object]] = []
-    current: dict[str, object] | None = None
+    scenarios: list[dict[str, Any]] = []
+    current: dict[str, Any] | None = None
     for raw_line in feature_path.read_text(encoding="utf-8").splitlines():
         line = raw_line.strip()
         if not line or line.startswith("#"):
@@ -79,7 +80,7 @@ class TestGherkinBDDScenarios(unittest.TestCase):
     def test_all_gherkin_scenarios_in_feature_file(self) -> None:
         self.assertTrue(FEATURE_FILE.is_file(), f"Missing Gherkin feature file: {FEATURE_FILE}")
         scenarios = parse_gherkin_feature(FEATURE_FILE)
-        self.assertEqual(len(scenarios), 13)
+        self.assertEqual(len(scenarios), 14)
 
         for sc in scenarios:
             name = str(sc["name"])
@@ -88,7 +89,7 @@ class TestGherkinBDDScenarios(unittest.TestCase):
                 self._execute_scenario(name, steps)
 
     def _execute_scenario(self, name: str, steps: list[str]) -> None:
-        ctx: dict[str, object] = {}
+        ctx: dict[str, Any] = {}
         for step in steps:
             if step.startswith('Given the unified app entrypoint receives "'):
                 arg_str = step.split('"', 2)[1]
@@ -372,11 +373,13 @@ class TestGherkinBDDScenarios(unittest.TestCase):
                     self.assertFalse(desktop_entry.exists(), "Desktop entry should be removed on uninstall")
             elif step == "And the desktop GUI includes a File menu with an Uninstall option and a Yes/No confirmation modal connected to MoteApi.uninstall_app":
                 gui_html = str(ctx["gui_html"])
-                self.assertIn("file_menu_btn", gui_html)
+                self.assertNotIn("file_menu_btn", gui_html)
+                self.assertIn("menu_install_btn", gui_html)
                 self.assertIn("menu_uninstall_btn", gui_html)
                 self.assertIn("uninstall_modal", gui_html)
                 self.assertIn("confirm_uninstall_yes_btn", gui_html)
                 self.assertIn("confirm_uninstall_no_btn", gui_html)
+                self.assertTrue(callable(getattr(mote_gui, "build_native_app_menu", None)))
                 api = mote_gui.MoteApi()
                 self.assertTrue(hasattr(api, "uninstall_app"), "MoteApi.uninstall_app is missing")
                 self.assertTrue(hasattr(api, "install_app"), "MoteApi.install_app is missing")
@@ -409,7 +412,6 @@ class TestGherkinBDDScenarios(unittest.TestCase):
                 self.assertIn("platform_machine == 'x86_64'", py_text)
                 self.assertIn("platform_machine == 'AMD64'", py_text)
             elif step == "And Termux (aarch64-linux-android) resolves $PREFIX/bin/sh, uses pulse audio capture, and executes steno.com without /bin/sh or uv wheels":
-                import shutil
                 import subprocess
 
                 self.assertTrue(mote_core.is_termux({"TERMUX_VERSION": "0.118.1"}, prefix_dir=Path("/nonexistent")))
@@ -477,6 +479,7 @@ class TestGherkinBDDScenarios(unittest.TestCase):
             elif step == "Given a ChromeOS Crostini or Linux environment where neither gi (GTK) nor qtpy (Qt) is installed":
                 has_fn = getattr(mote_gui, "has_native_webview_backend", None)
                 self.assertTrue(callable(has_fn), "mote.gui.has_native_webview_backend is missing")
+                assert callable(has_fn)
                 self.assertFalse(
                     has_fn(platform_str="linux", find_spec_fn=lambda _name: None),
                     "Should return False on Linux when neither gi nor qtpy is installed",
@@ -484,6 +487,7 @@ class TestGherkinBDDScenarios(unittest.TestCase):
             elif step == "When starting the local browser GUI bridge server for Steno":
                 create_srv = getattr(mote_gui, "create_browser_gui_server", None)
                 self.assertTrue(callable(create_srv), "mote.gui.create_browser_gui_server is missing")
+                assert callable(create_srv)
                 api = mote_gui.MoteApi()
                 srv, bridge, url = create_srv(api, mote_gui.HTML, port=0)
                 if srv is not None:
@@ -567,7 +571,7 @@ class TestGherkinBDDScenarios(unittest.TestCase):
                     fake_wav = Path(tmp) / "downloaded.wav"
                     fake_wav.write_bytes(b"RIFF....WAVE")
                     with mock.patch.object(mote_core, "download_media_url_audio", return_value=fake_wav) as mock_dl:
-                        with mock.patch.object(mote_core, "get_checkpoint_status_dict", return_value={"ok": True}) as mock_status:
+                        with mock.patch.object(mote_core, "get_checkpoint_status_dict", return_value={"ok": True}):
                             rc = mote_core.cli_main(["https://hypertekst.net/steno/test_meeting.opus", "--status"])
                             self.assertEqual(rc, 0)
                             mock_dl.assert_called_once()
@@ -584,6 +588,95 @@ class TestGherkinBDDScenarios(unittest.TestCase):
                         self.assertIsNotNone(res)
                         self.assertEqual(res["audio_path"], str(fake_wav))
                         self.assertIn("html_name", res)
+            elif step == "Given the local UX state machine in app.html and MoteApi":
+                ctx["app_html"] = mote_gui._load_app_html()
+                ctx["api"] = mote_gui.MoteApi()
+            elif step == "When inspecting voiceover configuration, microphone controls, and state machine transitions":
+                self.assertTrue(bool(ctx.get("app_html")))
+                self.assertIsNotNone(ctx.get("api"))
+            elif step == "Then voiceover does not autoplay by default and uses pre-generated high-quality audio files":
+                app_html = str(ctx["app_html"])
+                import inspect
+
+                # 1. Voiceover checkbox must NOT be checked by default in app.html
+                self.assertNotRegex(
+                    app_html,
+                    r'<input[^>]*id="auto_speak_guide"[^>]*checked',
+                    "auto_speak_guide must not be checked (autoplay) by default",
+                )
+                # 2. start_recording must default speak_guide to False
+                sig = inspect.signature(mote_gui.MoteApi.start_recording)
+                self.assertEqual(
+                    sig.parameters["speak_guide"].default,
+                    False,
+                    "MoteApi.start_recording must default speak_guide=False so voiceover never autoplays",
+                )
+                # 3. Pre-generated high-quality neural voiceover audio must be available for both 'no' and 'en'
+                ensure_vo = getattr(mote_core, "ensure_pregenerated_voiceover", None)
+                self.assertTrue(callable(ensure_vo), "mote.core.ensure_pregenerated_voiceover is missing")
+                assert callable(ensure_vo)
+                with tempfile.TemporaryDirectory() as tmp:
+                    vo_no = ensure_vo("no", cache_dir=Path(tmp))
+                    vo_en = ensure_vo("en", cache_dir=Path(tmp))
+                    self.assertIsNotNone(vo_no)
+                    self.assertIsNotNone(vo_en)
+                    assert isinstance(vo_no, Path) and isinstance(vo_en, Path)
+                    self.assertTrue(vo_no.is_file() and vo_no.stat().st_size > 4000)
+                    self.assertTrue(vo_en.is_file() and vo_en.stat().st_size > 4000)
+            elif step == "And MoteApi lists available audio input devices, system volume, and supports microphone selection and dB gain boost":
+                api = ctx["api"]
+                self.assertTrue(hasattr(api, "get_audio_input_status"), "MoteApi.get_audio_input_status missing")
+                self.assertTrue(hasattr(api, "set_mic_volume"), "MoteApi.set_mic_volume missing")
+                self.assertTrue(hasattr(api, "open_sound_settings"), "MoteApi.open_sound_settings missing")
+                self.assertTrue(hasattr(api, "test_microphone"), "MoteApi.test_microphone missing")
+                devs = mote_core.list_audio_input_devices(platform_str="darwin")
+                self.assertIsInstance(devs, list)
+                self.assertGreaterEqual(len(devs), 1)
+                self.assertIn("id", devs[0])
+                self.assertIn("name", devs[0])
+                cmd_gain = mote_core.build_ffmpeg_mic_record_cmd(
+                    "ffmpeg",
+                    Path("/tmp/gain.wav"),
+                    platform_str="darwin",
+                    os_name="posix",
+                    mic_device=":0",
+                    gain_db=12.0,
+                    auto_gain=True,
+                )
+                self.assertIn(":0", cmd_gain)
+                self.assertIn("-af", cmd_gain)
+                af_val = cmd_gain[cmd_gain.index("-af") + 1]
+                self.assertIn("12.0dB", af_val)
+                self.assertIn("dynaudnorm", af_val)
+                self.assertIn("afftdn", af_val)
+                self.assertTrue(hasattr(mote_core, "start_mic_record_process"), "start_mic_record_process missing")
+                self.assertTrue(hasattr(api, "toggle_play_audio"), "MoteApi.toggle_play_audio missing")
+                self.assertTrue(hasattr(api, "open_file_in_os"), "MoteApi.open_file_in_os missing")
+            elif step == "And the UX state machine supports Record (meeting or lecture), Existing File, Stream/URL, Context via File or Link, and Resume Transcription":
+                app_html = str(ctx["app_html"])
+                api = ctx["api"]
+                for required_token in (
+                    "UX_STATE_MACHINE",
+                    "setUxIntent",
+                    "setSessionFormat",
+                    "setContextAvailability",
+                    "setUxStep",
+                    "mic_device_select",
+                    "mic_gain_select",
+                    "sys_mic_vol",
+                    "fetchContextFromLink",
+                    "refreshResumableSessions",
+                    "play_audio_btn",
+                    "togglePlaySelectedAudio",
+                    "open_transcript_btn",
+                    "open_notes_html_btn",
+                    "openGeneratedFile",
+                    "updateMicTestState",
+                    "toggleLogDrawer",
+                ):
+                    self.assertIn(required_token, app_html, f"Missing '{required_token}' in app.html UX state machine")
+                self.assertTrue(hasattr(api, "fetch_context_url"), "MoteApi.fetch_context_url missing")
+                self.assertTrue(hasattr(api, "list_resumable_sessions"), "MoteApi.list_resumable_sessions missing")
             else:
                 self.fail(f"Unrecognized Gherkin step in '{name}': {step}")
 
@@ -662,6 +755,32 @@ class TestAARImprovements(unittest.TestCase):
                     mock_run_pipeline.called,
                     "MoteApi._worker should delegate pipeline execution to run_pipeline (DRY)",
                 )
+
+    def test_determine_stages_to_run_gui_task_modes_with_existing_checkpoints(self) -> None:
+        self.assertEqual(
+            mote_core.determine_stages_to_run("full", False, True, True, True, True, True),
+            (True, True, True, True, True),
+        )
+        self.assertEqual(
+            mote_core.determine_stages_to_run("from_3_diarize", False, True, True, True, True, True),
+            (False, False, True, True, True),
+        )
+        self.assertEqual(
+            mote_core.determine_stages_to_run("names_and_notes", False, True, True, True, True, True),
+            (False, False, False, True, True),
+        )
+        self.assertEqual(
+            mote_core.determine_stages_to_run("notes_only", False, True, True, True, True, True),
+            (False, False, False, False, True),
+        )
+        self.assertEqual(
+            mote_core.determine_stages_to_run("transcribe_only", False, True, True, True, True, True),
+            (False, False, False, True, False),
+        )
+        self.assertEqual(
+            mote_core.determine_stages_to_run("transcribe_s2", False, True, True, True, True, True),
+            (False, True, False, False, False),
+        )
 
 
 class TestContextAndTranscriptExtraction(unittest.TestCase):
@@ -769,6 +888,90 @@ class TestContextAndTranscriptExtraction(unittest.TestCase):
             self.assertEqual(levels[0]["status"], "godt")
             self.assertGreaterEqual(len(chunks), 1)
             self.assertIn("00:00–00:02 | -18 dBFS (godt)", chunks[0])
+
+
+class TestLanguageDetectionAndPreferences(unittest.TestCase):
+    def test_audio_language_normalization_and_model_recommendations(self) -> None:
+        self.assertEqual(mote_core.normalize_audio_language("nb-NO"), "no")
+        self.assertTrue(mote_core.is_norwegian_language("nn"))
+        self.assertEqual(mote_core.normalize_audio_language("en-US"), "en")
+        self.assertEqual(mote_core.normalize_audio_language("auto"), "auto")
+        self.assertEqual(mote_core.normalize_audio_language("de"), "de")
+
+        rec_no = mote_core.recommend_models_for_language("no", profile="standard", ram_gb=16.0)
+        self.assertEqual(rec_no["default_whisper"], "NbAiLab/nb-whisper-medium")
+        self.assertTrue(any("nb-whisper" in m for m in rec_no["whisper_choices"]))
+
+        rec_en = mote_core.recommend_models_for_language("en", profile="recommended", ram_gb=16.0)
+        self.assertEqual(rec_en["default_whisper"], "large-v3-turbo")
+        self.assertNotIn("NbAiLab/nb-whisper-medium", rec_en["whisper_choices"])
+
+        rec_de = mote_core.recommend_models_for_language("de", profile="light", ram_gb=8.0)
+        self.assertEqual(rec_de["default_whisper"], "small")
+
+        # Verify evaluate_model_resource_fit warns if nb-whisper is paired with English audio
+        hw = {
+            "ram_gb": 16.0,
+            "disk_free_gb": 50.0,
+            "gpu_type": "mps",
+            "gpu_label": "Apple Silicon (MPS)",
+            "recommended_whisper": "large-v3-turbo",
+            "recommended_ollama": "gemma4:e4b",
+        }
+        fit_mismatch = mote_core.evaluate_model_resource_fit(
+            "NbAiLab/nb-whisper-medium", "gemma4:e4b", hw, language="en"
+        )
+        self.assertEqual(fit_mismatch["status"], "warning")
+        self.assertEqual(fit_mismatch["recommended_whisper"], "large-v3-turbo")
+
+    def test_user_preferences_decouple_ui_locale_and_audio_language(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            prefs_file = Path(tmp) / "user_prefs.json"
+            saved = mote_core.save_user_preferences(
+                {
+                    "ui_lang": "no",
+                    "audio_language": "en",
+                    "language_models": {
+                        "en": {"whisper_model": "large-v3-turbo", "ollama_model": "gemma4:e4b"},
+                        "no": {"whisper_model": "NbAiLab/nb-whisper-large", "ollama_model": "gemma4:e4b"},
+                    },
+                },
+                prefs_path=prefs_file,
+            )
+            self.assertEqual(saved["ui_lang"], "no")
+            self.assertEqual(saved["audio_language"], "en")
+            loaded = mote_core.load_user_preferences(prefs_path=prefs_file)
+            self.assertEqual(loaded["ui_lang"], "no")
+            self.assertEqual(loaded["audio_language"], "en")
+            self.assertEqual(
+                loaded["language_models"]["en"]["whisper_model"],
+                "large-v3-turbo",
+            )
+            self.assertEqual(
+                loaded["language_models"]["no"]["whisper_model"],
+                "NbAiLab/nb-whisper-large",
+            )
+
+    def test_detect_text_language_and_gui_confirmation_elements(self) -> None:
+        det_no = mote_core.detect_text_language(
+            "Velkommen til styremøtet. Jeg heter Kari Nordmann og vi skal gjennomgå budsjettet for i år."
+        )
+        self.assertEqual(det_no["detected_language"], "no")
+        self.assertGreater(det_no["confidence"], 0.7)
+
+        det_en = mote_core.detect_text_language(
+            "Welcome to the board meeting. My name is John Smith and we will review the budget with the team today."
+        )
+        self.assertEqual(det_en["detected_language"], "en")
+        self.assertGreater(det_en["confidence"], 0.7)
+
+        html = mote_gui._load_app_html()
+        self.assertIn('id="audio_lang_select"', html)
+        self.assertIn('id="detect_lang_btn"', html)
+        self.assertIn('id="lang_confirm_banner"', html)
+        self.assertIn("function setAudioLanguage(", html)
+        self.assertIn("function onLanguageDetected(", html)
+        self.assertIn("function confirmDetectedLanguageChange(", html)
 
 
 class TestSyntheticE2E(unittest.TestCase):
