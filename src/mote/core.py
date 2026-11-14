@@ -7,12 +7,15 @@ import array
 import base64
 import getpass
 import html
+import importlib.util
+import ipaddress
 import json
 import math
 import os
 import platform
 import re
 import shutil
+import socket
 import stat
 import struct
 import subprocess
@@ -30,6 +33,7 @@ import zlib
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from datetime import datetime
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, TypedDict
 
@@ -220,6 +224,8 @@ def build_media_url_ffmpeg_cmd(
     cmd = [
         ffmpeg_bin,
         "-y",
+        "-rw_timeout",
+        "15000000",
         "-reconnect",
         "1",
         "-reconnect_streamed",
@@ -251,6 +257,7 @@ def download_media_url_audio(
     max_seconds: float | None = None,
     ffmpeg_bin: str | None = None,
     env: dict[str, str] | None = None,
+    timeout_sec: int | None = None,
 ) -> Path:
     """Download or stream media from a URL and extract 16kHz mono 16-bit PCM WAV audio via ffmpeg."""
     clean_url = str(url).strip()
@@ -277,15 +284,32 @@ def download_media_url_audio(
         ffmpeg_bin=f_bin,
         max_seconds=max_seconds,
     )
+    eff_timeout = (
+        timeout_sec
+        if timeout_sec is not None
+        else (int(max_seconds) + 60 if max_seconds and max_seconds > 0 else 3600)
+    )
 
     log_fn(
         f"==> Laster ned og trekker ut lyd fra nettadresse / Extracting audio from URL:\n"
         f"    {clean_url} -> {out_wav.name}"
     )
 
-    proc = subprocess.run(cmd, env=run_env, capture_output=True, text=True, check=False)
+    try:
+        proc = subprocess.run(
+            cmd,
+            env=run_env,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=eff_timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(
+            f"Tidsavbrudd ved nedlasting av lydstrøm ({eff_timeout}s) fra {clean_url}"
+        ) from exc
     if proc.returncode != 0 and not out_wav.is_file():
-        # Fallback without reconnect flags for older ffmpeg versions
+        # Fallback without reconnect/rw_timeout flags for older ffmpeg versions
         cmd_simple = [
             f_bin,
             "-y",
@@ -302,7 +326,19 @@ def download_media_url_audio(
         if max_seconds is not None and max_seconds > 0:
             cmd_simple.extend(["-t", str(max_seconds)])
         cmd_simple.append(str(out_wav))
-        proc = subprocess.run(cmd_simple, env=run_env, capture_output=True, text=True, check=False)
+        try:
+            proc = subprocess.run(
+                cmd_simple,
+                env=run_env,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=eff_timeout,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(
+                f"Tidsavbrudd ved nedlasting av lydstrøm ({eff_timeout}s) fra {clean_url}"
+            ) from exc
         if proc.returncode != 0 and not out_wav.is_file():
             err_msg = proc.stderr.strip() or f"ffmpeg exited with code {proc.returncode}"
             raise RuntimeError(
@@ -1025,22 +1061,84 @@ def normalize_context_url(url: str) -> str:
     return clean
 
 
-def fetch_context_from_url(url: str, timeout: int = 20) -> dict[str, Any]:
+def _is_disallowed_ip(addr_str: str) -> bool:
+    try:
+        ip = ipaddress.ip_address(addr_str.split("%", 1)[0])
+        return bool(
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_multicast
+            or ip.is_reserved
+            or ip.is_unspecified
+        )
+    except ValueError:
+        return False
+
+
+def _validate_public_http_url(url: str) -> None:
+    """Reject non-HTTP(S) schemes and loopback/private/link-local addresses (SSRF protection)."""
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme.lower() not in ("http", "https"):
+        raise ValueError(f"Ugyldig nettadresse for kontekst / Invalid context URL: {url}")
+    host = (parsed.hostname or "").strip().lower()
+    if not host:
+        raise ValueError(f"Mangler vertsnavn i URL / Missing host in URL: {url}")
+    if host in {"localhost", "localhost.localdomain"} or host.endswith((".local", ".internal")):
+        raise ValueError(f"Blokkert lokal/intern adresse / Blocked local or internal host: {host}")
+    if _is_disallowed_ip(host):
+        raise ValueError(f"Blokkert privat/lokal IP-adresse / Blocked non-public IP: {host}")
+    try:
+        infos = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+        for _fam, _stype, _proto, _canon, sockaddr in infos:
+            resolved_ip = str(sockaddr[0])
+            if _is_disallowed_ip(resolved_ip):
+                raise ValueError(
+                    f"Blokkert lokal/privat DNS-oppslag / Blocked non-public resolved IP for {host}"
+                )
+    except socket.gaierror:
+        pass
+
+
+class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(
+        self,
+        req: urllib.request.Request,
+        fp: Any,
+        code: int,
+        msg: str,
+        headers: Any,
+        newurl: str,
+    ) -> urllib.request.Request | None:
+        _validate_public_http_url(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def fetch_context_from_url(
+    url: str,
+    timeout: int = 20,
+    max_bytes: int = 25 * 1024 * 1024,
+) -> dict[str, Any]:
     """Download agenda, lecture slides, or draft notes from an HTTP/HTTPS URL and extract clean text."""
     raw_url = (url or "").strip()
-    parsed = urllib.parse.urlparse(raw_url)
-    if parsed.scheme.lower() not in ("http", "https"):
-        raise ValueError(f"Ugyldig nettadresse for kontekst / Invalid context URL: {raw_url}")
+    _validate_public_http_url(raw_url)
 
     eff_url = normalize_context_url(raw_url)
+    _validate_public_http_url(eff_url)
     eff_parsed = urllib.parse.urlparse(eff_url)
     req = urllib.request.Request(
         eff_url,
         headers={"User-Agent": "Mozilla/5.0 (compatible; Steno/1.0)"},
     )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+    opener = urllib.request.build_opener(_SafeRedirectHandler())
+    with opener.open(req, timeout=timeout) as resp:
         ctype = str(resp.headers.get("Content-Type", "")).lower()
-        body = resp.read()
+        body = resp.read(max_bytes + 1)
+    if len(body) > max_bytes:
+        raise ValueError(
+            f"Kontekstfilen overstiger maks størrelse ({max_bytes // (1024 * 1024)} MB) / "
+            f"Context file exceeds {max_bytes // (1024 * 1024)} MB limit."
+        )
 
     ext = Path(eff_parsed.path).suffix.lower()
     if not ext or ext not in CONTEXT_DOC_EXTENSIONS:
@@ -2415,7 +2513,10 @@ def _resolve_steno_install_paths(
         roaming_appdata = Path(os.environ.get("APPDATA", str(root / "AppData" / "Roaming")))
         app_dir = local_appdata / "Steno"
         mote_cache_dir = root / ".local" / "share" / "mote_transcribe"
+        mote_xdg_cache_dir = root / ".cache" / "mote_transcribe"
         cache_dir = local_appdata / "Steno" / "cache"
+        uv_whisperx_dir = roaming_appdata / "uv" / "tools" / "whisperx"
+        hf_hub_dir = root / ".cache" / "huggingface" / "hub"
         bin_dir = root / ".local" / "bin"
         launcher_path = bin_dir / "steno.cmd"
         desktop_entry = roaming_appdata / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Steno.cmd"
@@ -2423,14 +2524,20 @@ def _resolve_steno_install_paths(
         prefix = Path(os.environ.get("PREFIX", "/data/data/com.termux/files/usr"))
         app_dir = root / ".local" / "share" / "steno"
         mote_cache_dir = root / ".local" / "share" / "mote_transcribe"
+        mote_xdg_cache_dir = root / ".cache" / "mote_transcribe"
         cache_dir = root / ".cache" / "steno"
+        uv_whisperx_dir = root / ".local" / "share" / "uv" / "tools" / "whisperx"
+        hf_hub_dir = root / ".cache" / "huggingface" / "hub"
         bin_dir = (prefix / "bin") if (prefix / "bin").is_dir() else (root / ".local" / "bin")
         launcher_path = bin_dir / "steno"
         desktop_entry = root / ".shortcuts" / "Steno"
     else:
         app_dir = root / ".local" / "share" / "steno"
         mote_cache_dir = root / ".local" / "share" / "mote_transcribe"
+        mote_xdg_cache_dir = root / ".cache" / "mote_transcribe"
         cache_dir = root / ".cache" / "steno"
+        uv_whisperx_dir = root / ".local" / "share" / "uv" / "tools" / "whisperx"
+        hf_hub_dir = root / ".cache" / "huggingface" / "hub"
         bin_dir = root / ".local" / "bin"
         launcher_path = bin_dir / ("steno.cmd" if plat.startswith("win") else "steno")
         if plat == "darwin":
@@ -2446,7 +2553,10 @@ def _resolve_steno_install_paths(
         "root": root,
         "app_dir": app_dir,
         "mote_cache_dir": mote_cache_dir,
+        "mote_xdg_cache_dir": mote_xdg_cache_dir,
         "cache_dir": cache_dir,
+        "uv_whisperx_dir": uv_whisperx_dir,
+        "hf_hub_dir": hf_hub_dir,
         "bin_dir": bin_dir,
         "launcher_path": launcher_path,
         "desktop_entry": desktop_entry,
@@ -2480,19 +2590,31 @@ def install_steno_app(
     bin_dir.mkdir(parents=True, exist_ok=True)
 
     target_py = app_dir / "steno.py"
-    candidates: list[Path] = []
-    if source_script is not None:
-        candidates.append(Path(source_script))
     this_file = Path(__file__).resolve()
-    candidates.extend([
-        this_file.parent.parent.parent / "dist" / "steno.py",
-        this_file.parent.parent.parent / "www" / "rec" / "steno.py",
-        this_file.parent.parent.parent / "steno.py",
-        this_file,
-    ])
-    chosen_src = next((c for c in candidates if c.is_file()), this_file)
-    if chosen_src.resolve() != target_py.resolve():
-        shutil.copyfile(chosen_src, target_py)
+    repo_root = this_file.parent.parent.parent
+    dist_steno = repo_root / "dist" / "steno.py"
+    build_script = repo_root / "scripts" / "build_single_file.py"
+    explicit_src = Path(source_script) if source_script is not None else None
+    if explicit_src is not None and explicit_src.is_file():
+        if explicit_src.resolve() != target_py.resolve():
+            shutil.copyfile(explicit_src, target_py)
+    elif (repo_root / "src" / "mote" / "core.py").is_file():
+        if dist_steno.is_file():
+            if dist_steno.resolve() != target_py.resolve():
+                shutil.copyfile(dist_steno, target_py)
+        elif build_script.is_file():
+            spec = importlib.util.spec_from_file_location("_steno_builder", build_script)
+            if spec is not None and spec.loader is not None:
+                builder_mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(builder_mod)
+                target_py.write_text(builder_mod.generate_single_file_content(), encoding="utf-8")
+            else:
+                shutil.copyfile(this_file, target_py)
+        else:
+            shutil.copyfile(this_file, target_py)
+    else:
+        if this_file.resolve() != target_py.resolve():
+            shutil.copyfile(this_file, target_py)
     target_py.chmod(0o755)
 
     if plat.startswith("win"):
@@ -2585,11 +2707,24 @@ def uninstall_steno_app(
     paths = _resolve_steno_install_paths(target_root=target_root, platform_str=plat)
     removed: list[str] = []
 
-    for dir_key in ("app_dir", "mote_cache_dir", "cache_dir"):
+    for dir_key in ("app_dir", "mote_cache_dir", "mote_xdg_cache_dir", "cache_dir", "uv_whisperx_dir"):
         dpath = paths[dir_key]
         if dpath.exists():
             shutil.rmtree(dpath, ignore_errors=True)
             removed.append(str(dpath))
+
+    hf_hub_dir = paths["hf_hub_dir"]
+    if hf_hub_dir.is_dir():
+        steno_hf_prefixes = (
+            "models--NbAiLab--nb-whisper-",
+            "models--NbAiLab--nb-wav2vec2-",
+            "models--pyannote--",
+            "models--Systran--faster-whisper-",
+        )
+        for child in sorted(hf_hub_dir.iterdir()):
+            if child.name.startswith(steno_hf_prefixes) and child.is_dir():
+                shutil.rmtree(child, ignore_errors=True)
+                removed.append(str(child))
 
     desktop_entry = paths["desktop_entry"]
     if desktop_entry.is_dir():
@@ -2603,14 +2738,28 @@ def uninstall_steno_app(
             pass
 
     bin_dir = paths["bin_dir"]
-    for launcher_name in ("steno", "steno.com", "steno.cmd", "steno.py"):
+    for launcher_name in ("steno", "steno.com", "steno.cmd", "steno.py", "whisperx", "whisperx.exe"):
         cand = bin_dir / launcher_name
-        if cand.exists():
+        if cand.exists() or cand.is_symlink():
             try:
                 cand.unlink()
                 removed.append(str(cand))
             except OSError:
                 pass
+
+    if target_root is None:
+        tmp_root = Path(tempfile.gettempdir())
+        mictest_tmp = tmp_root / "steno_mictest_latest.wav"
+        if mictest_tmp.is_file():
+            try:
+                mictest_tmp.unlink()
+                removed.append(str(mictest_tmp))
+            except OSError:
+                pass
+        uploads_tmp = tmp_root / "steno_browser_uploads"
+        if uploads_tmp.is_dir():
+            shutil.rmtree(uploads_tmp, ignore_errors=True)
+            removed.append(str(uploads_tmp))
 
     return {
         "ok": True,
@@ -3341,6 +3490,7 @@ def infer_speaker_names_via_api(
     agenda_text: str,
     log_fn: Callable[[str], None],
     manual_notes_text: str = "",
+    language: str = "no",
 ) -> dict[str, str]:
     """Use Ollama to detect self-introductions, direct address, and roles from manual notes to map SPEAKER_XX."""
     unique_speakers = sorted({t["speaker"] for t in turns})
@@ -3395,6 +3545,12 @@ def infer_speaker_names_via_api(
         "representing",
         "treasurer",
         "secretary",
+        "heiße",
+        "mein name",
+        "jag heter",
+        "jeg hedder",
+        "je m'appelle",
+        "me llamo",
         *name_tokens,
     )
 
@@ -3418,39 +3574,69 @@ def infer_speaker_names_via_api(
         t_str = f"{format_seconds(t['start'])}–{format_seconds(t['end'])}"
         sample_lines.append(f"[{t_str}] {t['speaker']}: {t['text']}")
 
+    norm_lang = normalize_audio_language(language)
+    if norm_lang == "auto":
+        norm_lang = str(detect_text_language(" ".join(sample_lines)[:2500]).get("detected_language") or "no")
+    is_no = is_norwegian_language(norm_lang)
+
     context_parts: list[str] = []
     if meeting_title.strip():
-        context_parts.append(f"Møtetittel/Dato: {meeting_title.strip()}")
+        lbl_title = "Møtetittel/Dato" if is_no else "Meeting title/Date"
+        context_parts.append(f"{lbl_title}: {meeting_title.strip()}")
     if known_names_hint.strip():
-        context_parts.append(f"Forhåndsoppgitte deltakere (tilstede): {known_names_hint.strip()}")
+        lbl_part = "Forhåndsoppgitte deltakere (tilstede)" if is_no else "Known participants (present)"
+        context_parts.append(f"{lbl_part}: {known_names_hint.strip()}")
     if agenda_text.strip():
-        context_parts.append(f"Agenda / Lysbilder / Kontekst:\n{agenda_text.strip()[:3500]}")
+        lbl_ag = "Agenda / Lysbilder / Kontekst" if is_no else "Agenda / Slides / Context"
+        context_parts.append(f"{lbl_ag}:\n{agenda_text.strip()[:3500]}")
     if manual_notes_text.strip():
-        context_parts.append(
-            f"Manuelle møtenotater / referat-utkast (bruk til å koble hvem som sier hva / har hvilken rolle):\n"
-            f"{manual_notes_text.strip()[:4500]}"
+        lbl_mn = (
+            "Manuelle møtenotater / referat-utkast (bruk til å koble hvem som sier hva / har hvilken rolle)"
+            if is_no
+            else "Manual notes / draft minutes (use to match who speaks / holds each role)"
         )
-    context_str = "\n".join(context_parts) if context_parts else "Ingen forhåndsoppgitt deltakerliste."
+        context_parts.append(f"{lbl_mn}:\n{manual_notes_text.strip()[:4500]}")
+    default_ctx = "Ingen forhåndsoppgitt deltakerliste." if is_no else "No pre-supplied participant list."
+    context_str = "\n".join(context_parts) if context_parts else default_ctx
 
-    prompt = (
-        "Analyser utdraget fra møtetranskripsjonen under og finn ut hvem de ulike taler-IDene "
-        f"({', '.join(unique_speakers)}) er, basert på selvpresentasjon, tiltale mellom deltakerne, "
-        "og hvem som presenterer hvilke saker/roller i møtet.\n\n"
-        f"{context_str}\n\n"
-        "KRITISKE REGLER (LES NØYE FOR Å UNNGÅ Å BYTTE OM TO TALERE):\n"
-        "1. DIREKTE TILTALE: Når en taler (f.eks. SPEAKER_A) tiltaler en annen ved navn (f.eks. «Hva tenker du, Ola?» "
-        "eller «Kari, kan du...»), betyr det at SPEAKER_A IKKE er den personen – det er taleren som svarer i replikken "
-        "rett etterpå som har det navnet!\n"
-        "2. OMTALE I TREDJEPERSON: Når en taler omtaler noen ved navn i tredjeperson (f.eks. «Ola har sjekket...» "
-        "eller «Kari skal sende...»), kan den som snakker IKKE være den omtalte personen.\n"
-        "3. SAKER OG ROLLER FRA MANUELLE NOTATER: Sjekk i utdraget hvem som leder ordet, hvem som legger frem hvilke saker, "
-        "og hvem som har bestemte verv/ansvarsoppgaver nevnt i de manuelle møtenotatene.\n"
-        "4. Returner KUN et gyldig JSON-objekt som knytter hver taler-ID til personens korrekte navn (bruk eksakt stavemåte "
-        "fra deltakerlisten/notatene, f.eks. 'Kari Nordmann').\n"
-        "5. Hvis du IKKE finner navnet til en taler-ID med sikkerhet, behold original ID, f.eks. "
-        '{"SPEAKER_00": "SPEAKER_00"}. Ikke gjett tilfeldige navn.\n\n'
-        "Utdrag fra transkripsjon:\n" + "\n".join(sample_lines)
-    )
+    if is_no:
+        prompt = (
+            "Analyser utdraget fra møtetranskripsjonen under og finn ut hvem de ulike taler-IDene "
+            f"({', '.join(unique_speakers)}) er, basert på selvpresentasjon, tiltale mellom deltakerne, "
+            "og hvem som presenterer hvilke saker/roller i møtet.\n\n"
+            f"{context_str}\n\n"
+            "KRITISKE REGLER (LES NØYE FOR Å UNNGÅ Å BYTTE OM TO TALERE):\n"
+            "1. DIREKTE TILTALE: Når en taler (f.eks. SPEAKER_A) tiltaler en annen ved navn (f.eks. «Hva tenker du, Ola?» "
+            "eller «Kari, kan du...»), betyr det at SPEAKER_A IKKE er den personen – det er taleren som svarer i replikken "
+            "rett etterpå som har det navnet!\n"
+            "2. OMTALE I TREDJEPERSON: Når en taler omtaler noen ved navn i tredjeperson (f.eks. «Ola har sjekket...» "
+            "eller «Kari skal sende...»), kan den som snakker IKKE være den omtalte personen.\n"
+            "3. SAKER OG ROLLER FRA MANUELLE NOTATER: Sjekk i utdraget hvem som leder ordet, hvem som legger frem hvilke saker, "
+            "og hvem som har bestemte verv/ansvarsoppgaver nevnt i de manuelle møtenotatene.\n"
+            "4. Returner KUN et gyldig JSON-objekt som knytter hver taler-ID til personens korrekte navn (bruk eksakt stavemåte "
+            "fra deltakerlisten/notatene, f.eks. 'Kari Nordmann').\n"
+            "5. Hvis du IKKE finner navnet til en taler-ID med sikkerhet, behold original ID, f.eks. "
+            '{"SPEAKER_00": "SPEAKER_00"}. Ikke gjett tilfeldige navn.\n\n'
+            "Utdrag fra transkripsjon:\n" + "\n".join(sample_lines)
+        )
+    else:
+        prompt = (
+            "Analyze the transcript excerpt below and identify who each speaker ID "
+            f"({', '.join(unique_speakers)}) is, based on self-introductions, direct address between speakers, "
+            "and who presents each topic/role.\n\n"
+            f"{context_str}\n\n"
+            "CRITICAL RULES (READ CAREFULLY TO AVOID SWAPPING SPEAKERS):\n"
+            "1. DIRECT ADDRESS: When speaker SPEAKER_A addresses someone by name (e.g. 'What do you think, Alice?'), "
+            "SPEAKER_A is NOT Alice — the speaker responding in the turn immediately after usually is!\n"
+            "2. THIRD-PERSON REFERENCE: When a speaker refers to someone in third person ('Bob checked...'), "
+            "the current speaker is NOT that person.\n"
+            "3. ROLES & TOPICS FROM NOTES: Match who chairs the discussion or presents items mentioned in the manual notes.\n"
+            "4. Return ONLY a valid JSON object mapping each speaker ID to the person's full name "
+            "(matching the spelling in the participant list/notes, e.g. 'Alice Smith').\n"
+            "5. If you are NOT certain about a speaker ID, keep the original ID, e.g. "
+            '{"SPEAKER_00": "SPEAKER_00"}. Do not guess.\n\n'
+            "Transcript excerpt:\n" + "\n".join(sample_lines)
+        )
 
     payload = {
         "model": model,
@@ -3493,6 +3679,93 @@ def infer_speaker_names_via_api(
     return base_fallback
 
 
+_SAFE_HREF_RE = re.compile(r"^(https?://|mailto:|#)", re.IGNORECASE)
+
+
+def _is_safe_href(url: str) -> bool:
+    """Allow only safe web, mailto, or fragment link schemes in generated HTML."""
+    clean = html.unescape(url or "").strip()
+    if any(ord(ch) < 32 for ch in clean):
+        return False
+    return bool(_SAFE_HREF_RE.match(clean))
+
+
+_ALLOWED_HTML_TAGS = frozenset({
+    "h1", "h2", "h3", "h4", "h5", "h6",
+    "p", "br", "hr",
+    "strong", "b", "em", "i", "code", "pre", "blockquote",
+    "ul", "ol", "li",
+    "table", "thead", "tbody", "tr", "th", "td",
+    "a", "del", "sup", "sub",
+})
+_VOID_HTML_TAGS = frozenset({"br", "hr"})
+
+
+class _MarkdownHtmlSanitizer(HTMLParser):
+    """Strip unsafe tags, event handlers, and javascript:/data: links from rendered Markdown HTML."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=False)
+        self.out: list[str] = []
+        self._skip_depth = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        low = tag.lower()
+        if low in ("script", "style"):
+            self._skip_depth += 1
+            return
+        if self._skip_depth > 0:
+            return
+        if low not in _ALLOWED_HTML_TAGS:
+            return
+        attr_parts: list[str] = []
+        if low == "a":
+            href = ""
+            for k, v in attrs:
+                if k.lower() == "href" and v and _is_safe_href(v):
+                    href = v.strip()
+                    break
+            if href:
+                attr_parts.append(f'href="{html.escape(href, quote=True)}"')
+                attr_parts.append('target="_blank"')
+                attr_parts.append('rel="noopener noreferrer"')
+        elif low in ("th", "td"):
+            for k, v in attrs:
+                if k.lower() == "align" and v in ("left", "center", "right"):
+                    attr_parts.append(f'align="{v}"')
+        attr_str = (" " + " ".join(attr_parts)) if attr_parts else ""
+        self.out.append(f"<{low}{attr_str}>")
+
+    def handle_endtag(self, tag: str) -> None:
+        low = tag.lower()
+        if low in ("script", "style"):
+            if self._skip_depth > 0:
+                self._skip_depth -= 1
+            return
+        if self._skip_depth > 0 or low not in _ALLOWED_HTML_TAGS or low in _VOID_HTML_TAGS:
+            return
+        self.out.append(f"</{low}>")
+
+    def handle_data(self, data: str) -> None:
+        if self._skip_depth == 0:
+            self.out.append(html.escape(data, quote=False))
+
+    def handle_entityref(self, name: str) -> None:
+        if self._skip_depth == 0:
+            self.out.append(f"&{name};")
+
+    def handle_charref(self, name: str) -> None:
+        if self._skip_depth == 0:
+            self.out.append(f"&#{name};")
+
+
+def _sanitize_rendered_html(raw_html: str) -> str:
+    parser = _MarkdownHtmlSanitizer()
+    parser.feed(raw_html)
+    parser.close()
+    return "".join(parser.out)
+
+
 def _format_inline_md(text: str) -> str:
     """Format inline markdown elements: bold, italics, code, links, safely escaped."""
     escaped = html.escape(text)
@@ -3502,8 +3775,14 @@ def _format_inline_md(text: str) -> str:
     escaped = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", escaped)
     # Italic *text*
     escaped = re.sub(r"(?<!\*)\*([^*]+)\*(?!\*)", r"<em>\1</em>", escaped)
-    # Links [label](url)
-    escaped = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r'<a href="\2" target="_blank" rel="noopener">\1</a>', escaped)
+    # Links [label](url) - allow only safe schemes
+    def _replace_link(match: re.Match[str]) -> str:
+        label, url = match.group(1), match.group(2)
+        if _is_safe_href(url):
+            return f'<a href="{url.strip()}" target="_blank" rel="noopener noreferrer">{label}</a>'
+        return label
+
+    escaped = re.sub(r"\[([^\]]+)\]\(([^()\s]*(?:\([^()]*\)[^()\s]*)*)\)", _replace_link, escaped)
     return escaped
 
 
@@ -3512,10 +3791,11 @@ def _render_markdown_to_html(md_text: str) -> str:
     try:
         import markdown as md_lib
 
-        return md_lib.markdown(
+        raw_html = md_lib.markdown(
             md_text,
             extensions=["tables", "fenced_code", "sane_lists", "nl2br"],
         )
+        return _sanitize_rendered_html(raw_html)
     except Exception:
         pass
 
@@ -4796,7 +5076,11 @@ def list_resumable_sessions(
         data_root = (base_dir / "data").resolve()
         if data_root.is_dir():
             candidate_dirs.append(data_root)
-            for child in sorted(data_root.iterdir()):
+            try:
+                children = sorted(data_root.iterdir())
+            except OSError:
+                children = []
+            for child in children:
                 if child.is_dir() and not child.name.startswith("."):
                     candidate_dirs.append(child.resolve())
 
@@ -4810,11 +5094,19 @@ def list_resumable_sessions(
         stems_in_folder: dict[str, Path] = {}
 
         if ckpt_root.is_dir():
-            for ckpt_sub in ckpt_root.iterdir():
+            try:
+                ckpt_subs = list(ckpt_root.iterdir())
+            except OSError:
+                ckpt_subs = []
+            for ckpt_sub in ckpt_subs:
                 if ckpt_sub.is_dir():
                     stems_in_folder[ckpt_sub.name] = ckpt_sub
 
-        for f in folder.iterdir():
+        try:
+            folder_entries = list(folder.iterdir())
+        except OSError:
+            folder_entries = []
+        for f in folder_entries:
             if not f.is_file() or f.name.startswith("."):
                 continue
             low_ext = f.suffix.lower()
@@ -4837,7 +5129,7 @@ def list_resumable_sessions(
                     input_file = cand
                     break
             if input_file is None:
-                for f in folder.iterdir():
+                for f in folder_entries:
                     if (
                         f.is_file()
                         and f.suffix.lower() in audio_exts
@@ -5285,6 +5577,7 @@ def run_pipeline(
                 combined_agenda,
                 log,
                 manual_notes_text=combined_manual_notes,
+                language=effective_language,
             )
             merged_map = dict(speaker_map)
             merged_map.update(inferred_map)
@@ -5773,9 +6066,11 @@ def cli_main(argv: list[str] | None = None) -> int:
         print(res["message_en"] if is_en else res["message_no"], flush=True)
         return 0
 
-    hw_info = detect_hardware_resources(args.out_dir)
+    hw_info = detect_hardware_resources(args.out_dir, language=args.language)
     if args.check_hw:
-        fit = evaluate_model_resource_fit(args.whisper_model, args.ollama_model, hw_info)
+        fit = evaluate_model_resource_fit(
+            args.whisper_model, args.ollama_model, hw_info, language=args.language
+        )
         print(json.dumps({"hardware": hw_info, "resource_fit": fit}, indent=2, ensure_ascii=False))
         return 0
 
@@ -5788,15 +6083,28 @@ def cli_main(argv: list[str] | None = None) -> int:
             flush=True,
         )
     elif args.profile in MODEL_PROFILES:
-        prof = MODEL_PROFILES[args.profile]
-        args.whisper_model = prof["whisper_model"]
-        args.ollama_model = prof["ollama_model"]
+        if is_norwegian_language(args.language):
+            prof = MODEL_PROFILES[args.profile]
+            args.whisper_model = prof["whisper_model"]
+            args.ollama_model = prof["ollama_model"]
+            prof_label = str(prof["label"])
+        else:
+            lang_rec = recommend_models_for_language(
+                args.language,
+                profile=args.profile,
+                ram_gb=float(hw_info.get("ram_gb", 16.0)),
+            )
+            args.whisper_model = lang_rec["default_whisper"]
+            args.ollama_model = lang_rec["default_ollama"]
+            prof_label = f"{args.language} ({args.profile})"
         print(
-            f"==> [Profil: {args.profile}] {prof['label']} -> ASR={args.whisper_model}, LLM={args.ollama_model}",
+            f"==> [Profil: {args.profile}] {prof_label} -> ASR={args.whisper_model}, LLM={args.ollama_model}",
             flush=True,
         )
 
-    fit_check = evaluate_model_resource_fit(args.whisper_model, args.ollama_model, hw_info)
+    fit_check = evaluate_model_resource_fit(
+        args.whisper_model, args.ollama_model, hw_info, language=args.language
+    )
     if fit_check["level"] in ("critical", "warning"):
         print(f"==> RESSURS-ADVARSEL: {fit_check['message']}", file=sys.stderr, flush=True)
 

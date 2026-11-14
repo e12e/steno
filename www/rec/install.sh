@@ -19,7 +19,11 @@ if [ "$IS_TERMUX" = "1" ] && [ -n "${PREFIX:-}" ] && [ -d "$PREFIX/bin" ]; then
     DEFAULT_BIN_DIR="$PREFIX/bin"
 fi
 
-STENO_URL="${STENO_URL:-https://hypertekst.net/steno/steno.py}"
+DEFAULT_STENO_URL="https://github.com/e12e/steno/releases/latest/download/steno.py"
+DEFAULT_SHA256_URL="https://github.com/e12e/steno/releases/latest/download/SHA256SUMS.txt"
+STENO_URL="${STENO_URL:-$DEFAULT_STENO_URL}"
+STENO_SHA256_URL="${STENO_SHA256_URL:-}"
+VERIFY_SHA256="${STENO_VERIFY_SHA256:-1}"
 INSTALL_DIR="${STENO_INSTALL_DIR:-$HOME/.local/share/steno}"
 BIN_DIR="${STENO_BIN_DIR:-$DEFAULT_BIN_DIR}"
 SOURCE_FILE="${STENO_SOURCE_FILE:-}"
@@ -44,6 +48,31 @@ else
     else
         echo "Error: Neither curl nor wget is available to download steno.py." >&2
         exit 1
+    fi
+    if [ "$VERIFY_SHA256" != "0" ] && { [ "$STENO_URL" = "$DEFAULT_STENO_URL" ] || [ -n "$STENO_SHA256_URL" ]; }; then
+        SUMS_URL="${STENO_SHA256_URL:-$DEFAULT_SHA256_URL}"
+        SUMS_FILE="$TARGET_SCRIPT.sha256"
+        ACTUAL_HASH=""
+        if command -v sha256sum >/dev/null 2>&1; then
+            ACTUAL_HASH="$(sha256sum "$TARGET_SCRIPT" | awk '{ print tolower($1) }')"
+        elif command -v shasum >/dev/null 2>&1; then
+            ACTUAL_HASH="$(shasum -a 256 "$TARGET_SCRIPT" | awk '{ print tolower($1) }')"
+        fi
+        if [ -n "$ACTUAL_HASH" ]; then
+            if command -v curl >/dev/null 2>&1; then
+                curl -LsSf "$SUMS_URL" -o "$SUMS_FILE"
+            else
+                wget -qO "$SUMS_FILE" "$SUMS_URL"
+            fi
+            EXPECTED_HASH="$(awk '$2 == "steno.py" || $2 == "*steno.py" { print tolower($1); exit }' "$SUMS_FILE")"
+            rm -f "$SUMS_FILE"
+            if [ -z "$EXPECTED_HASH" ] || [ "$ACTUAL_HASH" != "$EXPECTED_HASH" ]; then
+                rm -f "$TARGET_SCRIPT"
+                echo "Error: SHA-256 verification failed for steno.py (expected '${EXPECTED_HASH:-missing}', got '$ACTUAL_HASH')." >&2
+                exit 1
+            fi
+            echo "==> Verified SHA-256 checksum for steno.py ($ACTUAL_HASH)"
+        fi
     fi
 fi
 

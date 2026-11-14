@@ -47,4 +47,13 @@ warn_unused_configs = true
 ignore_missing_imports = true
 check_untyped_defs = true
 explicit_package_bases = true
-files = ["src/mote/core.py", "src/mote/cli.py", "transcribe.py", "tests/test_cli_and_pipeline.py"]
+files = [
+    "src/mote/core.py",
+    "src/mote/cli.py",
+    "src/mote/gui.py",
+    "src/mote/template_loader.py",
+    "scripts/build_single_file.py",
+    "transcribe.py",
+    "steno.py",
+    "tests/test_cli_and_pipeline.py",
+]

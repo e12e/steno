@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ "${STENO_SKIP_PRE_PUSH:-0}" = "1" ]; then
+    exit 0
+fi
+
+# Skip checks if every ref being pushed is a deletion (all-zero local SHA)
+zero_sha="0000000000000000000000000000000000000000"
+saw_ref=0
+has_non_delete=0
+if [ ! -t 0 ]; then
+    while IFS=' ' read -r _local_ref local_sha _remote_ref _remote_sha || [ -n "${local_sha:-}" ]; do
+        [ -n "${local_sha:-}" ] || continue
+        saw_ref=1
+        if [ "$local_sha" != "$zero_sha" ]; then
+            has_non_delete=1
+        fi
+    done
+    if [ "$saw_ref" = "1" ] && [ "$has_non_delete" = "0" ]; then
+        exit 0
+    fi
+fi
+
+export PATH="$HOME/.local/bin:$HOME/.local/share/mise/shims:/opt/homebrew/bin:/usr/local/bin:$PATH"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+
+echo "==> [pre-push] Running lint, typecheck, doctest, and unit tests (skip with STENO_SKIP_PRE_PUSH=1)..."
+make lint
+make typecheck
+make doctest
+make test

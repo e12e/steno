@@ -1588,6 +1588,15 @@
 </dialog>
 
 <script>
+  function escapeHtml(val) {
+    return String(val ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
   // =========================================================================
   // EXPLICIT FINITE STATE MACHINE & STORYBOARD CONTROLLER (UX_STATE_MACHINE)
   // =========================================================================
@@ -2018,9 +2027,13 @@
 
     if (banner && txt && acceptBtn && dismissBtn) {
       const probStr = probPct ? `, ${probPct}` : '';
+      const safeLabel = escapeHtml(detLabel);
+      const safeCode = escapeHtml(detCode);
+      const safeCur = escapeHtml(curLang);
+      const safeModel = escapeHtml(shortModel);
       txt.innerHTML = isEn
-        ? `🌐 <strong>Detected ${detLabel} (${detCode}${probStr})</strong> — current is <strong>${curLang}</strong>. Switch language &amp; model (<code>${shortModel}</code>)?`
-        : `🌐 <strong>Oppdaget ${detLabel} (${detCode}${probStr})</strong> — valgt er <strong>${curLang}</strong>. Bytte talespråk og modell (<code>${shortModel}</code>)?`;
+        ? `🌐 <strong>Detected ${safeLabel} (${safeCode}${probStr})</strong> — current is <strong>${safeCur}</strong>. Switch language &amp; model (<code>${safeModel}</code>)?`
+        : `🌐 <strong>Oppdaget ${safeLabel} (${safeCode}${probStr})</strong> — valgt er <strong>${safeCur}</strong>. Bytte talespråk og modell (<code>${safeModel}</code>)?`;
       acceptBtn.textContent = isEn ? `Switch to ${detCode.toUpperCase()}` : `Bytt til ${detCode.toUpperCase()}`;
       dismissBtn.textContent = isEn ? `Keep ${curLang.toUpperCase()}` : `Behold ${curLang.toUpperCase()}`;
       banner.classList.add('open');
@@ -2197,7 +2210,7 @@
         container.style.color = '#e2e8f0';
         container.innerHTML = (
           `<div style="font-weight:700; color:#93c5fd;">⏳ ${isEn ? 'Running Speech-to-Text (Whisper STT)...' : 'Kjører talegjenkjenning (Whisper STT) på opptaket...'}</div>` +
-          `<div style="margin-top:3px;">${isEn ? 'Measured audio level:' : 'Målt lydnivå:'} <strong>${lvl.label || ''} (${db} dBFS)</strong></div>`
+          `<div style="margin-top:3px;">${isEn ? 'Measured audio level:' : 'Målt lydnivå:'} <strong>${escapeHtml(lvl.label || '')} (${escapeHtml(db)} dBFS)</strong></div>`
         );
       }
       return;
@@ -2218,7 +2231,7 @@
       }
       if (!container) return;
       if (state.ok === false) {
-        container.innerHTML = `<div style="color:#f87171; font-weight:700;">⚠️ ${state.error || (isEn ? 'Microphone test failed.' : 'Mikrofontest feilet.')}</div>`;
+        container.innerHTML = `<div style="color:#f87171; font-weight:700;">⚠️ ${escapeHtml(state.error || (isEn ? 'Microphone test failed.' : 'Mikrofontest feilet.'))}</div>`;
         return;
       }
       const lvl = state.level || {};
@@ -2227,7 +2240,7 @@
       const lvlColor = (st === 'godt') ? '#4ade80' : ((st === 'lavt') ? '#fbbf24' : '#f87171');
       const sttText = (state.stt_text || '').trim();
       const sttHtml = sttText
-        ? `<div style="margin-top:4px; color:#4ade80; font-weight:700;">✓ ${isEn ? 'STT recognized:' : 'STT oppfattet tale:'} <span style="color:#ffffff; font-weight:600;">«${sttText}»</span></div>`
+        ? `<div style="margin-top:4px; color:#4ade80; font-weight:700;">✓ ${isEn ? 'STT recognized:' : 'STT oppfattet tale:'} <span style="color:#ffffff; font-weight:600;">«${escapeHtml(sttText)}»</span></div>`
         : `<div style="margin-top:4px; color:#fbbf24; font-weight:600;">⚠️ ${isEn ? 'STT: No clear speech recognized (speak closer to mic or increase gain to +12 dB).' : 'STT: Ingen tydelig tale oppfattet (snakk nærmere mikrofonen eller øk forsterkning til +12 dB).'}</div>`;
 
       let langHtml = '';
@@ -2240,15 +2253,15 @@
         const curLang = UX_STATE_MACHINE.audioLanguage || (document.getElementById('language').value || 'no').trim().toLowerCase();
         if (detCode !== curLang) {
           onLanguageDetected(state);
-          langHtml = `<div style="margin-top:4px; color:#fbbf24; font-weight:700;">🌐 ${isEn ? 'Detected language:' : 'Oppdaget talespråk:'} ${detLbl}${probPct} ` +
-            `<button type="button" class="btn-xs btn-accent" style="margin-left:6px; padding:1px 7px;" onclick="confirmDetectedLanguageChange()">${isEn ? 'Switch to ' + detCode.toUpperCase() : 'Bytt til ' + detCode.toUpperCase()}</button></div>`;
+          langHtml = `<div style="margin-top:4px; color:#fbbf24; font-weight:700;">🌐 ${isEn ? 'Detected language:' : 'Oppdaget talespråk:'} ${escapeHtml(detLbl)}${escapeHtml(probPct)} ` +
+            `<button type="button" class="btn-xs btn-accent" style="margin-left:6px; padding:1px 7px;" onclick="confirmDetectedLanguageChange()">${escapeHtml(isEn ? 'Switch to ' + detCode.toUpperCase() : 'Bytt til ' + detCode.toUpperCase())}</button></div>`;
         } else {
-          langHtml = `<div style="margin-top:3px; color:#93c5fd; font-weight:600;">🌐 ${isEn ? 'Detected language:' : 'Oppdaget talespråk:'} ${detLbl}${probPct} ✓</div>`;
+          langHtml = `<div style="margin-top:3px; color:#93c5fd; font-weight:600;">🌐 ${isEn ? 'Detected language:' : 'Oppdaget talespråk:'} ${escapeHtml(detLbl)}${escapeHtml(probPct)} ✓</div>`;
         }
       }
 
       container.innerHTML = (
-        `<div style="color:${lvlColor}; font-weight:700;">${st === 'godt' ? '✓' : '⚠️'} ${isEn ? 'Audio level:' : 'Lydnivå:'} ${lvl.label || st} (${db} dBFS)</div>` +
+        `<div style="color:${lvlColor}; font-weight:700;">${st === 'godt' ? '✓' : '⚠️'} ${isEn ? 'Audio level:' : 'Lydnivå:'} ${escapeHtml(lvl.label || st)} (${escapeHtml(db)} dBFS)</div>` +
         sttHtml +
         langHtml +
         `<div style="margin-top:3px; font-size:10.5px; color:#94a3b8;">${isEn ? 'Tip: Click "▶ Play" above to listen to your 4s test clip.' : 'Tips: Trykk «▶ Spill av» over for å lytte til 4s-testopptaket.'}</div>`
@@ -2363,7 +2376,9 @@
         document.getElementById('agenda_text').value,
         micDev,
         gainDb,
-        autoGain
+        autoGain,
+        currentUiLang,
+        UX_STATE_MACHINE.sessionFormat === 'foredrag' ? 'foredrag' : 'mote'
       );
       if (res && res.ok) {
         UX_STATE_MACHINE.recording = true;
@@ -2560,7 +2575,14 @@
       const info = document.createElement('div');
       info.style.minWidth = '0';
       info.style.flex = '1';
-      info.innerHTML = `<div class="resume-item-title">${item.stem || 'Økt'}</div><div class="resume-item-meta">${badgesHtml}</div>`;
+      const titleEl = document.createElement('div');
+      titleEl.className = 'resume-item-title';
+      titleEl.textContent = item.stem || 'Økt';
+      const metaEl = document.createElement('div');
+      metaEl.className = 'resume-item-meta';
+      metaEl.innerHTML = badgesHtml;
+      info.appendChild(titleEl);
+      info.appendChild(metaEl);
 
       const btn = document.createElement('button');
       btn.type = 'button';
@@ -3045,8 +3067,14 @@
     }
     if (defs.hf_token) {
       document.getElementById('hf_token').value = defs.hf_token;
+    } else if (defs.hf_token_configured) {
+      document.getElementById('hf_token').placeholder = currentUiLang === 'en'
+        ? '✓ HF token saved locally (leave blank to reuse)'
+        : '✓ HF-token er lagret lokalt (la stå tomt for å gjenbruke)';
     } else if (defs.diarization_cached) {
-      document.getElementById('hf_token').placeholder = '✓ Taler-modell er bufret lokalt';
+      document.getElementById('hf_token').placeholder = currentUiLang === 'en'
+        ? '✓ Speaker model cached locally'
+        : '✓ Taler-modell er bufret lokalt';
     }
     if (defs.default_out_dir) {
       document.getElementById('out_dir').value = defs.default_out_dir;

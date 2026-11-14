@@ -45,6 +45,7 @@ def main() -> int:
             "tests/",
             "transcribe.py",
             "steno.py",
+            "run_verification_and_data.py",
         ],
     )
     run_step(

@@ -1,0 +1,107 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish (e.g. v0.2.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Lint with Ruff
+        run: make lint
+
+      - name: Typecheck with Mypy
+        run: make typecheck
+
+      - name: Run Python doctests
+        run: make doctest
+
+      - name: Run unit & BDD tests (builds dist/)
+        run: make test
+
+      - name: Warm uv standalone script environment
+        run: uv run --python 3.12 --script dist/steno.py --self-test
+
+      - name: Verify standalone script, SHA256SUMS.txt, and APE binary
+        run: |
+          bash scripts/test_standalone.sh
+          (cd dist && sha256sum -c SHA256SUMS.txt)
+
+      - name: Publish GitHub Release and prune older releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+          GITHUB_REF_NAME_VAL: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            TAG="$INPUT_TAG"
+          else
+            TAG="$GITHUB_REF_NAME_VAL"
+          fi
+
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid release tag '$TAG' (expected e.g. v0.2.0)" >&2
+            exit 1
+          fi
+
+          if ! git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$TAG" -m "Release $TAG"
+            git push origin "refs/tags/$TAG"
+          fi
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/steno.com dist/steno.py dist/SHA256SUMS.txt --clobber
+            gh release edit "$TAG" --draft=false --prerelease=false --latest
+          else
+            gh release create "$TAG" dist/steno.com dist/steno.py dist/SHA256SUMS.txt \
+              --title "Steno $TAG" \
+              --generate-notes \
+              --latest
+          fi
+
+          old_tags="$(
+            gh release list --limit 100 --json tagName \
+              | TAG="$TAG" python3 -c 'import json, os, sys; t = os.environ["TAG"]; [print(r["tagName"]) for r in json.load(sys.stdin) if r.get("tagName") and r["tagName"] != t]'
+          )"
+          if [ -n "$old_tags" ]; then
+            while IFS= read -r old_tag; do
+              [ -n "$old_tag" ] || continue
+              echo "Pruning old release and tag: $old_tag"
+              gh release delete "$old_tag" --yes --cleanup-tag
+            done <<< "$old_tags"
+          fi

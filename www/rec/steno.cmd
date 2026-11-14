@@ -13,7 +13,7 @@ if not exist "%STENO_PY%" (
 
 if not exist "%STENO_PY%" (
     echo Downloading steno.py...
-    powershell -NoProfile -ExecutionPolicy Bypass -Command "New-Item -ItemType Directory -Force -Path '%LOCALAPPDATA%\Steno' | Out-Null; irm https://hypertekst.net/steno/steno.py -OutFile '%LOCALAPPDATA%\Steno\steno.py'"
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "New-Item -ItemType Directory -Force -Path '%LOCALAPPDATA%\Steno' | Out-Null; irm https://github.com/e12e/steno/releases/latest/download/steno.py -OutFile '%LOCALAPPDATA%\Steno\steno.py'"
 )
 
 where uv >nul 2>nul || (

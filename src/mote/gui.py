@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import shutil
 import signal
 import subprocess
@@ -10,6 +11,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.parse
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -151,7 +153,8 @@ class MoteApi:
             rec_whisper, rec_ollama, hw, language=audio_lang
         )
         return {
-            "hf_token": get_initial_hf_token(),
+            "hf_token": "",
+            "hf_token_configured": bool(get_initial_hf_token()),
             "diarization_cached": is_diarization_cached(),
             "default_out_dir": str(default_dir),
             "default_meeting_title": f"Møte {today}",
@@ -776,6 +779,8 @@ class MoteApi:
         mic_device: str = "default",
         gain_db: float = 0.0,
         auto_gain: bool = False,
+        ui_lang: str = "no",
+        note_mode: str = "mote",
     ) -> dict[str, Any]:
         """Start recording 16kHz mono WAV audio from the selected microphone via ffmpeg + optional gain boost & live ASR check."""
         if self._rec_proc and self._rec_proc.poll() is None:
@@ -813,7 +818,7 @@ class MoteApi:
                 f"==> OPPTAK STARTET: Lagrer mikrofon-lyd ({mic_device}{gain_info}) til {rec_file.name}"
             )
             if speak_guide:
-                self.speak_intro_prompt(ui_lang=language)
+                self.speak_intro_prompt(ui_lang=ui_lang, note_mode=note_mode)
 
             try:
                 init_prompt = build_whisper_initial_prompt(meeting_title, speaker_names_hint, agenda_text)
@@ -1367,6 +1372,7 @@ def has_native_webview_backend(
 
 _BROWSER_BRIDGE_SCRIPT = """<script id="steno-browser-bridge">
 (function() {
+  const STENO_TOKEN = __STENO_BRIDGE_TOKEN__;
   function pickAndUploadBrowserFile(kind, multiple) {
     return new Promise((resolve) => {
       const inp = document.createElement('input');
@@ -1390,6 +1396,7 @@ _BROWSER_BRIDGE_SCRIPT = """<script id="steno-browser-bridge">
               method: 'POST',
               headers: {
                 'Content-Type': 'application/octet-stream',
+                'X-Steno-Token': STENO_TOKEN,
                 'X-Steno-Filename': encodeURIComponent(f.name),
                 'X-Steno-Kind': 'audio'
               },
@@ -1405,6 +1412,7 @@ _BROWSER_BRIDGE_SCRIPT = """<script id="steno-browser-bridge">
                 method: 'POST',
                 headers: {
                   'Content-Type': 'application/octet-stream',
+                  'X-Steno-Token': STENO_TOKEN,
                   'X-Steno-Filename': encodeURIComponent(f.name),
                   'X-Steno-Kind': 'context'
                 },
@@ -1442,7 +1450,7 @@ _BROWSER_BRIDGE_SCRIPT = """<script id="steno-browser-bridge">
             if (!entered) return null;
             const r = await fetch('/api/suggest_output_names', {
               method: 'POST',
-              headers: {'Content-Type': 'application/json'},
+              headers: {'Content-Type': 'application/json', 'X-Steno-Token': STENO_TOKEN},
               body: JSON.stringify({args: [currentAudioPath || '', entered]})
             });
             const d = await r.json();
@@ -1452,7 +1460,7 @@ _BROWSER_BRIDGE_SCRIPT = """<script id="steno-browser-bridge">
         return async function(...args) {
           const resp = await fetch('/api/' + String(prop), {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
+            headers: {'Content-Type': 'application/json', 'X-Steno-Token': STENO_TOKEN},
             body: JSON.stringify({args: args})
           });
           const data = await resp.json();
@@ -1465,7 +1473,9 @@ _BROWSER_BRIDGE_SCRIPT = """<script id="steno-browser-bridge">
 
   setInterval(async () => {
     try {
-      const r = await fetch('/api/_events');
+      const r = await fetch('/api/_events', {
+        headers: {'X-Steno-Token': STENO_TOKEN}
+      });
       const d = await r.json();
       if (d && Array.isArray(d.events)) {
         for (const code of d.events) {
@@ -1486,6 +1496,7 @@ _BROWSER_BRIDGE_SCRIPT = """<script id="steno-browser-bridge">
         method: 'POST',
         headers: {
           'Content-Type': 'application/octet-stream',
+          'X-Steno-Token': STENO_TOKEN,
           'X-Steno-Filename': encodeURIComponent(f.name),
           'X-Steno-Kind': 'drop'
         },
@@ -1504,22 +1515,44 @@ _BROWSER_BRIDGE_SCRIPT = """<script id="steno-browser-bridge">
 </script>"""
 
 
-def inject_browser_bridge(html_content: str) -> str:
+def inject_browser_bridge(html_content: str, auth_token: str = "") -> str:
     """Inject the browser pywebview.api bridge script into app.html."""
+    script = _BROWSER_BRIDGE_SCRIPT.replace("__STENO_BRIDGE_TOKEN__", json.dumps(auth_token))
     if "</head>" in html_content:
-        return html_content.replace("</head>", _BROWSER_BRIDGE_SCRIPT + "\n</head>", 1)
-    return _BROWSER_BRIDGE_SCRIPT + "\n" + html_content
+        return html_content.replace("</head>", script + "\n</head>", 1)
+    return script + "\n" + html_content
+
+
+_ALLOWED_LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "[::1]", "::1"})
+
+
+def _extract_hostname_from_host_header(host_header: str) -> str:
+    raw = host_header.strip().lower()
+    if raw.startswith("["):
+        end_idx = raw.find("]")
+        return raw[: end_idx + 1] if end_idx != -1 else raw
+    return raw.split(":", 1)[0]
 
 
 class BrowserWindowBridge:
-    """Window adapter that queues evaluate_js calls and dispatches HTTP API requests for browser mode."""
+    """Window adapter that queues evaluate_js calls and dispatches authenticated HTTP API requests."""
 
-    def __init__(self, api: MoteApi | None = None, html_content: str = "") -> None:
+    def __init__(
+        self,
+        api: MoteApi | None = None,
+        html_content: str = "",
+        auth_token: str | None = None,
+    ) -> None:
         self._lock = threading.Lock()
         self._js_queue: list[str] = []
         self.server: Any = None
         self.api = api
-        self.bridged_html_bytes = inject_browser_bridge(html_content).encode("utf-8") if html_content else b""
+        self.auth_token: str = auth_token or secrets.token_urlsafe(32)
+        self.bridged_html_bytes = (
+            inject_browser_bridge(html_content, auth_token=self.auth_token).encode("utf-8")
+            if html_content
+            else b""
+        )
         self.upload_dir = Path(tempfile.gettempdir()) / "steno_browser_uploads"
 
     def evaluate_js(self, code: str) -> None:
@@ -1548,20 +1581,37 @@ class BrowserWindowBridge:
         body: bytes = b"",
     ) -> tuple[int, str, bytes]:
         """Process a GET or POST request for the browser GUI bridge and return (status, content_type, body_bytes)."""
-        import urllib.parse
-
         hdrs = {k.lower(): v for k, v in (headers or {}).items()}
+        if "host" in hdrs:
+            host_only = _extract_hostname_from_host_header(hdrs["host"])
+            if host_only not in _ALLOWED_LOCAL_HOSTS:
+                return 403, "application/json; charset=utf-8", b'{"ok": false, "error": "Forbidden host"}'
+        if "origin" in hdrs:
+            origin_host = (urllib.parse.urlparse(hdrs["origin"]).hostname or "").lower()
+            if origin_host not in {"127.0.0.1", "localhost", "::1"}:
+                return 403, "application/json; charset=utf-8", b'{"ok": false, "error": "Forbidden origin"}'
+
         api = self.api
+        req_path = path.split("?", 1)[0]
+        if req_path.startswith("/api/"):
+            supplied_tok = hdrs.get("x-steno-token", "")
+            if not supplied_tok or not secrets.compare_digest(supplied_tok, self.auth_token):
+                return (
+                    403,
+                    "application/json; charset=utf-8",
+                    b'{"ok": false, "error": "Unauthorized bridge token"}',
+                )
+
         if method.upper() == "GET":
-            if path in ("/", "/index.html"):
+            if req_path in ("/", "/index.html"):
                 return 200, "text/html; charset=utf-8", self.bridged_html_bytes
-            if path.startswith("/api/_events"):
+            if req_path == "/api/_events":
                 raw = json.dumps({"ok": True, "events": self.drain_js_queue()}, ensure_ascii=False).encode("utf-8")
                 return 200, "application/json; charset=utf-8", raw
             return 404, "text/plain; charset=utf-8", b"Not Found"
 
         if method.upper() == "POST" and api is not None:
-            if path == "/api/_upload_file":
+            if req_path == "/api/_upload_file":
                 raw_name = urllib.parse.unquote(hdrs.get("x-steno-filename", "uploaded_file.wav"))
                 safe_name = Path(raw_name).name or "uploaded_file.wav"
                 kind = hdrs.get("x-steno-kind", "audio")
@@ -1582,8 +1632,15 @@ class BrowserWindowBridge:
                     payload = {"ok": True, "result": suggestion}
                 return 200, "application/json; charset=utf-8", json.dumps(payload, ensure_ascii=False).encode("utf-8")
 
-            if path.startswith("/api/"):
-                method_name = path[len("/api/") :].split("?", 1)[0].strip()
+            if req_path.startswith("/api/"):
+                ctype_hdr = hdrs.get("content-type", "").lower()
+                if not ctype_hdr.startswith("application/json"):
+                    return (
+                        415,
+                        "application/json; charset=utf-8",
+                        b'{"ok": false, "error": "Unsupported Content-Type"}',
+                    )
+                method_name = req_path[len("/api/") :].strip()
                 if method_name.startswith("_") or not hasattr(api, method_name):
                     err_raw = json.dumps(
                         {"ok": False, "error": f"Unknown API method: {method_name}"}, ensure_ascii=False
@@ -1619,7 +1676,19 @@ def create_browser_gui_server(
             return
 
         def _dispatch(self, method: str) -> None:
-            length = int(self.headers.get("Content-Length", "0") or "0") if method == "POST" else 0
+            max_len = 512 * 1024 * 1024 if self.path.split("?", 1)[0] == "/api/_upload_file" else 10 * 1024 * 1024
+            try:
+                length = int(self.headers.get("Content-Length", "0") or "0") if method == "POST" else 0
+            except ValueError:
+                length = 0
+            if length < 0 or length > max_len:
+                err_b = b'{"ok": false, "error": "Payload Too Large"}'
+                self.send_response(413)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Length", str(len(err_b)))
+                self.end_headers()
+                self.wfile.write(err_b)
+                return
             body = self.rfile.read(length) if length > 0 else b""
             hdr_dict = {k: v for k, v in self.headers.items()}
             status, ctype, resp_bytes = bridge.handle_http_request(method, self.path, hdr_dict, body)
@@ -1703,20 +1772,20 @@ def build_native_app_menu(window: Any, ui_lang: str = "no") -> list[Any] | None:
             [
                 MenuAction(
                     "Open Audio File / Resume Session..." if is_en else "Åpne lydfil / Gjenoppta økt...",
-                    lambda: window.evaluate_js("selectIntent('file'); browseAudio()"),
+                    lambda: window.evaluate_js("setUxIntent('file'); browseAudio()"),
                 ),
                 MenuAction(
                     "Fetch from Stream / URL..." if is_en else "Hent fra strøm / nettadresse (URL)...",
-                    lambda: window.evaluate_js("selectIntent('stream'); promptUrlAudio()"),
+                    lambda: window.evaluate_js("setUxIntent('stream'); promptAudioUrl()"),
                 ),
                 MenuSeparator(),
                 MenuAction(
                     "Open Transcript (.html)" if is_en else "Åpne transkripsjon (.html)",
-                    lambda: window.evaluate_js("openOutputHtml('transcript')"),
+                    lambda: window.evaluate_js("openGeneratedFile('html')"),
                 ),
                 MenuAction(
                     "Open Meeting Notes (.html)" if is_en else "Åpne møtereferat (.html)",
-                    lambda: window.evaluate_js("openOutputHtml('notes')"),
+                    lambda: window.evaluate_js("openGeneratedFile('notes_html')"),
                 ),
                 MenuAction(
                     "Open Output Folder" if is_en else "Åpne utdatamappe",
@@ -1738,11 +1807,11 @@ def build_native_app_menu(window: Any, ui_lang: str = "no") -> list[Any] | None:
             [
                 MenuAction(
                     "Meeting (Multi-speaker)" if is_en else "Møte (Flere talere)",
-                    lambda: window.evaluate_js("selectTaskMode('mote')"),
+                    lambda: window.evaluate_js("setSessionFormat('mote')"),
                 ),
                 MenuAction(
                     "Lecture / Talk (1 speaker)" if is_en else "Forelesning / Foredrag (1 taler)",
-                    lambda: window.evaluate_js("selectTaskMode('foredrag')"),
+                    lambda: window.evaluate_js("setSessionFormat('foredrag')"),
                 ),
                 MenuSeparator(),
                 MenuAction(
@@ -1767,10 +1836,6 @@ def build_native_app_menu(window: Any, ui_lang: str = "no") -> list[Any] | None:
 
 
 def main() -> None:
-    try:
-        install_steno_app()
-    except Exception:
-        pass
     api = MoteApi()
     if not has_native_webview_backend():
         if is_termux():

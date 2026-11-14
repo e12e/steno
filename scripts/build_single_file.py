@@ -9,6 +9,8 @@ via an embedded uv polyglot self-bootstrapper.
 from __future__ import annotations
 
 import ast
+import base64
+import hashlib
 import re
 import struct
 from pathlib import Path
@@ -18,6 +20,7 @@ SRC_DIR = ROOT_DIR / "src" / "mote"
 DIST_DIR = ROOT_DIR / "dist"
 DIST_FILE = DIST_DIR / "steno.py"
 DIST_COM_FILE = DIST_DIR / "steno.com"
+DIST_SHA256_FILE = DIST_DIR / "SHA256SUMS.txt"
 
 POLYGLOT_HEADER = r'''#!/bin/sh
 # /// script
@@ -225,7 +228,7 @@ def generate_cosmopolitan_ape_binary(py_content: str | None = None) -> bytes:
     header_padded = header_part.ljust(e_lfanew, b" ")
 
     # 4. Bytes 0x800..0xFFF: 64-bit Windows PE32+ (x86_64 / ARM64 Prism) Header + Section Table
-    raw_code_size = 0x0600
+    raw_code_size = 0x0C00
     pe_sig = b"PE\x00\x00"
     coff_hdr = struct.pack(
         "<HHIIIHH",
@@ -284,9 +287,9 @@ def generate_cosmopolitan_ape_binary(py_content: str | None = None) -> bytes:
     )
     pe_headers_block = (pe_sig + coff_hdr + opt_hdr + sec_hdr).ljust(0x0800, b"\x00")
 
-    # 5. Build x86_64 Windows launcher stub + Import Table at RVA 0x1000..0x15FF
+    # 5. Build x86_64 Windows launcher stub + Import Table at RVA 0x1000..0x1BFF
     # Imports:
-    #   KERNEL32.dll: GetModuleFileNameA (IAT 0x10E0), GetCommandLineA (IAT 0x10E8), SetEnvironmentVariableA (IAT 0x10F0)
+    #   KERNEL32.dll: GetModuleFileNameW (IAT 0x10E0), GetCommandLineW (IAT 0x10E8), SetEnvironmentVariableW (IAT 0x10F0)
     #   msvcrt.dll:   system (IAT 0x1110)
     code_buf = bytearray()
 
@@ -298,21 +301,21 @@ def generate_cosmopolitan_ape_binary(py_content: str | None = None) -> bytes:
         code_buf.extend(prefix)
         code_buf.extend(struct.pack("<i", target_rva - next_rva))
 
-    _emit(b"\x48\x81\xec\x38\x04\x00\x00")      # sub rsp, 0x438
+    _emit(b"\x48\x81\xec\x38\x08\x00\x00")      # sub rsp, 0x838 (shadow space + 1024 WCHARs, 16B aligned)
     _emit(b"\x31\xc9")                          # xor ecx, ecx (hModule = NULL)
     _emit(b"\x48\x8d\x54\x24\x20")              # lea rdx, [rsp + 0x20]
-    _emit(b"\x41\xb8\x00\x04\x00\x00")          # mov r8d, 1024
-    _emit_rip_op(b"\xff\x15", 0x10E0)           # call [rip + GetModuleFileNameA]
-    _emit_rip_op(b"\x48\x8d\x0d", 0x11A0)       # lea rcx, [rip + "STENO_SELF"]
+    _emit(b"\x41\xb8\x00\x04\x00\x00")          # mov r8d, 1024 (WCHAR count)
+    _emit_rip_op(b"\xff\x15", 0x10E0)           # call [rip + GetModuleFileNameW]
+    _emit_rip_op(b"\x48\x8d\x0d", 0x11A0)       # lea rcx, [rip + L"STENO_SELF"]
     _emit(b"\x48\x8d\x54\x24\x20")              # lea rdx, [rsp + 0x20]
-    _emit_rip_op(b"\xff\x15", 0x10F0)           # call [rip + SetEnvironmentVariableA]
-    _emit_rip_op(b"\xff\x15", 0x10E8)           # call [rip + GetCommandLineA]
-    _emit_rip_op(b"\x48\x8d\x0d", 0x11B0)       # lea rcx, [rip + "STENO_CMDLINE"]
+    _emit_rip_op(b"\xff\x15", 0x10F0)           # call [rip + SetEnvironmentVariableW]
+    _emit_rip_op(b"\xff\x15", 0x10E8)           # call [rip + GetCommandLineW]
+    _emit_rip_op(b"\x48\x8d\x0d", 0x11C0)       # lea rcx, [rip + L"STENO_CMDLINE"]
     _emit(b"\x48\x89\xc2")                      # mov rdx, rax
-    _emit_rip_op(b"\xff\x15", 0x10F0)           # call [rip + SetEnvironmentVariableA]
-    _emit_rip_op(b"\x48\x8d\x0d", 0x11C0)       # lea rcx, [rip + win_bootstrap_cmd]
+    _emit_rip_op(b"\xff\x15", 0x10F0)           # call [rip + SetEnvironmentVariableW]
+    _emit_rip_op(b"\x48\x8d\x0d", 0x11E0)       # lea rcx, [rip + win_bootstrap_cmd]
     _emit_rip_op(b"\xff\x15", 0x1110)           # call [rip + msvcrt!system]
-    _emit(b"\x48\x81\xc4\x38\x04\x00\x00")      # add rsp, 0x438
+    _emit(b"\x48\x81\xc4\x38\x08\x00\x00")      # add rsp, 0x838
     _emit(b"\xc3")                              # ret
     assert len(code_buf) <= 0x80
     code_padded = bytes(code_buf).ljust(0x80, b"\x90")
@@ -331,29 +334,38 @@ def generate_cosmopolitan_ape_binary(py_content: str | None = None) -> bytes:
         + b"msvcrt.dll\x00".ljust(16, b"\x00")
     )
     hint_names = (
-        b"\x00\x00GetModuleFileNameA\x00".ljust(24, b"\x00")
-        + b"\x00\x00GetCommandLineA\x00".ljust(24, b"\x00")
-        + b"\x00\x00SetEnvironmentVariableA\x00".ljust(32, b"\x00")
+        b"\x00\x00GetModuleFileNameW\x00".ljust(24, b"\x00")
+        + b"\x00\x00GetCommandLineW\x00".ljust(24, b"\x00")
+        + b"\x00\x00SetEnvironmentVariableW\x00".ljust(32, b"\x00")
         + b"\x00\x00system\x00".ljust(16, b"\x00")
     )
     env_names = (
-        b"STENO_SELF\x00".ljust(16, b"\x00")
-        + b"STENO_CMDLINE\x00".ljust(16, b"\x00")
+        "STENO_SELF\x00".encode("utf-16le").ljust(32, b"\x00")
+        + "STENO_CMDLINE\x00".encode("utf-16le").ljust(32, b"\x00")
     )
-    win_bootstrap_cmd = (
-        b'powershell -NoProfile -ExecutionPolicy Bypass -Command "'
-        b"$d=Join-Path $env:LOCALAPPDATA 'Steno';"
-        b"New-Item -ItemType Directory -Force -Path $d|Out-Null;"
-        b"$p=Join-Path $d 'steno.py';"
-        b"$r=[IO.File]::ReadAllText($env:STENO_SELF);"
-        b"$m='# === STENO_PAYLOAD_BEGIN ===';"
-        b"$i=$r.IndexOf($m);"
-        b"if($i -ge 0){[IO.File]::WriteAllText($p,$r.Substring($i+$m.Length).TrimStart())};"
-        b"if(-not(Get-Command uv -ErrorAction SilentlyContinue)){irm https://astral.sh/uv/install.ps1|iex};"
-        b'$env:PATH=\\"$env:USERPROFILE\\.local\\bin;$env:LOCALAPPDATA\\uv\\bin;$env:LOCALAPPDATA\\Microsoft\\WinGet\\Links;$env:PATH\\";'
-        b"$c=$env:STENO_CMDLINE;"
-        b"$a=if($c -match '^(?:\\\"[^\\\"]+\\\"|\\S+)\\s+(.*)$'){$Matches[1]}else{''};"
-        b'iex \\"uv run --python 3.12 --script `$p `$a\\";exit $LASTEXITCODE"\x00'
+    ps_bootstrap = (
+        "$ErrorActionPreference='Stop';"
+        "$d=Join-Path $env:LOCALAPPDATA 'Steno';"
+        "New-Item -ItemType Directory -Force -Path $d|Out-Null;"
+        "$p=Join-Path $d 'steno.py';"
+        "$u8=New-Object System.Text.UTF8Encoding($false);"
+        "$r=[IO.File]::ReadAllText($env:STENO_SELF,$u8);"
+        "$m='# === STENO_PAYLOAD_BEGIN ===';"
+        "$i=$r.IndexOf($m);"
+        "if($i -ge 0){[IO.File]::WriteAllText($p,$r.Substring($i+$m.Length).TrimStart(),$u8)};"
+        "$env:PATH=\"$env:USERPROFILE\\.local\\bin;$env:LOCALAPPDATA\\uv\\bin;$env:LOCALAPPDATA\\Microsoft\\WinGet\\Links;$env:PATH\";"
+        "if(-not(Get-Command uv -ErrorAction SilentlyContinue)){irm https://astral.sh/uv/install.ps1|iex};"
+        "$c=[string]$env:STENO_CMDLINE;"
+        "$ms=[regex]::Matches($c,'\"((?:\\\\\"|[^\"])*)\"|(\\S+)');"
+        "$g=@();for($k=1;$k -lt $ms.Count;$k++){"
+        "$v=if($ms[$k].Groups[1].Success){$ms[$k].Groups[1].Value.Replace('\\\"','\"')}else{$ms[$k].Groups[2].Value};"
+        "$g+=$v};"
+        "& uv run --python 3.12 --script $p @g;"
+        "exit $LASTEXITCODE"
+    )
+    ps_b64 = base64.b64encode(ps_bootstrap.encode("utf-16le")).decode("ascii")
+    win_bootstrap_cmd = f"powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand {ps_b64}\x00".encode(
+        "ascii"
     )
     code_section_raw = (
         code_padded
@@ -386,14 +398,12 @@ def build() -> int:
     DIST_COM_FILE.write_bytes(com_bytes)
     DIST_COM_FILE.chmod(0o755)
 
-    www_rec_dir = ROOT_DIR / "www" / "rec"
-    if www_rec_dir.is_dir():
-        www_script = www_rec_dir / "steno.py"
-        www_script.write_text(out_content, encoding="utf-8")
-        www_script.chmod(0o755)
-        www_com = www_rec_dir / "steno.com"
-        www_com.write_bytes(com_bytes)
-        www_com.chmod(0o755)
+    sha_com = hashlib.sha256(com_bytes).hexdigest()
+    sha_py = hashlib.sha256(out_content.encode("utf-8")).hexdigest()
+    DIST_SHA256_FILE.write_text(
+        f"{sha_com}  {DIST_COM_FILE.name}\n{sha_py}  {DIST_FILE.name}\n",
+        encoding="utf-8",
+    )
     print(
         f"==> Ferdig bygget og AST-verifisert! "
         f"steno.py: {DIST_FILE.stat().st_size // 1024} KB, "

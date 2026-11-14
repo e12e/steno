@@ -801,10 +801,12 @@
                             </div>
                         </div>
                         <p class="dispatch-summary">
-                            A single Actually Portable Executable (<code>steno.com</code>) encapsulating the desktop interface, transcript and minutes HTML renderers, the five-stage checkpoint engine, and an automatic runtime provisioner. <strong>No pre-installed Python is required</strong>—double-clicking or running <code>steno.com</code> caches its runtime across macOS, Windows 11, Linux (<code>amd64</code> &amp; <code>arm64</code>), and Android Termux (<code>aarch64-linux-android</code>), installs desktop and CLI shortcuts automatically, and includes an in-app <em>File → Uninstall Steno…</em> menu (with a Yes/No confirmation dialog) as well as <code>--uninstall</code> to remove all cached files.
+                            A single Actually Portable Executable (<code>steno.com</code>) encapsulating the desktop interface, transcript and minutes HTML renderers, the five-stage checkpoint engine, and an automatic runtime provisioner. <strong>No pre-installed Python is required</strong>—double-clicking or running <code>steno.com</code> caches its runtime across macOS, Windows 11, Linux (<code>amd64</code> &amp; <code>arm64</code>), and Android Termux (<code>aarch64-linux-android</code>), offers one-click desktop and CLI shortcut installation (or <code>--install</code>), and includes an in-app <em>File → Uninstall Steno…</em> menu (with a Yes/No confirmation dialog) as well as <code>--uninstall</code> to remove all cached files.
                         </p>
                         <div class="dispatch-action">
-                            <a href="steno.com" download="steno.com">Download Universal Binary (steno.com) →</a>
+                            <a href="https://github.com/e12e/steno/releases/latest/download/steno.com" rel="noopener">Download Universal Binary (steno.com) →</a>
+                            <a href="https://github.com/e12e/steno/releases/latest/download/SHA256SUMS.txt" rel="noopener">SHA-256 Checksums</a>
+                            <a href="https://github.com/e12e/steno/releases/latest" rel="noopener">Latest Release Notes</a>
                         </div>
                     </div>
 
@@ -813,7 +815,7 @@
                     <div class="section-kicker">II. The Five Sequential Operations</div>
                     <h2>Checkpointed Execution &amp; Speaker Attribution</h2>
 
-                    <p>To prevent memory contention on portable machines, the five analytical stages execute sequentially rather than concurrently. Upon completing each operation, the engine writes an atomic JSON checkpoint under <code>.steno_checkpoints/&lt;stem&gt;/</code> and releases its model weights before the next model is loaded.</p>
+                    <p>To prevent memory contention on portable machines, the five analytical stages execute sequentially rather than concurrently. Upon completing each operation, the engine writes an atomic JSON checkpoint under <code>.mote_checkpoints/&lt;stem&gt;/</code> and releases its model weights before the next model is loaded.</p>
 
                     <p>If an operation is halted, re-invoking the file resumes from the last verified checkpoint. Individual stages—such as re-binding participant identities or re-computing the final minutes with amended context notes—may be repeated independently in seconds.</p>
 
@@ -857,7 +859,7 @@
 
                     <p><code>steno.com</code> is a Cosmopolitan Actually Portable Executable valid simultaneously as a 64-bit Windows PE32+ executable (running on both <code>amd64</code> and Windows 11 <code>arm64</code>) and a POSIX shell/Python bundle on macOS, Linux (<code>amd64</code> &amp; <code>arm64</code>), and Android Termux (<code>aarch64-linux-android</code>). On first launch, it caches Astral’s standalone <code>uv</code> binary (or native Termux <code>pkg</code> packages on Android), an isolated Python runtime, and standalone <code>ffmpeg</code>, <code>whisperx</code>, and <code>ollama</code> binaries in the local application support directory.</p>
 
-                    <p>Invoking <code>steno.com</code> without arguments (or double-clicking it) installs the desktop shortcut and opens the native desktop window—where <em>File → Uninstall Steno…</em> lets the operator remove all cached files with a Yes/No confirmation dialog at any time. Supplying any file path or flag dispatches directly to the command-line interface.</p>
+                    <p>Invoking <code>steno.com</code> without arguments (or double-clicking it) opens the native desktop window—where <em>File → Install Desktop Shortcut</em> (or <code>--install</code>) creates shortcuts and <em>File → Uninstall Steno…</em> removes all cached files with a Yes/No confirmation dialog at any time. Supplying any file path or flag dispatches directly to the command-line interface.</p>
 
                     <pre class="terminal-specimen"><code># 1. Launch desktop GUI (or double-click steno.com on Windows / macOS / Linux)
 chmod +x steno.com
@@ -905,7 +907,7 @@ chmod +x steno.com
                         <tbody>
                             <tr>
                                 <th scope="row">Artifact</th>
-                                <td><a href="steno.com" download="steno.com">steno.com</a></td>
+                                <td><a href="https://github.com/e12e/steno/releases/latest/download/steno.com" rel="noopener">steno.com</a></td>
                             </tr>
                             <tr>
                                 <th scope="row">Runtime</th>
@@ -1053,7 +1055,7 @@ chmod +x steno.com
                     </div>
                     <div>
                         <span class="impressum-label">GitHub Profile</span>
-                        <a href="https://github.com/e12e" rel="me noopener">github.com/e12e</a>
+                        <a href="https://github.com/e12e/steno" rel="me noopener">github.com/e12e/steno</a>
                     </div>
                     <div>
                         <span class="impressum-label">Correspondence</span>

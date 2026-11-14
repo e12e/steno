@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import contextlib
 import doctest
+import hashlib
 import io
 import json
 import os
 import shlex
+import shutil
 import struct
 import sys
 import tempfile
@@ -27,6 +29,13 @@ from mote import core as mote_core
 from mote import gui as mote_gui
 
 FEATURE_FILE = Path(__file__).resolve().parent / "features" / "cli_and_pipeline.feature"
+
+
+def setUpModule() -> None:
+    from scripts import build_single_file
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        build_single_file.build()
 
 
 def parse_gherkin_feature(feature_path: Path) -> list[dict[str, Any]]:
@@ -235,22 +244,24 @@ class TestGherkinBDDScenarios(unittest.TestCase):
             elif step == "When inspecting the generated ffmpeg arguments and the www/rec release folder":
                 root_dir = Path(__file__).resolve().parent.parent
                 ctx["www_rec_index"] = root_dir / "www" / "rec" / "index.html"
-                ctx["www_rec_script"] = root_dir / "www" / "rec" / "steno.py"
+                ctx["www_rec_dir"] = root_dir / "www" / "rec"
             elif step == 'Then darwin uses "avfoundation", win32 uses "dshow", and linux uses "pulse" or "alsa"':
                 self.assertIn("avfoundation", list(ctx["cmd_darwin"]))  # type: ignore[arg-type]
                 self.assertIn("dshow", list(ctx["cmd_win32"]))  # type: ignore[arg-type]
                 cmd_linux = list(ctx["cmd_linux"])  # type: ignore[arg-type]
                 self.assertTrue("pulse" in cmd_linux or "alsa" in cmd_linux)
-            elif step == 'And www/rec/index.html and www/rec/steno.py exist with "Steno" and "an automaton stenographer" in The Chronicle broadsheet style':
+            elif step == "And www/rec/index.html links to the latest GitHub Release in The Chronicle broadsheet style without bundling binaries in www/rec":
                 idx_path = ctx["www_rec_index"]
-                scr_path = ctx["www_rec_script"]
-                assert isinstance(idx_path, Path) and isinstance(scr_path, Path)
+                www_rec_dir = ctx["www_rec_dir"]
+                assert isinstance(idx_path, Path) and isinstance(www_rec_dir, Path)
                 self.assertTrue(idx_path.is_file(), f"Missing {idx_path}")
-                self.assertTrue(scr_path.is_file(), f"Missing {scr_path}")
+                self.assertFalse((www_rec_dir / "steno.py").exists(), "www/rec/steno.py must not be bundled in git")
+                self.assertFalse((www_rec_dir / "steno.com").exists(), "www/rec/steno.com must not be bundled in git")
                 idx_html = idx_path.read_text(encoding="utf-8")
                 self.assertIn("The Chronicle", idx_html)
                 self.assertIn("broadsheet-grid", idx_html)
-                self.assertIn("steno.com", idx_html)
+                self.assertIn("https://github.com/e12e/steno/releases/latest/download/steno.com", idx_html)
+                self.assertIn("https://github.com/e12e/steno/releases/latest/download/SHA256SUMS.txt", idx_html)
                 self.assertIn("a modern annalist for your meetings", idx_html.lower())
                 self.assertIn("an automaton stenographer", idx_html.lower())
                 self.assertIn("macOS", idx_html)
@@ -276,14 +287,19 @@ class TestGherkinBDDScenarios(unittest.TestCase):
                 import subprocess
 
                 www_rec_dir = ctx["www_rec_dir"]
-                assert isinstance(www_rec_dir, Path)
+                dist_steno = ctx["dist_steno"]
+                assert isinstance(www_rec_dir, Path) and isinstance(dist_steno, Path)
                 install_sh = www_rec_dir / "install.sh"
                 self.assertTrue(install_sh.is_file(), f"Missing {install_sh}")
+                self.assertIn(
+                    "https://github.com/e12e/steno/releases/latest/download/steno.py",
+                    install_sh.read_text(encoding="utf-8"),
+                )
                 with tempfile.TemporaryDirectory() as tmp:
                     env = os.environ.copy()
                     env["STENO_INSTALL_DIR"] = str(Path(tmp) / "share" / "steno")
                     env["STENO_BIN_DIR"] = str(Path(tmp) / "bin")
-                    env["STENO_SOURCE_FILE"] = str(www_rec_dir / "steno.py")
+                    env["STENO_SOURCE_FILE"] = str(dist_steno)
                     env["STENO_SKIP_UV_WARMUP"] = "1"
                     proc = subprocess.run(
                         ["/bin/sh", str(install_sh)],
@@ -308,17 +324,20 @@ class TestGherkinBDDScenarios(unittest.TestCase):
                 ps1_text = install_ps1.read_text(encoding="utf-8")
                 cmd_text = steno_cmd.read_text(encoding="utf-8")
                 self.assertIn("astral.sh/uv/install.ps1", ps1_text)
-                self.assertIn("steno.py", ps1_text)
+                self.assertIn("https://github.com/e12e/steno/releases/latest/download/steno.py", ps1_text)
+                self.assertIn("https://github.com/e12e/steno/releases/latest/download/SHA256SUMS.txt", ps1_text)
+                self.assertIn("https://github.com/e12e/steno/releases/latest/download/steno.py", cmd_text)
                 self.assertIn("uv run --python 3.12", cmd_text)
-                self.assertIn('href="steno.com"', idx_html)
+                self.assertIn('href="https://github.com/e12e/steno/releases/latest/download/steno.com"', idx_html)
                 self.assertNotIn('download="install.sh"', idx_html)
                 self.assertNotIn('download="install.ps1"', idx_html)
                 self.assertNotIn('download="steno.cmd"', idx_html)
                 self.assertNotIn('download="steno.py"', idx_html)
-            elif step == "Given the Cosmopolitan APE binary dist/steno.com and www/rec/steno.com":
+            elif step == "Given the Cosmopolitan APE binary dist/steno.com and dist/SHA256SUMS.txt":
                 root_dir = Path(__file__).resolve().parent.parent
                 ctx["dist_com"] = root_dir / "dist" / "steno.com"
-                ctx["www_com"] = root_dir / "www" / "rec" / "steno.com"
+                ctx["dist_py"] = root_dir / "dist" / "steno.py"
+                ctx["dist_sums"] = root_dir / "dist" / "SHA256SUMS.txt"
                 ctx["www_idx"] = root_dir / "www" / "rec" / "index.html"
             elif step == "When running install_steno_app and uninstall_steno_app in an isolated prefix and inspecting the GUI File menu":
                 install_fn = getattr(mote_core, "install_steno_app", None)
@@ -332,13 +351,24 @@ class TestGherkinBDDScenarios(unittest.TestCase):
                 import struct
 
                 dist_com = ctx["dist_com"]
-                www_com = ctx["www_com"]
+                dist_py = ctx["dist_py"]
+                dist_sums = ctx["dist_sums"]
                 www_idx = ctx["www_idx"]
-                assert isinstance(dist_com, Path) and isinstance(www_com, Path) and isinstance(www_idx, Path)
+                assert (
+                    isinstance(dist_com, Path)
+                    and isinstance(dist_py, Path)
+                    and isinstance(dist_sums, Path)
+                    and isinstance(www_idx, Path)
+                )
                 self.assertTrue(dist_com.is_file(), f"Missing {dist_com}")
-                self.assertTrue(www_com.is_file(), f"Missing {www_com}")
+                self.assertTrue(dist_py.is_file(), f"Missing {dist_py}")
+                self.assertTrue(dist_sums.is_file(), f"Missing {dist_sums}")
                 com_bytes = dist_com.read_bytes()
-                self.assertEqual(com_bytes, www_com.read_bytes(), "www/rec/steno.com is out of sync with dist/steno.com")
+                sha_com = hashlib.sha256(com_bytes).hexdigest()
+                sha_py = hashlib.sha256(dist_py.read_bytes()).hexdigest()
+                sums_text = dist_sums.read_text(encoding="utf-8")
+                self.assertIn(f"{sha_com}  steno.com", sums_text)
+                self.assertIn(f"{sha_py}  steno.py", sums_text)
                 self.assertTrue(com_bytes.startswith(b"MZqFpD="), "steno.com must start with Cosmopolitan APE MZqFpD= magic")
                 e_lfanew = struct.unpack_from("<I", com_bytes, 0x3C)[0]
                 self.assertEqual(com_bytes[e_lfanew : e_lfanew + 4], b"PE\x00\x00", "Invalid PE signature at e_lfanew")
@@ -347,7 +377,7 @@ class TestGherkinBDDScenarios(unittest.TestCase):
                 opt_magic = struct.unpack_from("<H", com_bytes, e_lfanew + 24)[0]
                 self.assertEqual(opt_magic, 0x020B, "PE optional header must be PE32+ (0x020B)")
                 self.assertIn(b"# === STENO_PAYLOAD_BEGIN ===", com_bytes)
-                self.assertIn("steno.com", www_idx.read_text(encoding="utf-8"))
+                self.assertIn("https://github.com/e12e/steno/releases/latest/download/steno.com", www_idx.read_text(encoding="utf-8"))
             elif step == "And install_steno_app creates the cached app directory, CLI launcher, and desktop entry, and uninstall_steno_app removes them cleanly":
                 install_fn = ctx["install_fn"]
                 uninstall_fn = ctx["uninstall_fn"]
@@ -460,6 +490,8 @@ class TestGherkinBDDScenarios(unittest.TestCase):
                     self.assertEqual(proc.returncode, 0, msg=f"Termux steno.com failed: {proc.stderr}\n{proc.stdout}")
                     self.assertIn("SELF_TEST_OK", proc.stdout)
             elif step == "And the Windows PE32+ code section in steno.com imports KERNEL32.dll and msvcrt.dll to extract and launch steno.py on amd64 and arm64":
+                import base64
+                import re
                 import struct
 
                 com_bytes = ctx["com_bytes"]
@@ -471,11 +503,17 @@ class TestGherkinBDDScenarios(unittest.TestCase):
                 self.assertGreaterEqual(imp_size, 60)
                 self.assertIn(b"KERNEL32.dll\x00", com_bytes)
                 self.assertIn(b"msvcrt.dll\x00", com_bytes)
-                self.assertIn(b"GetModuleFileNameA\x00", com_bytes)
-                self.assertIn(b"GetCommandLineA\x00", com_bytes)
-                self.assertIn(b"SetEnvironmentVariableA\x00", com_bytes)
-                self.assertIn(b"STENO_SELF\x00", com_bytes)
-                self.assertIn(b"STENO_CMDLINE\x00", com_bytes)
+                self.assertIn(b"GetModuleFileNameW\x00", com_bytes)
+                self.assertIn(b"GetCommandLineW\x00", com_bytes)
+                self.assertIn(b"SetEnvironmentVariableW\x00", com_bytes)
+                self.assertIn("STENO_SELF\x00".encode("utf-16le"), com_bytes)
+                self.assertIn("STENO_CMDLINE\x00".encode("utf-16le"), com_bytes)
+                m_enc = re.search(rb"-EncodedCommand\s+([A-Za-z0-9+/=]+)\x00", com_bytes)
+                self.assertIsNotNone(m_enc, "Windows launcher must use PowerShell -EncodedCommand")
+                assert m_enc is not None
+                ps_script = base64.b64decode(m_enc.group(1)).decode("utf-16le")
+                self.assertIn("& uv run --python 3.12 --script $p @g", ps_script)
+                self.assertNotIn('iex "uv run', ps_script)
             elif step == "Given a ChromeOS Crostini or Linux environment where neither gi (GTK) nor qtpy (Qt) is installed":
                 has_fn = getattr(mote_gui, "has_native_webview_backend", None)
                 self.assertTrue(callable(has_fn), "mote.gui.has_native_webview_backend is missing")
@@ -506,19 +544,52 @@ class TestGherkinBDDScenarios(unittest.TestCase):
                 self.assertIn("pywebviewready", page_html)
             elif step == "And POST /api/get_defaults and GET /api/_events and POST /api/_upload_file bridge MoteApi calls without GTK or Qt":
                 bridge = ctx["browser_bridge"]
+                tok = bridge.auth_token
+                self.assertTrue(len(tok) >= 16)
+
+                # Reject missing token, DNS rebinding Host, CSRF Origin, and non-JSON Content-Type
+                st_unauth, _, _ = bridge.handle_http_request(
+                    "POST", "/api/get_defaults", {"Content-Type": "application/json"}, b'{"args": []}'
+                )
+                self.assertEqual(st_unauth, 403)
+                st_host, _, _ = bridge.handle_http_request(
+                    "POST",
+                    "/api/get_defaults",
+                    {"Host": "evil.example:8080", "Content-Type": "application/json", "X-Steno-Token": tok},
+                    b'{"args": []}',
+                )
+                self.assertEqual(st_host, 403)
+                st_origin, _, _ = bridge.handle_http_request(
+                    "POST",
+                    "/api/get_defaults",
+                    {"Origin": "https://evil.example", "Content-Type": "application/json", "X-Steno-Token": tok},
+                    b'{"args": []}',
+                )
+                self.assertEqual(st_origin, 403)
+                st_ctype, _, _ = bridge.handle_http_request(
+                    "POST",
+                    "/api/get_defaults",
+                    {"Content-Type": "text/plain", "X-Steno-Token": tok},
+                    b'{"args": []}',
+                )
+                self.assertEqual(st_ctype, 415)
+
                 status, _ctype, body = bridge.handle_http_request(
                     "POST",
                     "/api/get_defaults",
-                    {"Content-Type": "application/json"},
+                    {"Host": "127.0.0.1:8080", "Content-Type": "application/json", "X-Steno-Token": tok},
                     b'{"args": []}',
                 )
                 self.assertEqual(status, 200)
                 data = json.loads(body.decode("utf-8"))
                 self.assertTrue(data["ok"])
                 self.assertIn("default_out_dir", data["result"])
+                self.assertEqual(data["result"]["hf_token"], "", "Bridge must not expose raw HF token")
 
                 bridge.evaluate_js("updateProgress(42, 'Testing ChromeOS')")
-                status_ev, _ctype_ev, ev_body = bridge.handle_http_request("GET", "/api/_events")
+                status_ev, _ctype_ev, ev_body = bridge.handle_http_request(
+                    "GET", "/api/_events", {"X-Steno-Token": tok}
+                )
                 self.assertEqual(status_ev, 200)
                 ev_data = json.loads(ev_body.decode("utf-8"))
                 self.assertIn("updateProgress(42, 'Testing ChromeOS')", ev_data["events"])
@@ -529,6 +600,7 @@ class TestGherkinBDDScenarios(unittest.TestCase):
                     "/api/_upload_file",
                     {
                         "Content-Type": "application/octet-stream",
+                        "X-Steno-Token": tok,
                         "X-Steno-Filename": "chromeos_test.wav",
                         "X-Steno-Kind": "audio",
                     },
@@ -693,13 +765,13 @@ class TestAARImprovements(unittest.TestCase):
             expected,
             "dist/steno.py is out of sync with src/mote/* — run scripts/build_single_file.py",
         )
-        www_rec_script = build_single_file.ROOT_DIR / "www" / "rec" / "steno.py"
-        self.assertTrue(www_rec_script.is_file(), "www/rec/steno.py is missing")
-        self.assertEqual(
-            www_rec_script.read_text(encoding="utf-8"),
-            expected,
-            "www/rec/steno.py is out of sync with dist/steno.py — run scripts/build_single_file.py",
-        )
+        self.assertTrue(build_single_file.DIST_COM_FILE.is_file(), "dist/steno.com is missing")
+        self.assertTrue(build_single_file.DIST_SHA256_FILE.is_file(), "dist/SHA256SUMS.txt is missing")
+        sums_text = build_single_file.DIST_SHA256_FILE.read_text(encoding="utf-8")
+        sha_com = hashlib.sha256(build_single_file.DIST_COM_FILE.read_bytes()).hexdigest()
+        sha_py = hashlib.sha256(expected.encode("utf-8")).hexdigest()
+        self.assertIn(f"{sha_com}  steno.com", sums_text)
+        self.assertIn(f"{sha_py}  steno.py", sums_text)
 
     def test_fallback_templates_are_compact_and_not_duplicated_bloat(self) -> None:
         self.assertLessEqual(
@@ -781,6 +853,179 @@ class TestAARImprovements(unittest.TestCase):
             mote_core.determine_stages_to_run("transcribe_s2", False, True, True, True, True, True),
             (False, True, False, False, False),
         )
+
+    def test_native_app_menu_evaluate_js_functions_exist_in_html(self) -> None:
+        import re
+        import types
+
+        class _FakeMenu:
+            def __init__(self, title: str, items: list[object]) -> None:
+                self.title = title
+                self.items = items
+
+        class _FakeAction:
+            def __init__(self, title: str, func: object) -> None:
+                self.title = title
+                self.func = func
+
+        class _FakeSep:
+            pass
+
+        class _FakeWindow:
+            def __init__(self) -> None:
+                self.calls: list[str] = []
+
+            def evaluate_js(self, code: str) -> None:
+                self.calls.append(code)
+
+        fake_menu_mod = types.ModuleType("webview.menu")
+        fake_menu_mod.Menu = _FakeMenu  # type: ignore[attr-defined]
+        fake_menu_mod.MenuAction = _FakeAction  # type: ignore[attr-defined]
+        fake_menu_mod.MenuSeparator = _FakeSep  # type: ignore[attr-defined]
+        fake_wv = types.ModuleType("webview")
+        fake_wv.menu = fake_menu_mod  # type: ignore[attr-defined]
+
+        win = _FakeWindow()
+        with mock.patch.dict(sys.modules, {"webview": fake_wv, "webview.menu": fake_menu_mod}):
+            menus = mote_gui.build_native_app_menu(win, ui_lang="no")
+        self.assertIsNotNone(menus)
+        assert menus is not None
+        for menu in menus:
+            for item in menu.items:
+                if hasattr(item, "func") and callable(item.func):
+                    item.func()
+
+        self.assertGreaterEqual(len(win.calls), 10)
+        app_html = mote_gui._load_app_html()
+        for js_snippet in win.calls:
+            fn_names = re.findall(r"([A-Za-z_][A-Za-z0-9_]*)\s*\(", js_snippet)
+            self.assertGreater(len(fn_names), 0, f"Expected function call in {js_snippet}")
+            for fn_name in fn_names:
+                self.assertIn(
+                    f"function {fn_name}(",
+                    app_html,
+                    f"Menu item calls '{fn_name}' via evaluate_js, which is missing from app.html",
+                )
+
+    def test_markdown_to_html_sanitizes_xss_and_javascript_links(self) -> None:
+        evil_md = (
+            "# Meeting Notes\n\n"
+            "<script>alert('xss')</script>\n\n"
+            '<img src=x onerror="alert(1)">\n\n'
+            "[Bad link](javascript:alert(2)) and [Good link](https://hypertekst.net/steno/)\n\n"
+            "| Owner | Task |\n| --- | --- |\n| Alice | **Review** |"
+        )
+        rendered = mote_core._render_markdown_to_html(evil_md)
+        self.assertNotIn("<script", rendered.lower())
+        self.assertNotIn("<img", rendered.lower())
+        self.assertNotIn("javascript:", rendered.lower())
+        self.assertIn("Bad link", rendered)
+        self.assertIn('href="https://hypertekst.net/steno/"', rendered)
+        self.assertIn("<strong>Review</strong>", rendered)
+        self.assertIn("<table>", rendered)
+
+        sanitized_raw = mote_core._sanitize_rendered_html(
+            '<p>Safe</p><script>alert(1)</script><img src=x onerror="alert(1)">'
+            '<a href="javascript:alert(2)">bad</a><a href="https://example.com">ok</a>'
+        )
+        self.assertNotIn("<script", sanitized_raw.lower())
+        self.assertNotIn("<img", sanitized_raw.lower())
+        self.assertNotIn("onerror", sanitized_raw.lower())
+        self.assertNotIn("javascript:", sanitized_raw.lower())
+        self.assertIn('href="https://example.com"', sanitized_raw)
+
+    def test_fetch_context_from_url_ssrf_and_max_bytes_guards(self) -> None:
+        for blocked in (
+            "http://127.0.0.1:8080/secret",
+            "http://169.254.169.254/latest/meta-data/",
+            "http://localhost:11434/api/tags",
+            "file:///etc/passwd",
+        ):
+            with self.assertRaises(ValueError, msg=f"Should reject {blocked}"):
+                mote_core.fetch_context_from_url(blocked)
+
+        class _BigResp:
+            headers = {"Content-Type": "text/plain"}
+
+            def read(self, n: int = -1) -> bytes:
+                return b"A" * (1025 if n < 0 else n)
+
+            def __enter__(self) -> _BigResp:
+                return self
+
+            def __exit__(self, *_a: object) -> None:
+                pass
+
+        with mock.patch.object(mote_core, "_validate_public_http_url"):
+            with mock.patch("urllib.request.OpenerDirector.open", return_value=_BigResp()):
+                with self.assertRaises(ValueError):
+                    mote_core.fetch_context_from_url("https://example.com/huge.txt", max_bytes=1024)
+
+    def test_uninstall_steno_app_removes_whisperx_and_steno_hf_models_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            mote_core.install_steno_app(target_root=root, platform_str="linux")
+            uv_wx = root / ".local" / "share" / "uv" / "tools" / "whisperx"
+            uv_wx.mkdir(parents=True)
+            (uv_wx / "marker").write_text("wx", encoding="utf-8")
+            xdg_cache = root / ".cache" / "mote_transcribe"
+            xdg_cache.mkdir(parents=True)
+            (xdg_cache / "hf_token").write_text("hf_secret", encoding="utf-8")
+            hf_hub = root / ".cache" / "huggingface" / "hub"
+            steno_hf = hf_hub / "models--NbAiLab--nb-whisper-small"
+            unrelated_hf = hf_hub / "models--someone--unrelated-model"
+            steno_hf.mkdir(parents=True)
+            unrelated_hf.mkdir(parents=True)
+
+            out = mote_core.uninstall_steno_app(target_root=root, platform_str="linux")
+            self.assertTrue(out["ok"])
+            self.assertFalse(uv_wx.exists())
+            self.assertFalse(xdg_cache.exists())
+            self.assertFalse(steno_hf.exists())
+            self.assertTrue(unrelated_hf.exists(), "Unrelated HuggingFace models must not be removed")
+
+    def test_release_workflows_githooks_and_checkout_install(self) -> None:
+        root_dir = Path(__file__).resolve().parent.parent
+        ci_yml = root_dir / ".github" / "workflows" / "ci.yml"
+        rel_yml = root_dir / ".github" / "workflows" / "release.yml"
+        pre_push = root_dir / ".githooks" / "pre-push"
+        gitignore = (root_dir / ".gitignore").read_text(encoding="utf-8")
+
+        self.assertTrue(ci_yml.is_file(), "Missing .github/workflows/ci.yml")
+        self.assertTrue(rel_yml.is_file(), "Missing .github/workflows/release.yml")
+        rel_text = rel_yml.read_text(encoding="utf-8")
+        self.assertIn('"v*"', rel_text)
+        self.assertIn("dist/steno.com", rel_text)
+        self.assertIn("dist/steno.py", rel_text)
+        self.assertIn("dist/SHA256SUMS.txt", rel_text)
+        self.assertIn("gh release delete", rel_text)
+        self.assertIn("--cleanup-tag", rel_text)
+
+        self.assertTrue(pre_push.is_file(), "Missing .githooks/pre-push")
+        self.assertTrue(os.access(pre_push, os.X_OK), ".githooks/pre-push must be executable")
+        for ignored_entry in ("dist/", "www/rec/steno.py", "www/rec/steno.com"):
+            self.assertIn(ignored_entry, gitignore)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            sim_repo = tmp_path / "repo"
+            shutil.copytree(root_dir / "src" / "mote", sim_repo / "src" / "mote")
+            (sim_repo / "scripts").mkdir(parents=True)
+            shutil.copyfile(
+                root_dir / "scripts" / "build_single_file.py",
+                sim_repo / "scripts" / "build_single_file.py",
+            )
+            install_root = tmp_path / "home"
+            with mock.patch.object(
+                mote_core, "__file__", str(sim_repo / "src" / "mote" / "core.py")
+            ):
+                res = mote_core.install_steno_app(target_root=install_root, platform_str="linux")
+            self.assertTrue(res["ok"])
+            installed_py = Path(res["app_dir"]) / "steno.py"
+            self.assertTrue(installed_py.is_file())
+            installed_text = installed_py.read_text(encoding="utf-8")
+            self.assertIn("def entrypoint(", installed_text)
+            self.assertNotIn("from mote.gui import entrypoint", installed_text)
 
 
 class TestContextAndTranscriptExtraction(unittest.TestCase):

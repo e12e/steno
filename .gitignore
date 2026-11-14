@@ -11,3 +11,6 @@ data/**
 synthetic_test/meetings/*/runs/
 synthetic_test/meetings/*/llm_runs/
 scripts/transcribe_*.sh
+dist/
+www/rec/steno.py
+www/rec/steno.com

@@ -47,7 +47,7 @@ Feature: Idiomatic CLI Argument Parsing, Unified Entrypoint Dispatch, and Pipeli
     Given cross-platform ffmpeg microphone commands are generated for darwin, win32, and linux
     When inspecting the generated ffmpeg arguments and the www/rec release folder
     Then darwin uses "avfoundation", win32 uses "dshow", and linux uses "pulse" or "alsa"
-    And www/rec/index.html and www/rec/steno.py exist with "Steno" and "an automaton stenographer" in The Chronicle broadsheet style
+    And www/rec/index.html links to the latest GitHub Release in The Chronicle broadsheet style without bundling binaries in www/rec
 
   Scenario: Zero-Python execution and universal installers for macOS, Linux, and Windows
     Given a target machine without python3 pre-installed
@@ -57,7 +57,7 @@ Feature: Idiomatic CLI Argument Parsing, Unified Entrypoint Dispatch, and Pipeli
     And www/rec/install.ps1 and www/rec/steno.cmd provide zero-Python Windows installation and double-click launch
 
   Scenario: Cosmopolitan APE steno.com binary, install/uninstall lifecycle, and GUI File menu uninstall dialog
-    Given the Cosmopolitan APE binary dist/steno.com and www/rec/steno.com
+    Given the Cosmopolitan APE binary dist/steno.com and dist/SHA256SUMS.txt
     When running install_steno_app and uninstall_steno_app in an isolated prefix and inspecting the GUI File menu
     Then dist/steno.com has a valid MZqFpD APE + 64-bit PE32+ header and embeds the steno.py payload
     And install_steno_app creates the cached app directory, CLI launcher, and desktop entry, and uninstall_steno_app removes them cleanly

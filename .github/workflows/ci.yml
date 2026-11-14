@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Lint with Ruff
+        run: make lint
+
+      - name: Typecheck with Mypy
+        run: make typecheck
+
+      - name: Run Python doctests
+        run: make doctest
+
+      - name: Run unit & BDD tests (builds dist/)
+        run: make test
+
+      - name: Warm uv standalone script environment
+        run: uv run --python 3.12 --script dist/steno.py --self-test
+
+      - name: Verify standalone script, SHA256SUMS.txt, and APE binary
+        run: |
+          bash scripts/test_standalone.sh
+          (cd dist && sha256sum -c SHA256SUMS.txt)
