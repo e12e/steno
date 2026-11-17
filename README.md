@@ -123,7 +123,7 @@ make check
 make build
 
 # Publiser ny GitHub Release (bygger, tester, oppdaterer Latest og sletter eldre utgivelser/tagger):
-git tag v0.2.0 && git push github v0.2.0
+git tag v0.3.0 && git push github v0.3.0
 ```
 
 ---

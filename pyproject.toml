@@ -1,6 +1,6 @@
 [project]
 name = "steno"
-version = "0.2.0"
+version = "0.3.0"
 description = "Steno - a modern annalist for your meetings - an automaton stenographer."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -27,7 +27,7 @@ mote-cli = "mote.core:cli_main"
 addopts = "--doctest-modules"
 pythonpath = ["src", "."]
 testpaths = [
-    "src/mote/core.py",
+    "src/mote",
     "transcribe.py",
     "tests/test_cli_and_pipeline.py",
 ]
@@ -48,10 +48,7 @@ ignore_missing_imports = true
 check_untyped_defs = true
 explicit_package_bases = true
 files = [
-    "src/mote/core.py",
-    "src/mote/cli.py",
-    "src/mote/gui.py",
-    "src/mote/template_loader.py",
+    "src/mote",
     "scripts/build_single_file.py",
     "transcribe.py",
     "steno.py",

@@ -1,9 +1,9 @@
-# GUI for Meeting Recording, Guided Voice Enrollment, Agenda Context, WhisperX & Ollama.
+"""Desktop pywebview GUI API, native OS menus, self-test, and unified entrypoint for Steno."""
+
 from __future__ import annotations
 
 import json
 import os
-import secrets
 import shutil
 import signal
 import subprocess
@@ -11,7 +11,6 @@ import sys
 import tempfile
 import threading
 import time
-import urllib.parse
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -20,61 +19,70 @@ SRC_DIR = Path(__file__).resolve().parent.parent
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from mote.core import (  # noqa: E402
-    LANGUAGE_LABELS,
+from mote.audio import (  # noqa: E402
     LIVE_CHUNK_WORKER_CODE,
-    MODEL_PROFILES,
-    WHISPERX_STAGE_RUNNER_CODE,
+    MACOS_COREAUDIO_RECORD_RUNNER_CODE,
     LiveAudioMonitor,
-    analyze_pcm16_audio_level,
-    build_cli_parser,
+    detect_audio_language,
+    download_media_url_audio,
+    ensure_pregenerated_voiceover,
+    find_wav_data_offset,
+    get_system_input_volume,
+    get_voiceover_script,
+    list_audio_input_devices,
+    open_system_sound_settings,
+    resolve_moved_audio_path,
+    run_live_check_on_file,
+    run_mic_test,
+    set_system_input_volume,
+    start_mic_record_process,
+)
+from mote.constants import (  # noqa: E402
+    LANGUAGE_LABELS,
+    MODEL_PROFILES,
     build_runtime_env,
     build_whisper_initial_prompt,
     clean_base_stem,
-    cli_main,
-    detect_audio_language,
-    detect_hardware_resources,
     detect_text_language,
-    download_media_url_audio,
-    ensure_ffmpeg,
-    ensure_pregenerated_voiceover,
-    evaluate_model_resource_fit,
-    extract_context_from_file,
-    fetch_context_from_url,
-    find_wav_data_offset,
     get_checkpoint_dir,
-    get_checkpoint_status_dict,
-    get_initial_hf_token,
     get_language_display_name,
-    get_system_input_volume,
-    get_voiceover_script,
-    get_whisperx_python,
-    install_steno_app,
-    is_diarization_cached,
     is_media_url,
     is_termux,
     is_transcript_file,
-    list_audio_input_devices,
-    list_resumable_sessions,
     load_user_preferences,
     normalize_audio_language,
-    open_system_sound_settings,
-    pick_live_whisper_model,
-    pick_multilingual_whisper_model,
-    recommend_models_for_language,
-    resolve_moved_audio_path,
     resolve_speaker_bounds,
     resolve_ui_lang,
-    run_live_check_on_file,
-    run_pipeline,
     sanitize_text,
     save_user_preferences,
-    set_system_input_volume,
-    start_mic_record_process,
-    uninstall_steno_app,
     unique_filename,
 )
-from mote.template_loader import load_template  # noqa: E402
+from mote.context import extract_context_from_file, fetch_context_from_url  # noqa: E402
+from mote.core import build_cli_parser, cli_main  # noqa: E402
+from mote.gui_bridge import (  # noqa: F401, E402
+    BrowserWindowBridge,
+    create_browser_gui_server,
+    has_native_webview_backend,
+    inject_browser_bridge,
+    run_browser_gui,
+)
+from mote.hardware import (  # noqa: E402
+    detect_hardware_resources,
+    ensure_ffmpeg,
+    evaluate_model_resource_fit,
+    get_initial_hf_token,
+    install_steno_app,
+    is_diarization_cached,
+    recommend_models_for_language,
+    uninstall_steno_app,
+)
+from mote.pipeline import (  # noqa: E402
+    WHISPERX_STAGE_RUNNER_CODE,
+    get_checkpoint_status_dict,
+    list_resumable_sessions,
+    run_pipeline,
+)
+from mote.template_loader import assemble_app_html, load_template  # noqa: E402
 
 try:
     import webview  # noqa: E402
@@ -85,6 +93,13 @@ except ImportError:
     FileDialog = None  # type: ignore[assignment, misc]
     DOMEventHandler = None  # type: ignore[assignment, misc]
 
+# Keep compatibility imports referenced so linters preserve public re-exports used by GUI scripts
+_GUI_EXPORTS = (
+    find_wav_data_offset,
+    get_voiceover_script,
+    is_media_url,
+)
+
 
 def _get_project_base_dir() -> Path:
     here = Path(__file__).resolve().parent
@@ -94,6 +109,8 @@ def _get_project_base_dir() -> Path:
 
 
 class MoteApi:
+    """pywebview / browser-bridge RPC surface exposed as window.pywebview.api."""
+
     def __init__(self) -> None:
         self.window: Any = None
         self._rec_proc: subprocess.Popen[str] | None = None
@@ -104,6 +121,24 @@ class MoteApi:
         self._active_proc: subprocess.Popen[str] | None = None
         self._cancel_requested: bool = False
         self._log_lines: list[str] = []
+        self._last_waveform_emit: float = 0.0
+
+    def _emit(self, event_type: str, payload: Any) -> None:
+        win = self.window
+        if not win:
+            return
+        if hasattr(win, "emit_event"):
+            win.emit_event(event_type, payload)
+            return
+        try:
+            t_json = json.dumps(event_type, ensure_ascii=False)
+            p_json = json.dumps(payload, ensure_ascii=False)
+            win.evaluate_js(f"window.__stenoDispatchEvent && window.__stenoDispatchEvent({t_json}, {p_json})")
+        except Exception:
+            pass
+
+    def _set_rec_path(self, path: Path) -> None:
+        self._rec_path = path
 
     def shutdown_children(self) -> None:
         """Stop any running background recording, TTS, playback, or WhisperX/Ollama child processes when GUI closes."""
@@ -149,9 +184,7 @@ class MoteApi:
         )
         hw["recommended_whisper"] = rec_whisper
         hw["recommended_ollama"] = rec_ollama
-        fit = evaluate_model_resource_fit(
-            rec_whisper, rec_ollama, hw, language=audio_lang
-        )
+        fit = evaluate_model_resource_fit(rec_whisper, rec_ollama, hw, language=audio_lang)
         return {
             "hf_token": "",
             "hf_token_configured": bool(get_initial_hf_token()),
@@ -163,6 +196,7 @@ class MoteApi:
             "profiles": MODEL_PROFILES,
             "ui_lang": ui_lang,
             "audio_language": audio_lang,
+            "color_scheme": str(prefs.get("color_scheme", "system")),
             "user_prefs": prefs,
             "supported_languages": [
                 {"code": k, "label_no": v[0], "label_en": v[1]}
@@ -179,7 +213,7 @@ class MoteApi:
         }
 
     def save_preferences(self, updates: dict[str, Any]) -> dict[str, Any]:
-        """Persist user preferences (ui_lang, audio_language, per-language models) independent of OS locale."""
+        """Persist user preferences (ui_lang, color_scheme, audio_language, per-language models)."""
         merged = save_user_preferences(updates if isinstance(updates, dict) else {})
         return {"ok": True, "user_prefs": merged}
 
@@ -194,7 +228,11 @@ class MoteApi:
         prefs = load_user_preferences()
         out_dir = Path(out_dir_str) if out_dir_str else None
         hw = detect_hardware_resources(out_dir, language=norm_lang)
-        eff_profile = profile if profile in ("light", "recommended", "heavy") else str(hw.get("recommended_profile", "recommended"))
+        eff_profile = (
+            profile
+            if profile in ("light", "recommended", "heavy")
+            else str(hw.get("recommended_profile", "recommended"))
+        )
         recs = recommend_models_for_language(
             norm_lang,
             profile=eff_profile,
@@ -298,260 +336,70 @@ class MoteApi:
 
     def open_sound_settings(self) -> dict[str, Any]:
         """Open the OS Sound / Microphone input settings pane."""
-        ok = open_system_sound_settings()
-        return {"ok": ok}
+        return {"ok": bool(open_system_sound_settings().get("ok", False))}
 
     def _emit_mic_test_state(self, state: dict[str, Any]) -> None:
-        if self.window:
-            try:
-                payload = json.dumps(state, ensure_ascii=False)
-                self.window.evaluate_js(f"updateMicTestState({payload})")
-            except Exception:
-                pass
+        self._emit("mic_test", state)
+
+    def _on_live_level(self, lvl: dict[str, Any]) -> None:
+        self._emit("live_level", lvl)
+
+    def _on_live_waveform(self, samples: list[float], lvl: dict[str, Any]) -> None:
+        now = time.monotonic()
+        if (now - self._last_waveform_emit) < 0.075:
+            return
+        self._last_waveform_emit = now
+        self._emit("waveform", {"samples": samples, "level": lvl})
+
+    def _on_live_chunk(self, line: str, lvl: dict[str, Any], text: str) -> None:
+        self._log(f"[SANNTIDS-LYDSJEKK] {line}")
+        self._emit("live_chunk", {"line": line, "level": lvl, "text": text})
 
     def test_microphone(
         self,
-        mic_device: str = "default",
+        mic_device: str | dict[str, Any] = "default",
         gain_db: float = 6.0,
         auto_gain: bool = True,
         duration_sec: float = 4.0,
         whisper_model: str = "NbAiLab/nb-whisper-small",
         language: str = "no",
     ) -> dict[str, Any]:
-        """Run a 4s microphone level + live Speech-to-Text (STT) verification in a background thread."""
+        """Run a 4s microphone oscilloscope + level + Speech-to-Text (STT) verification in a background thread."""
         if self._rec_proc and self._rec_proc.poll() is None:
             return {"ok": False, "error": "Opptak pågår allerede."}
 
-        def _test_worker() -> None:
-            env = build_runtime_env()
-            ffmpeg_bin = ensure_ffmpeg(env, self._log)
-            tmp_wav = Path(tempfile.gettempdir()) / "steno_mictest_latest.wav"
-            tmp_wav.unlink(missing_ok=True)
-            dur = max(2.0, min(8.0, float(duration_sec)))
-            norm_lang = normalize_audio_language(language)
-            eff_model = pick_live_whisper_model(whisper_model, language=norm_lang)
-            self._log(
-                f"==> MIKROFON- & STT-TEST ({dur:.0f}s): enhet={mic_device}, boost=+{float(gain_db):.0f} dB"
-                + (" + auto-gain" if auto_gain else "")
-                + f", STT={eff_model} (språk={norm_lang}) — Snakk en kort setning nå..."
+        if isinstance(mic_device, dict):
+            cfg = mic_device
+            eff_dev = str(cfg.get("mic_device", "default"))
+            eff_gain = float(cfg.get("gain_db", gain_db))
+            eff_auto = bool(cfg.get("auto_gain", auto_gain))
+            eff_dur = float(cfg.get("duration_sec", duration_sec))
+            eff_whisper = str(cfg.get("whisper_model", whisper_model))
+            eff_lang = str(cfg.get("language", language))
+        else:
+            eff_dev = mic_device
+            eff_gain = gain_db
+            eff_auto = auto_gain
+            eff_dur = duration_sec
+            eff_whisper = whisper_model
+            eff_lang = language
+
+        def _worker_fn() -> None:
+            run_mic_test(
+                mic_device=eff_dev,
+                gain_db=eff_gain,
+                auto_gain=eff_auto,
+                duration_sec=eff_dur,
+                whisper_model=eff_whisper,
+                language=eff_lang,
+                on_state=self._emit_mic_test_state,
+                on_level=self._on_live_level,
+                on_waveform=self._on_live_waveform,
+                on_audio_ready=self._set_rec_path,
+                log_fn=self._log,
             )
-            self._emit_mic_test_state(
-                {
-                    "phase": "recording",
-                    "duration_sec": dur,
-                    "remaining_sec": dur,
-                    "model": eff_model,
-                }
-            )
-            proc: subprocess.Popen[str] | None = None
-            stt_proc: subprocess.Popen[str] | None = None
-            stt_tmp_dir = tempfile.TemporaryDirectory(prefix="steno_mic_stt_")
-            try:
-                # 1. Start warming up the Whisper STT worker in parallel with recording so STT is instant after 4s
-                wx_bin = shutil.which("whisperx", path=env["PATH"])
-                if wx_bin:
-                    try:
-                        wx_py = get_whisperx_python(wx_bin)
-                        stt_dir_path = Path(stt_tmp_dir.name)
-                        worker_py = stt_dir_path / "live_worker.py"
-                        worker_py.write_text(LIVE_CHUNK_WORKER_CODE, encoding="utf-8")
-                        cfg_path = stt_dir_path / "live_cfg.json"
-                        cfg_path.write_text(
-                            json.dumps(
-                                {
-                                    "model": eff_model,
-                                    "detect_lang_model": pick_multilingual_whisper_model(),
-                                    "language": norm_lang,
-                                    "compute_type": "int8",
-                                    "initial_prompt": "",
-                                },
-                                ensure_ascii=False,
-                            ),
-                            encoding="utf-8",
-                        )
-                        stt_proc = subprocess.Popen(
-                            [wx_py, "-u", str(worker_py), str(cfg_path)],
-                            env=env,
-                            stdin=subprocess.PIPE,
-                            stdout=subprocess.PIPE,
-                            stderr=subprocess.DEVNULL,
-                            text=True,
-                            encoding="utf-8",
-                            errors="replace",
-                            bufsize=1,
-                        )
-                    except Exception:
-                        stt_proc = None
 
-                # 2. Capture 4 seconds of microphone audio
-                proc = start_mic_record_process(
-                    ffmpeg_bin,
-                    tmp_wav,
-                    env=env,
-                    mic_device=mic_device,
-                    gain_db=float(gain_db),
-                    auto_gain=bool(auto_gain),
-                )
-                steps = int(dur / 0.5)
-                for idx in range(max(2, steps)):
-                    time.sleep(0.5)
-                    rem = max(0.0, dur - ((idx + 1) * 0.5))
-                    lvl_now: dict[str, Any] | None = None
-                    if tmp_wav.is_file() and tmp_wav.stat().st_size > 1600:
-                        raw = tmp_wav.read_bytes()
-                        data_off = find_wav_data_offset(raw[:4096])
-                        if len(raw) > data_off:
-                            pcm = raw[max(data_off, len(raw) - 32000) :]
-                            lvl_now = analyze_pcm16_audio_level(pcm)
-                            self._on_live_level(lvl_now)
-                    self._emit_mic_test_state(
-                        {
-                            "phase": "recording",
-                            "duration_sec": dur,
-                            "remaining_sec": rem,
-                            "level": lvl_now,
-                            "model": eff_model,
-                        }
-                    )
-
-                if proc.poll() is None:
-                    try:
-                        if proc.stdin:
-                            proc.stdin.write("q\n")
-                            proc.stdin.flush()
-                        proc.wait(timeout=2)
-                    except Exception:
-                        proc.terminate()
-
-                if tmp_wav.is_file() and tmp_wav.stat().st_size > 128:
-                    self._rec_path = tmp_wav
-                    raw_all = tmp_wav.read_bytes()
-                    data_off = find_wav_data_offset(raw_all[:4096])
-                    pcm_all = raw_all[data_off:]
-                    final_lvl = analyze_pcm16_audio_level(pcm_all)
-                    self._on_live_level(final_lvl)
-                    rms_db = float(final_lvl.get("rms_dbfs", -96.0))
-                    st = str(final_lvl.get("status", "lavt"))
-
-                    self._emit_mic_test_state(
-                        {
-                            "phase": "transcribing",
-                            "level": final_lvl,
-                            "model": eff_model,
-                            "audio_path": str(tmp_wav),
-                        }
-                    )
-
-                    stt_text = ""
-                    detected_lang = ""
-                    detected_prob = 0.0
-                    if stt_proc and stt_proc.stdin and stt_proc.stdout and rms_db > -55.0:
-                        try:
-                            for _ in range(60):
-                                ln = stt_proc.stdout.readline()
-                                if not ln or "LIVE_WORKER:READY" in ln:
-                                    break
-                            req = json.dumps(
-                                {
-                                    "wav_path": str(tmp_wav),
-                                    "start": 0.0,
-                                    "end": dur,
-                                    "detect_language": True,
-                                }
-                            )
-                            stt_proc.stdin.write(req + "\n")
-                            stt_proc.stdin.flush()
-                            while True:
-                                r_line = stt_proc.stdout.readline()
-                                if not r_line:
-                                    break
-                                r_clean = r_line.strip()
-                                if r_clean.startswith("LIVE_RESULT:"):
-                                    payload = json.loads(r_clean[len("LIVE_RESULT:") :])
-                                    stt_text = sanitize_text(str(payload.get("text", "")))
-                                    dl = normalize_audio_language(str(payload.get("detected_language", "")))
-                                    dp = float(payload.get("language_probability", 0.0) or 0.0)
-                                    if dl and dl != "auto":
-                                        detected_lang = dl
-                                        detected_prob = dp
-                                    break
-                        except Exception:
-                            pass
-
-                    if not detected_lang and stt_text:
-                        txt_det = detect_text_language(stt_text)
-                        t_lang = str(txt_det.get("detected_language", ""))
-                        t_prob = float(txt_det.get("confidence", 0.0) or 0.0)
-                        if t_lang and t_prob >= 0.55:
-                            detected_lang = t_lang
-                            detected_prob = t_prob
-
-                    recs = recommend_models_for_language(detected_lang or norm_lang)
-                    self._emit_mic_test_state(
-                        {
-                            "phase": "done",
-                            "ok": True,
-                            "level": final_lvl,
-                            "stt_text": stt_text,
-                            "model": eff_model,
-                            "audio_path": str(tmp_wav),
-                            "detected_language": detected_lang,
-                            "language_probability": round(detected_prob, 3),
-                            "detected_label_no": get_language_display_name(detected_lang, "no") if detected_lang else "",
-                            "detected_label_en": get_language_display_name(detected_lang, "en") if detected_lang else "",
-                            "recommended_whisper": recs["default_whisper"],
-                        }
-                    )
-
-                    stt_summary = f' | STT: «{stt_text}»' if stt_text else " | STT: (ingen tydelig tale oppfattet)"
-                    if st == "stille" or rms_db < -48.0:
-                        self._log(
-                            f"==> MIKROFON-TEST RESULTAT: Svært lavt/stille ({rms_db} dBFS){stt_summary}. "
-                            "Sjekk valgt mikrofon, øk systemvolum til 85–100%, eller velg +12 dB boost."
-                        )
-                    elif st == "lavt" or rms_db < -34.0:
-                        self._log(
-                            f"==> MIKROFON-TEST RESULTAT: Lavt lydnivå ({rms_db} dBFS){stt_summary}. "
-                            "Anbefaling: Sett mikrofon-boost til +12 dB."
-                        )
-                    else:
-                        self._log(
-                            f"==> MIKROFON-TEST RESULTAT: Godt lydnivå ({rms_db} dBFS){stt_summary}. Klar til opptak!"
-                        )
-                else:
-                    self._emit_mic_test_state(
-                        {
-                            "phase": "done",
-                            "ok": False,
-                            "error": "Ingen lyd mottatt fra mikrofonen. Sjekk mikrofontilgang i Systeminnstillinger.",
-                        }
-                    )
-                    self._log(
-                        "==> MIKROFON-TEST FEILET: Ingen lyd mottatt fra mikrofonen. Sjekk mikrofontilgang i Systeminnstillinger."
-                    )
-            except Exception as exc:
-                self._emit_mic_test_state({"phase": "done", "ok": False, "error": str(exc)})
-                self._log(f"==> MIKROFON-TEST FEIL: {exc}")
-            finally:
-                if proc and proc.poll() is None:
-                    try:
-                        proc.kill()
-                    except Exception:
-                        pass
-                if stt_proc and stt_proc.poll() is None:
-                    try:
-                        if stt_proc.stdin:
-                            stt_proc.stdin.write("QUIT\n")
-                            stt_proc.stdin.flush()
-                        stt_proc.wait(timeout=1)
-                    except Exception:
-                        try:
-                            stt_proc.kill()
-                        except Exception:
-                            pass
-                stt_tmp_dir.cleanup()
-
-        threading.Thread(target=_test_worker, daemon=True).start()
+        threading.Thread(target=_worker_fn, daemon=True).start()
         return {"ok": True}
 
     def fetch_context_url(self, url: str) -> dict[str, Any]:
@@ -677,6 +525,7 @@ class MoteApi:
         msg = res["message_en"] if is_en else res["message_no"]
         self._log(f"==> {msg}")
         if self.window:
+
             def _close_later() -> None:
                 time.sleep(0.8)
                 try:
@@ -684,6 +533,7 @@ class MoteApi:
                         self.window.destroy()
                 except Exception:
                     pass
+
             threading.Thread(target=_close_later, daemon=True).start()
         return {"ok": True, "message": msg, **res}
 
@@ -754,21 +604,9 @@ class MoteApi:
                 self._tts_proc = subprocess.Popen(["espeak", "-v", voice, prompt_text])
         return {"ok": True, "playing": True}
 
-    def _on_live_level(self, lvl: dict[str, Any]) -> None:
-        if self.window:
-            payload = json.dumps(lvl, ensure_ascii=False)
-            self.window.evaluate_js(f"updateLiveLevel({payload})")
-
-    def _on_live_chunk(self, line: str, lvl: dict[str, Any], _text: str) -> None:
-        self._log(f"[SANNTIDS-LYDSJEKK] {line}")
-        if self.window:
-            escaped_line = json.dumps(line, ensure_ascii=False)
-            escaped_lvl = json.dumps(lvl, ensure_ascii=False)
-            self.window.evaluate_js(f"appendLiveChunk({escaped_line}, {escaped_lvl})")
-
     def start_recording(
         self,
-        out_dir_str: str,
+        out_dir_str: str | dict[str, Any] = "",
         speak_guide: bool = False,
         live_transcribe: bool = True,
         whisper_model: str = "NbAiLab/nb-whisper-small",
@@ -782,9 +620,27 @@ class MoteApi:
         ui_lang: str = "no",
         note_mode: str = "mote",
     ) -> dict[str, Any]:
-        """Start recording 16kHz mono WAV audio from the selected microphone via ffmpeg + optional gain boost & live ASR check."""
+        """Start recording 16kHz mono WAV audio from the selected microphone via ffmpeg + live oscilloscope & ASR."""
         if self._rec_proc and self._rec_proc.poll() is None:
             return {"ok": False, "error": "Opptak pågår allerede."}
+
+        if isinstance(out_dir_str, dict):
+            cfg = out_dir_str
+            out_dir_val = str(cfg.get("out_dir", ""))
+            speak_guide = bool(cfg.get("speak_guide", False))
+            live_transcribe = bool(cfg.get("live_transcribe", True))
+            whisper_model = str(cfg.get("whisper_model", whisper_model))
+            language = str(cfg.get("language", language))
+            meeting_title = str(cfg.get("meeting_title", meeting_title))
+            speaker_names_hint = str(cfg.get("speaker_names_hint", speaker_names_hint))
+            agenda_text = str(cfg.get("agenda_text", agenda_text))
+            mic_device = str(cfg.get("mic_device", mic_device))
+            gain_db = float(cfg.get("gain_db", gain_db))
+            auto_gain = bool(cfg.get("auto_gain", auto_gain))
+            ui_lang = str(cfg.get("ui_lang", ui_lang))
+            note_mode = str(cfg.get("note_mode", note_mode))
+        else:
+            out_dir_val = out_dir_str
 
         if self._play_proc and self._play_proc.poll() is None:
             try:
@@ -796,7 +652,7 @@ class MoteApi:
         env = build_runtime_env()
         ffmpeg_bin = ensure_ffmpeg(env, self._log)
 
-        out_dir = Path(out_dir_str).resolve() if out_dir_str else (Path.home() / "Downloads")
+        out_dir = Path(out_dir_val).resolve() if out_dir_val else (Path.home() / "Downloads")
         out_dir.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
         rec_file = out_dir / unique_filename(out_dir, f"moteopptak_{stamp}", ".wav")
@@ -832,6 +688,8 @@ class MoteApi:
                     on_level=self._on_live_level,
                     on_chunk=self._on_live_chunk,
                     log_fn=self._log,
+                    on_waveform=self._on_live_waveform,
+                    poll_interval=0.075,
                 )
                 mon.start()
                 self._live_monitor = mon
@@ -912,16 +770,12 @@ class MoteApi:
                 )
                 avg_db = res.get("avg_rms_dbfs", -96.0)
                 st_val = "godt" if res.get("good_chunks", 0) > 0 else "lavt"
-                lvl_payload = json.dumps(
-                    {"status": st_val, "rms_dbfs": avg_db, "label": f"Snitt: {avg_db} dBFS"},
-                    ensure_ascii=False,
-                )
+                lvl_obj = {"status": st_val, "rms_dbfs": avg_db, "label": f"Snitt: {avg_db} dBFS"}
                 for ln in res.get("lines", []):
-                    if self.window:
-                        ln_payload = json.dumps(ln, ensure_ascii=False)
-                        self.window.evaluate_js(f"appendLiveChunk({ln_payload}, {lvl_payload})")
-                if res.get("detected_language") and self.window:
-                    det_payload = json.dumps(
+                    self._emit("live_chunk", {"line": ln, "level": lvl_obj, "text": ""})
+                if res.get("detected_language"):
+                    self._emit(
+                        "language_detected",
                         {
                             "detected_language": res.get("detected_language"),
                             "language_probability": res.get("language_probability", 0.0),
@@ -930,9 +784,7 @@ class MoteApi:
                             "recommended_whisper": res.get("recommended_whisper", ""),
                             "source": "quick_check",
                         },
-                        ensure_ascii=False,
                     )
-                    self.window.evaluate_js(f"onLanguageDetected({det_payload})")
             except Exception as exc:
                 self._log(f"FEIL under lydsjekk: {exc}")
 
@@ -1107,8 +959,7 @@ class MoteApi:
                 pass
             self._play_proc = None
             self._log("==> Avspilling stoppet.")
-            if self.window:
-                self.window.evaluate_js("setAudioPlaybackState(false)")
+            self._emit("playback_state", {"playing": False})
             return {"ok": True, "playing": False}
 
         raw = (audio_path_str or "").strip() or (str(self._rec_path) if self._rec_path else "")
@@ -1155,11 +1006,7 @@ class MoteApi:
                     pass
                 if self._play_proc is p:
                     self._play_proc = None
-                    if self.window:
-                        try:
-                            self.window.evaluate_js("setAudioPlaybackState(false)")
-                        except Exception:
-                            pass
+                    self._emit("playback_state", {"playing": False})
 
             threading.Thread(target=_watch_playback, args=(proc,), daemon=True).start()
             return {"ok": True, "playing": True, "audio_path": str(target)}
@@ -1168,27 +1015,47 @@ class MoteApi:
 
     def start_job(
         self,
-        audio_path: str,
-        out_dir: str,
-        html_name: str,
-        notes_name: str,
-        notes_html_name: str,
-        whisper_model: str,
-        ollama_model: str,
-        language: str,
-        hf_token: str,
-        min_speakers: str,
-        max_speakers: str,
-        speaker_names_hint: str,
-        meeting_title: str,
-        agenda_text: str,
+        audio_path: str | dict[str, Any] = "",
+        out_dir: str = "",
+        html_name: str = "",
+        notes_name: str = "",
+        notes_html_name: str = "",
+        whisper_model: str = "NbAiLab/nb-whisper-small",
+        ollama_model: str = "gemma4:e4b",
+        language: str = "no",
+        hf_token: str = "",
+        min_speakers: str = "",
+        max_speakers: str = "",
+        speaker_names_hint: str = "",
+        meeting_title: str = "",
+        agenda_text: str = "",
         note_mode: str = "auto",
         task_mode: str = "auto_resume",
         manual_notes_text: str = "",
     ) -> None:
-        threading.Thread(
-            target=self._worker,
-            args=(
+        if isinstance(audio_path, dict):
+            cfg = audio_path
+            args_tuple = (
+                str(cfg.get("audio_path", "")),
+                str(cfg.get("out_dir", out_dir)),
+                str(cfg.get("html_name", html_name)),
+                str(cfg.get("notes_name", notes_name)),
+                str(cfg.get("notes_html_name", notes_html_name)),
+                str(cfg.get("whisper_model", whisper_model)),
+                str(cfg.get("ollama_model", ollama_model)),
+                str(cfg.get("language", language)),
+                str(cfg.get("hf_token", hf_token)),
+                str(cfg.get("min_speakers", min_speakers)),
+                str(cfg.get("max_speakers", max_speakers)),
+                str(cfg.get("speaker_names_hint", speaker_names_hint)),
+                str(cfg.get("meeting_title", meeting_title)),
+                str(cfg.get("agenda_text", agenda_text)),
+                str(cfg.get("note_mode", note_mode)),
+                str(cfg.get("task_mode", task_mode)),
+                str(cfg.get("manual_notes_text", manual_notes_text)),
+            )
+        else:
+            args_tuple = (
                 audio_path,
                 out_dir,
                 html_name,
@@ -1206,19 +1073,19 @@ class MoteApi:
                 note_mode,
                 task_mode,
                 manual_notes_text,
-            ),
+            )
+        threading.Thread(
+            target=self._worker,
+            args=args_tuple,
             daemon=True,
         ).start()
 
     def _log(self, msg: str) -> None:
         self._log_lines.append(msg)
-        if self.window:
-            escaped = json.dumps(msg)
-            self.window.evaluate_js(f"appendLog({escaped})")
+        self._emit("log", {"line": msg})
 
     def _refresh_checkpoints_ui(self) -> None:
-        if self.window:
-            self.window.evaluate_js("refreshCheckpointBar()")
+        self._emit("checkpoints_dirty", {})
 
     def _auto_save_error_log(self, out_dir: Path, stem: str) -> None:
         try:
@@ -1236,13 +1103,10 @@ class MoteApi:
             pass
 
     def _set_progress(self, percent: int, label: str) -> None:
-        if self.window:
-            lbl = json.dumps(label)
-            self.window.evaluate_js(f"updateProgress({percent}, {lbl})")
+        self._emit("progress", {"percent": percent, "label": label})
 
     def _set_running(self, running: bool) -> None:
-        if self.window:
-            self.window.evaluate_js(f"setRunning({'true' if running else 'false'})")
+        self._emit("running", {"running": running})
 
     def _set_active_proc(self, proc: subprocess.Popen[str] | None) -> None:
         self._active_proc = proc
@@ -1327,7 +1191,7 @@ class MoteApi:
 
 
 def _load_app_html() -> str:
-    return load_template("app.html")
+    return assemble_app_html()
 
 
 HTML = _load_app_html()
@@ -1344,422 +1208,8 @@ def bind_drag_and_drop(window: Any) -> None:
     window.dom.document.events.drop += DOMEventHandler(on_drop, True, True)
 
 
-def has_native_webview_backend(
-    platform_str: str | None = None,
-    find_spec_fn: Any = None,
-) -> bool:
-    """Return True if a native desktop pywebview backend is available without errors.
-
-    >>> has_native_webview_backend(platform_str="linux", find_spec_fn=lambda _n: None)
-    False
-    """
-    if webview is None:
-        return False
-    plat = platform_str if platform_str is not None else sys.platform
-    if plat == "darwin" or plat.startswith("win") or os.name == "nt":
-        return True
-    if is_termux():
-        return False
-    if plat.startswith("linux") and find_spec_fn is None:
-        if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
-            return False
-    if find_spec_fn is None:
-        import importlib.util
-
-        find_spec_fn = importlib.util.find_spec
-    return bool(find_spec_fn("gi") is not None or find_spec_fn("qtpy") is not None)
-
-
-_BROWSER_BRIDGE_SCRIPT = """<script id="steno-browser-bridge">
-(function() {
-  const STENO_TOKEN = __STENO_BRIDGE_TOKEN__;
-  function pickAndUploadBrowserFile(kind, multiple) {
-    return new Promise((resolve) => {
-      const inp = document.createElement('input');
-      inp.type = 'file';
-      inp.multiple = !!multiple;
-      if (kind === 'audio') {
-        inp.accept = '.wav,.m4a,.opus,.mp3,.ogg,.flac,.aac,.mp4,.webm,.html,.htm,.json,.txt,.md,.srt,.vtt';
-      } else {
-        inp.accept = '.pptx,.pdf,.odp,.docx,.odt,.md,.txt,.html,.json,.csv';
-      }
-      inp.onchange = async () => {
-        if (!inp.files || inp.files.length === 0) {
-          resolve(null);
-          return;
-        }
-        try {
-          if (kind === 'audio') {
-            const f = inp.files[0];
-            const buf = await f.arrayBuffer();
-            const r = await fetch('/api/_upload_file', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/octet-stream',
-                'X-Steno-Token': STENO_TOKEN,
-                'X-Steno-Filename': encodeURIComponent(f.name),
-                'X-Steno-Kind': 'audio'
-              },
-              body: buf
-            });
-            const d = await r.json();
-            resolve(d.ok ? d.result : null);
-          } else {
-            const chunks = [];
-            for (const f of inp.files) {
-              const buf = await f.arrayBuffer();
-              const r = await fetch('/api/_upload_file', {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/octet-stream',
-                  'X-Steno-Token': STENO_TOKEN,
-                  'X-Steno-Filename': encodeURIComponent(f.name),
-                  'X-Steno-Kind': 'context'
-                },
-                body: buf
-              });
-              const d = await r.json();
-              if (d.ok && d.result && d.result.extracted_text) {
-                chunks.push(d.result.extracted_text);
-              }
-            }
-            resolve(chunks.length > 0 ? chunks.join('\\n\\n') : null);
-          }
-        } catch (err) {
-          console.error(err);
-          resolve(null);
-        }
-      };
-      inp.click();
-    });
-  }
-
-  window.pywebview = {
-    api: new Proxy({}, {
-      get: function(_target, prop) {
-        if (prop === 'pick_audio_file') {
-          return () => pickAndUploadBrowserFile('audio', false);
-        }
-        if (prop === 'pick_agenda_file') {
-          return () => pickAndUploadBrowserFile('context', true);
-        }
-        if (prop === 'pick_output_dir') {
-          return async (currentAudioPath) => {
-            const cur = document.getElementById('out_dir') ? document.getElementById('out_dir').value : '';
-            const entered = window.prompt('Output folder path / Mappe for utdatafiler:', cur || '');
-            if (!entered) return null;
-            const r = await fetch('/api/suggest_output_names', {
-              method: 'POST',
-              headers: {'Content-Type': 'application/json', 'X-Steno-Token': STENO_TOKEN},
-              body: JSON.stringify({args: [currentAudioPath || '', entered]})
-            });
-            const d = await r.json();
-            return d.ok ? d.result : {out_dir: entered};
-          };
-        }
-        return async function(...args) {
-          const resp = await fetch('/api/' + String(prop), {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json', 'X-Steno-Token': STENO_TOKEN},
-            body: JSON.stringify({args: args})
-          });
-          const data = await resp.json();
-          if (!data.ok) throw new Error(data.error || 'API call failed');
-          return data.result;
-        };
-      }
-    })
-  };
-
-  setInterval(async () => {
-    try {
-      const r = await fetch('/api/_events', {
-        headers: {'X-Steno-Token': STENO_TOKEN}
-      });
-      const d = await r.json();
-      if (d && Array.isArray(d.events)) {
-        for (const code of d.events) {
-          try { (0, eval)(code); } catch (e) { console.error(e); }
-        }
-      }
-    } catch (_e) {}
-  }, 250);
-
-  window.addEventListener('DOMContentLoaded', () => {
-    document.addEventListener('dragover', (e) => { e.preventDefault(); });
-    document.addEventListener('drop', async (e) => {
-      e.preventDefault();
-      if (!e.dataTransfer || !e.dataTransfer.files || e.dataTransfer.files.length === 0) return;
-      const f = e.dataTransfer.files[0];
-      const buf = await f.arrayBuffer();
-      const r = await fetch('/api/_upload_file', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/octet-stream',
-          'X-Steno-Token': STENO_TOKEN,
-          'X-Steno-Filename': encodeURIComponent(f.name),
-          'X-Steno-Kind': 'drop'
-        },
-        body: buf
-      });
-      const d = await r.json();
-      if (d.ok && d.result && d.result.local_path && typeof handleDroppedAudio === 'function') {
-        handleDroppedAudio(d.result.local_path);
-      }
-    });
-    setTimeout(() => {
-      window.dispatchEvent(new Event('pywebviewready'));
-    }, 50);
-  });
-})();
-</script>"""
-
-
-def inject_browser_bridge(html_content: str, auth_token: str = "") -> str:
-    """Inject the browser pywebview.api bridge script into app.html."""
-    script = _BROWSER_BRIDGE_SCRIPT.replace("__STENO_BRIDGE_TOKEN__", json.dumps(auth_token))
-    if "</head>" in html_content:
-        return html_content.replace("</head>", script + "\n</head>", 1)
-    return script + "\n" + html_content
-
-
-_ALLOWED_LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "[::1]", "::1"})
-
-
-def _extract_hostname_from_host_header(host_header: str) -> str:
-    raw = host_header.strip().lower()
-    if raw.startswith("["):
-        end_idx = raw.find("]")
-        return raw[: end_idx + 1] if end_idx != -1 else raw
-    return raw.split(":", 1)[0]
-
-
-class BrowserWindowBridge:
-    """Window adapter that queues evaluate_js calls and dispatches authenticated HTTP API requests."""
-
-    def __init__(
-        self,
-        api: MoteApi | None = None,
-        html_content: str = "",
-        auth_token: str | None = None,
-    ) -> None:
-        self._lock = threading.Lock()
-        self._js_queue: list[str] = []
-        self.server: Any = None
-        self.api = api
-        self.auth_token: str = auth_token or secrets.token_urlsafe(32)
-        self.bridged_html_bytes = (
-            inject_browser_bridge(html_content, auth_token=self.auth_token).encode("utf-8")
-            if html_content
-            else b""
-        )
-        self.upload_dir = Path(tempfile.gettempdir()) / "steno_browser_uploads"
-
-    def evaluate_js(self, code: str) -> None:
-        with self._lock:
-            self._js_queue.append(code)
-
-    def drain_js_queue(self) -> list[str]:
-        with self._lock:
-            items = list(self._js_queue)
-            self._js_queue.clear()
-            return items
-
-    def create_file_dialog(self, *_args: Any, **_kwargs: Any) -> Any:
-        return None
-
-    def destroy(self) -> None:
-        srv = self.server
-        if srv is not None:
-            threading.Thread(target=srv.shutdown, daemon=True).start()
-
-    def handle_http_request(
-        self,
-        method: str,
-        path: str,
-        headers: dict[str, str] | None = None,
-        body: bytes = b"",
-    ) -> tuple[int, str, bytes]:
-        """Process a GET or POST request for the browser GUI bridge and return (status, content_type, body_bytes)."""
-        hdrs = {k.lower(): v for k, v in (headers or {}).items()}
-        if "host" in hdrs:
-            host_only = _extract_hostname_from_host_header(hdrs["host"])
-            if host_only not in _ALLOWED_LOCAL_HOSTS:
-                return 403, "application/json; charset=utf-8", b'{"ok": false, "error": "Forbidden host"}'
-        if "origin" in hdrs:
-            origin_host = (urllib.parse.urlparse(hdrs["origin"]).hostname or "").lower()
-            if origin_host not in {"127.0.0.1", "localhost", "::1"}:
-                return 403, "application/json; charset=utf-8", b'{"ok": false, "error": "Forbidden origin"}'
-
-        api = self.api
-        req_path = path.split("?", 1)[0]
-        if req_path.startswith("/api/"):
-            supplied_tok = hdrs.get("x-steno-token", "")
-            if not supplied_tok or not secrets.compare_digest(supplied_tok, self.auth_token):
-                return (
-                    403,
-                    "application/json; charset=utf-8",
-                    b'{"ok": false, "error": "Unauthorized bridge token"}',
-                )
-
-        if method.upper() == "GET":
-            if req_path in ("/", "/index.html"):
-                return 200, "text/html; charset=utf-8", self.bridged_html_bytes
-            if req_path == "/api/_events":
-                raw = json.dumps({"ok": True, "events": self.drain_js_queue()}, ensure_ascii=False).encode("utf-8")
-                return 200, "application/json; charset=utf-8", raw
-            return 404, "text/plain; charset=utf-8", b"Not Found"
-
-        if method.upper() == "POST" and api is not None:
-            if req_path == "/api/_upload_file":
-                raw_name = urllib.parse.unquote(hdrs.get("x-steno-filename", "uploaded_file.wav"))
-                safe_name = Path(raw_name).name or "uploaded_file.wav"
-                kind = hdrs.get("x-steno-kind", "audio")
-                out_dir = self.upload_dir
-                out_dir.mkdir(parents=True, exist_ok=True)
-                dest_path = out_dir / safe_name
-                dest_path.write_bytes(body)
-                if kind == "context":
-                    extracted = extract_context_from_file(dest_path)
-                    api._log(f"==> Lastet inn kontekst fra {dest_path.name} ({len(extracted)} tegn)")
-                    payload: dict[str, Any] = {
-                        "ok": True,
-                        "result": {"local_path": str(dest_path), "extracted_text": extracted},
-                    }
-                else:
-                    suggestion = api.suggest_output_names(str(dest_path), str(out_dir))
-                    suggestion["local_path"] = str(dest_path)
-                    payload = {"ok": True, "result": suggestion}
-                return 200, "application/json; charset=utf-8", json.dumps(payload, ensure_ascii=False).encode("utf-8")
-
-            if req_path.startswith("/api/"):
-                ctype_hdr = hdrs.get("content-type", "").lower()
-                if not ctype_hdr.startswith("application/json"):
-                    return (
-                        415,
-                        "application/json; charset=utf-8",
-                        b'{"ok": false, "error": "Unsupported Content-Type"}',
-                    )
-                method_name = req_path[len("/api/") :].strip()
-                if method_name.startswith("_") or not hasattr(api, method_name):
-                    err_raw = json.dumps(
-                        {"ok": False, "error": f"Unknown API method: {method_name}"}, ensure_ascii=False
-                    ).encode("utf-8")
-                    return 404, "application/json; charset=utf-8", err_raw
-                try:
-                    data = json.loads(body.decode("utf-8")) if body else {}
-                    args = data.get("args", [])
-                    fn = getattr(api, method_name)
-                    result = fn(*args)
-                    ok_raw = json.dumps({"ok": True, "result": result}, ensure_ascii=False).encode("utf-8")
-                    return 200, "application/json; charset=utf-8", ok_raw
-                except Exception as exc:
-                    exc_raw = json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False).encode("utf-8")
-                    return 500, "application/json; charset=utf-8", exc_raw
-
-        return 404, "text/plain; charset=utf-8", b"Not Found"
-
-
-def create_browser_gui_server(
-    api: MoteApi,
-    html_content: str,
-    port: int | None = None,
-) -> tuple[Any, BrowserWindowBridge, str]:
-    """Create a local 127.0.0.1 HTTP server that serves the Steno GUI in any web browser."""
-    import http.server
-
-    bridge = BrowserWindowBridge(api=api, html_content=html_content)
-    api.window = bridge
-
-    class StenoBrowserHandler(http.server.BaseHTTPRequestHandler):
-        def log_message(self, _format: str, *_args: Any) -> None:
-            return
-
-        def _dispatch(self, method: str) -> None:
-            max_len = 512 * 1024 * 1024 if self.path.split("?", 1)[0] == "/api/_upload_file" else 10 * 1024 * 1024
-            try:
-                length = int(self.headers.get("Content-Length", "0") or "0") if method == "POST" else 0
-            except ValueError:
-                length = 0
-            if length < 0 or length > max_len:
-                err_b = b'{"ok": false, "error": "Payload Too Large"}'
-                self.send_response(413)
-                self.send_header("Content-Type", "application/json; charset=utf-8")
-                self.send_header("Content-Length", str(len(err_b)))
-                self.end_headers()
-                self.wfile.write(err_b)
-                return
-            body = self.rfile.read(length) if length > 0 else b""
-            hdr_dict = {k: v for k, v in self.headers.items()}
-            status, ctype, resp_bytes = bridge.handle_http_request(method, self.path, hdr_dict, body)
-            self.send_response(status)
-            self.send_header("Content-Type", ctype)
-            self.send_header("Content-Length", str(len(resp_bytes)))
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-            self.wfile.write(resp_bytes)
-
-        def do_GET(self) -> None:  # noqa: N802
-            self._dispatch("GET")
-
-        def do_POST(self) -> None:  # noqa: N802
-            self._dispatch("POST")
-
-    candidate_ports = [port] if port is not None else [8080, 8000, 8888, 3000, 5000, 0]
-    srv: Any = None
-    for p in candidate_ports:
-        try:
-            srv = http.server.ThreadingHTTPServer(("127.0.0.1", int(p)), StenoBrowserHandler)
-            break
-        except OSError:
-            continue
-
-    bridge.server = srv
-    actual_port = srv.server_address[1] if srv is not None else 8080
-    url = f"http://127.0.0.1:{actual_port}"
-    return srv, bridge, url
-
-
-def run_browser_gui(api: MoteApi, html_content: str) -> None:
-    """Start the local browser GUI server and open it in the default system/ChromeOS browser."""
-    import webbrowser
-
-    srv, _bridge, url = create_browser_gui_server(api, html_content, port=None)
-    print(
-        f"==> Starting Steno Web UI (ChromeOS / Linux browser mode): {url}\n"
-        f"    Open {url} in your browser if it does not open automatically. Press Ctrl+C to quit.",
-        flush=True,
-    )
-    opened = False
-    for opener in ("garcon-url-handler", "termux-open-url", "xdg-open"):
-        if shutil.which(opener):
-            try:
-                subprocess.Popen(
-                    [opener, url],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
-                opened = True
-                break
-            except Exception:
-                pass
-    if not opened:
-        try:
-            webbrowser.open(url)
-        except Exception:
-            pass
-
-    try:
-        srv.serve_forever()
-    except KeyboardInterrupt:
-        print("\n==> Shutting down Steno Web UI...", flush=True)
-    finally:
-        api.shutdown_children()
-        srv.server_close()
-
-
 def build_native_app_menu(window: Any, ui_lang: str = "no") -> list[Any] | None:
-    """Build native OS menu bar (macOS / desktop pywebview) for File & Session actions."""
+    """Build native OS menu bar (macOS / desktop pywebview) for File, Session, and Mode actions."""
     try:
         from webview.menu import Menu, MenuAction, MenuSeparator  # type: ignore[import-not-found]
     except Exception:
@@ -1772,11 +1222,11 @@ def build_native_app_menu(window: Any, ui_lang: str = "no") -> list[Any] | None:
             [
                 MenuAction(
                     "Open Audio File / Resume Session..." if is_en else "Åpne lydfil / Gjenoppta økt...",
-                    lambda: window.evaluate_js("setUxIntent('file'); browseAudio()"),
+                    lambda: window.evaluate_js("selectModeTab('transcribe'); browseAudio()"),
                 ),
                 MenuAction(
                     "Fetch from Stream / URL..." if is_en else "Hent fra strøm / nettadresse (URL)...",
-                    lambda: window.evaluate_js("setUxIntent('stream'); promptAudioUrl()"),
+                    lambda: window.evaluate_js("selectModeTab('transcribe'); promptAudioUrl()"),
                 ),
                 MenuSeparator(),
                 MenuAction(
@@ -1815,20 +1265,16 @@ def build_native_app_menu(window: Any, ui_lang: str = "no") -> list[Any] | None:
                 ),
                 MenuSeparator(),
                 MenuAction(
-                    "01 Setup & Source" if is_en else "01 Oppsett & Kilde",
-                    lambda: window.evaluate_js("setUxStep('1_source')"),
+                    "Record" if is_en else "Ta opp",
+                    lambda: window.evaluate_js("selectModeTab('record')"),
                 ),
                 MenuAction(
-                    "02 Audio Studio" if is_en else "02 Lydstudio",
-                    lambda: window.evaluate_js("setUxStep('2_audio')"),
+                    "Transcribe & Notes" if is_en else "Transkriber & Referat",
+                    lambda: window.evaluate_js("selectModeTab('transcribe')"),
                 ),
                 MenuAction(
-                    "03 Context & Agenda" if is_en else "03 Kontekst & Agenda",
-                    lambda: window.evaluate_js("setUxStep('2_context')"),
-                ),
-                MenuAction(
-                    "04 Pipeline & Run" if is_en else "04 Pipeline & Kjør",
-                    lambda: window.evaluate_js("setUxStep('3_run')"),
+                    "Settings" if is_en else "Innstillinger",
+                    lambda: window.evaluate_js("selectModeTab('settings')"),
                 ),
             ],
         ),
@@ -1848,9 +1294,9 @@ def main() -> None:
         "Steno — A modern annalist for your meetings — an automaton stenographer",
         html=HTML,
         js_api=api,
-        width=1200,
-        height=800,
-        min_size=(960, 660),
+        width=1080,
+        height=760,
+        min_size=(840, 620),
     )
     api.window = window
     try:
@@ -1875,8 +1321,10 @@ def main() -> None:
 
 
 def run_self_test() -> int:
-    """Verify embedded stage runner script, HTML templates, and MoteApi without opening a blocking GUI window."""
-    compile(WHISPERX_STAGE_RUNNER_CODE, "wx_stage_runner.py", "exec")
+    """Verify extracted runner scripts, HTML templates, and MoteApi without opening a blocking GUI window."""
+    compile(MACOS_COREAUDIO_RECORD_RUNNER_CODE, "macos_coreaudio_record.py", "exec")
+    compile(WHISPERX_STAGE_RUNNER_CODE, "whisperx_stage_runner.py", "exec")
+    compile(LIVE_CHUNK_WORKER_CODE, "live_chunk_worker.py", "exec")
     ns: dict[str, object] = {}
     header_lines = []
     for line in WHISPERX_STAGE_RUNNER_CODE.splitlines():
@@ -1885,7 +1333,8 @@ def run_self_test() -> int:
         header_lines.append(line)
     exec("\n".join(header_lines), ns)
     assert "sys" in ns and "Path" in ns, "Stage runner missing sys or Path"
-    assert "<html" in HTML.lower(), "App HTML template failed to load"
+    app_html = _load_app_html()
+    assert "<html" in app_html.lower(), "App HTML template failed to load"
     assert "<html" in load_template("transcript.html").lower(), "Transcript HTML template failed to load"
     assert "<html" in load_template("notes.html").lower(), "Notes HTML template failed to load"
     api = MoteApi()

@@ -3,4 +3,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-exec python3 run_verification_and_data.py "$@"
+make lint
+make typecheck
+make doctest
+make test
+bash scripts/test_standalone.sh "$@"

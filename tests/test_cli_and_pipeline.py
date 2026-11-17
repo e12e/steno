@@ -8,6 +8,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import shlex
 import shutil
 import struct
@@ -167,6 +168,22 @@ class TestGherkinBDDScenarios(unittest.TestCase):
                 self.assertIn('id="context_notes_drawer"', app_html)
                 self.assertIn('id="settings_summary_pill"', app_html)
                 self.assertIn("updateSettingsSummary()", app_html)
+            elif step == "And a 3-tab utilitarian layout with a dual-mode vintage oscilloscope is used":
+                app_html = str(ctx["app_html"])
+                for tab_id in (
+                    "tab_record",
+                    "tab_transcribe",
+                    "tab_settings",
+                    "panel_record",
+                    "panel_transcribe",
+                    "panel_settings",
+                    "scope_canvas",
+                    "color_scheme_select",
+                ):
+                    self.assertIn(f'id="{tab_id}"', app_html, f"Missing id='{tab_id}' in app.html")
+                self.assertIn("#efe7d5", app_html)
+                self.assertIn("#08120c", app_html)
+                self.assertIn("#6ee7b7", app_html)
             elif step == "And all required pywebview DOM element IDs are preserved":
                 app_html = str(ctx["app_html"])
                 required_ids = [
@@ -855,7 +872,6 @@ class TestAARImprovements(unittest.TestCase):
         )
 
     def test_native_app_menu_evaluate_js_functions_exist_in_html(self) -> None:
-        import re
         import types
 
         class _FakeMenu:
@@ -1217,6 +1233,123 @@ class TestLanguageDetectionAndPreferences(unittest.TestCase):
         self.assertIn("function setAudioLanguage(", html)
         self.assertIn("function onLanguageDetected(", html)
         self.assertIn("function confirmDetectedLanguageChange(", html)
+
+
+class TestModularArchitectureAndUtilitarianUX(unittest.TestCase):
+    def test_modular_code_layout_and_runners_compile(self) -> None:
+        root_dir = Path(__file__).resolve().parent.parent
+        src_mote = root_dir / "src" / "mote"
+        core_lines = (src_mote / "core.py").read_text(encoding="utf-8").splitlines()
+        gui_lines = (src_mote / "gui.py").read_text(encoding="utf-8").splitlines()
+        self.assertLess(len(core_lines), 800, f"core.py should stay compact (<800L), got {len(core_lines)}")
+        self.assertLess(len(gui_lines), 1500, f"gui.py should stay compact (<1500L), got {len(gui_lines)}")
+
+        runners_dir = src_mote / "runners"
+        for runner_name in (
+            "macos_coreaudio_record.py",
+            "whisperx_stage_runner.py",
+            "live_chunk_worker.py",
+        ):
+            runner_path = runners_dir / runner_name
+            self.assertTrue(runner_path.is_file(), f"Missing runner script {runner_path}")
+            compile(runner_path.read_text(encoding="utf-8"), runner_name, "exec")
+
+        tpl_dir = src_mote / "templates"
+        self.assertTrue((tpl_dir / "app.css").is_file(), "app.css missing")
+        self.assertTrue((tpl_dir / "app.js").is_file(), "app.js missing")
+        assembled = mote_gui._load_app_html()
+        self.assertNotIn("/* __STENO_APP_CSS__ */", assembled)
+        self.assertNotIn("/* __STENO_APP_JS__ */", assembled)
+
+    def test_waveform_downsampling_and_live_monitor_emission(self) -> None:
+        self.assertEqual(mote_core.downsample_pcm16_waveform(b"", bins=8), [0.0] * 8)
+        self.assertEqual(mote_core.downsample_pcm16_waveform(b"\x01", bins=4), [0.0] * 4)
+        pcm = struct.pack("<hhhh", 16384, -16384, 8192, -32768)
+        down = mote_core.downsample_pcm16_waveform(pcm, bins=4)
+        self.assertEqual(len(down), 4)
+        self.assertAlmostEqual(down[0], 16384 / 32768.0, places=3)
+        self.assertAlmostEqual(down[1], -16384 / 32768.0, places=3)
+        self.assertAlmostEqual(down[3], -1.0, places=3)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            wav_path = Path(tmp) / "wave.wav"
+            samples = struct.pack("<" + "h" * 1600, *([4000, -4000] * 800))
+            wav_path.write_bytes(mote_core.build_wav_bytes_from_pcm16(samples, 16000))
+            captured: list[list[float]] = []
+            mon = mote_core.LiveAudioMonitor(
+                wav_path=wav_path,
+                chunk_seconds=5.0,
+                enable_asr=False,
+                on_waveform=lambda pts, _lvl: captured.append(pts),
+                poll_interval=0.05,
+            )
+            mon.start()
+            try:
+                for _ in range(20):
+                    if captured:
+                        break
+                    time.sleep(0.05)
+            finally:
+                mon.stop()
+            self.assertGreaterEqual(len(captured), 1)
+            self.assertEqual(len(captured[0]), 72)
+
+    def test_root_steno_bootstrap_parity(self) -> None:
+        root_py = (Path(__file__).resolve().parent.parent / "steno.py").read_text(encoding="utf-8")
+        self.assertIn("--install", root_py)
+        self.assertIn("--uninstall", root_py)
+        self.assertIn("STENO_TERMUX", root_py)
+        self.assertIn("static-ffmpeg>=2.7; sys_platform == 'darwin'", root_py)
+        self.assertIn("platform_machine == 'AMD64'", root_py)
+
+    def test_browser_bridge_zero_eval_and_ui_events(self) -> None:
+        from mote import gui_bridge
+
+        self.assertNotIn("eval(", gui_bridge._BROWSER_BRIDGE_SCRIPT)
+        assembled = mote_gui._load_app_html()
+        self.assertNotIn("eval(", assembled)
+
+        api = mote_gui.MoteApi()
+        srv, bridge, _url = gui_bridge.create_browser_gui_server(api, assembled, port=0)
+        if srv is not None:
+            srv.server_close()
+        bridge.emit_event("waveform", {"samples": [0.1, -0.2], "level": {"rms_dbfs": -20.0}})
+        status, _ctype, body = bridge.handle_http_request(
+            "GET",
+            "/api/_events",
+            {"X-Steno-Token": bridge.auth_token},
+        )
+        self.assertEqual(status, 200)
+        payload = json.loads(body.decode("utf-8"))
+        self.assertIn("ui_events", payload)
+        self.assertEqual(payload["ui_events"][0]["type"], "waveform")
+        self.assertEqual(payload["ui_events"][0]["payload"]["samples"], [0.1, -0.2])
+
+    def test_utilitarian_tabs_oscilloscope_palettes_dialog_and_i18n(self) -> None:
+        root_dir = Path(__file__).resolve().parent.parent
+        css_text = (root_dir / "src" / "mote" / "templates" / "app.css").read_text(encoding="utf-8")
+        js_text = (root_dir / "src" / "mote" / "templates" / "app.js").read_text(encoding="utf-8")
+        html_text = mote_gui._load_app_html()
+
+        self.assertIn("#efe7d5", css_text)
+        self.assertIn("#08120c", css_text)
+        self.assertIn("#6ee7b7", js_text)
+        self.assertIn('id="uninstall_modal"', html_text)
+        self.assertIn("<dialog id=\"uninstall_modal\"", html_text)
+        dlg_tag = re.search(r'<dialog[^>]*id="uninstall_modal"[^>]*>', html_text)
+        self.assertIsNotNone(dlg_tag)
+        assert dlg_tag is not None
+        self.assertNotIn('role="dialog"', dlg_tag.group(0))
+        self.assertNotIn("aria-modal", dlg_tag.group(0))
+        self.assertIn('hidden="until-found"', html_text)
+
+        no_block = js_text.split("no: {", 1)[1].split("  en: {", 1)[0]
+        en_block = js_text.split("  en: {", 1)[1].split("function t(key)", 1)[0]
+        i18n_keys = set(re.findall(r'data-i18n(?:-placeholder)?="([^"]+)"', html_text))
+        self.assertGreater(len(i18n_keys), 20)
+        for key in i18n_keys:
+            self.assertIn(f"{key}:", no_block, f"Missing Norwegian translation key: {key}")
+            self.assertIn(f"{key}:", en_block, f"Missing English translation key: {key}")
 
 
 class TestSyntheticE2E(unittest.TestCase):

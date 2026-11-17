@@ -34,6 +34,7 @@ Feature: Idiomatic CLI Argument Parsing, Unified Entrypoint Dispatch, and Pipeli
     Given the desktop GUI template app.html is loaded
     When inspecting the app.html layout structure
     Then advanced settings and context textareas are placed in collapsible details drawers with a live summary pill
+    And a 3-tab utilitarian layout with a dual-mode vintage oscilloscope is used
     And all required pywebview DOM element IDs are preserved
 
   Scenario: CLI parser and desktop GUI support English and Norwegian localization

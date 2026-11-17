@@ -1,16 +1,16 @@
 .PHONY: test doctest lint typecheck check test-e2e build hooks clean
 
 doctest:
-	PYTHONPATH=src python3 -m doctest -v src/mote/core.py src/mote/cli.py
+	PYTHONPATH=src python3 -m doctest -v src/mote/constants.py src/mote/context.py src/mote/hardware.py src/mote/render.py src/mote/audio.py src/mote/pipeline.py src/mote/core.py src/mote/cli.py src/mote/gui_bridge.py src/mote/gui.py
 
 test:
 	PYTHONPATH=src python3 tests/test_cli_and_pipeline.py -v
 
 lint:
-	uvx ruff check src/ scripts/ tests/ transcribe.py steno.py run_verification_and_data.py
+	uvx ruff check src/ scripts/ tests/ transcribe.py steno.py
 
 typecheck:
-	uvx mypy --ignore-missing-imports src/mote/core.py src/mote/cli.py src/mote/gui.py src/mote/template_loader.py scripts/build_single_file.py transcribe.py steno.py tests/test_cli_and_pipeline.py
+	uvx mypy --ignore-missing-imports src/mote/ scripts/build_single_file.py transcribe.py steno.py tests/test_cli_and_pipeline.py
 
 check:
 	./scripts/run_checks.sh

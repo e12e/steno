@@ -11,12 +11,13 @@ from __future__ import annotations
 import ast
 import base64
 import hashlib
-import re
 import struct
+import sys
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
-SRC_DIR = ROOT_DIR / "src" / "mote"
+SRC_ROOT = ROOT_DIR / "src"
+SRC_DIR = SRC_ROOT / "mote"
 DIST_DIR = ROOT_DIR / "dist"
 DIST_FILE = DIST_DIR / "steno.py"
 DIST_COM_FILE = DIST_DIR / "steno.com"
@@ -135,42 +136,99 @@ _self_bootstrap_if_needed()
 '''
 
 
+MODULE_ORDER: tuple[str, ...] = (
+    "constants.py",
+    "context.py",
+    "hardware.py",
+    "render.py",
+    "audio.py",
+    "pipeline.py",
+    "core.py",
+    "gui_bridge.py",
+    "gui.py",
+)
+
+RUNNER_NAMES: tuple[str, ...] = (
+    "macos_coreaudio_record.py",
+    "whisperx_stage_runner.py",
+    "live_chunk_worker.py",
+)
+
+
+def _strip_module_for_bundle(code: str, *, is_last: bool) -> str:
+    """Remove package-internal imports and entry-guard boilerplate for single-file bundling."""
+    lines = code.splitlines(keepends=True)
+    tree = ast.parse(code)
+    skip_ranges: list[tuple[int, int]] = []
+    for node in tree.body:
+        end_ln = node.end_lineno if node.end_lineno is not None else node.lineno
+        if isinstance(node, ast.ImportFrom) and (
+            node.module == "__future__"
+            or (node.module is not None and (node.module == "mote" or node.module.startswith("mote.")))
+        ):
+            skip_ranges.append((node.lineno - 1, end_ln))
+        elif isinstance(node, ast.Import) and any(
+            alias.name == "mote" or alias.name.startswith("mote.") for alias in node.names
+        ):
+            skip_ranges.append((node.lineno - 1, end_ln))
+        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+            src_seg = "".join(lines[node.lineno - 1 : end_ln])
+            if src_seg.startswith("SRC_DIR =") or src_seg.startswith("__test__"):
+                skip_ranges.append((node.lineno - 1, end_ln))
+        elif isinstance(node, ast.For):
+            src_seg = "".join(lines[node.lineno - 1 : end_ln])
+            if "_submod" in src_seg and "__test__" in src_seg:
+                skip_ranges.append((node.lineno - 1, end_ln))
+        elif isinstance(node, ast.If):
+            src_seg = "".join(lines[node.lineno - 1 : end_ln])
+            if "str(SRC_DIR) not in sys.path" in src_seg or (not is_last and "__name__" in src_seg):
+                skip_ranges.append((node.lineno - 1, end_ln))
+
+    keep: list[str] = []
+    cursor = 0
+    for start, end in sorted(skip_ranges):
+        if start > cursor:
+            keep.extend(lines[cursor:start])
+        cursor = max(cursor, end)
+    keep.extend(lines[cursor:])
+    return "".join(keep)
+
+
 def generate_single_file_content() -> str:
     """Assemble and AST-validate the single-file distribution content in memory."""
-    tpl_app = (SRC_DIR / "templates" / "app.html").read_text(encoding="utf-8")
+    if str(SRC_ROOT) not in sys.path:
+        sys.path.insert(0, str(SRC_ROOT))
+    from mote.template_loader import assemble_app_html
+
+    tpl_app = assemble_app_html()
+    tpl_css = (SRC_DIR / "templates" / "app.css").read_text(encoding="utf-8")
+    tpl_js = (SRC_DIR / "templates" / "app.js").read_text(encoding="utf-8")
     tpl_transcript = (SRC_DIR / "templates" / "transcript.html").read_text(encoding="utf-8")
     tpl_notes = (SRC_DIR / "templates" / "notes.html").read_text(encoding="utf-8")
     tpl_vo_no = (SRC_DIR / "templates" / "voiceover_no.b64").read_text(encoding="utf-8")
     tpl_vo_en = (SRC_DIR / "templates" / "voiceover_en.b64").read_text(encoding="utf-8")
 
-    core_code = (SRC_DIR / "core.py").read_text(encoding="utf-8")
-    gui_code = (SRC_DIR / "gui.py").read_text(encoding="utf-8")
-
-    core_clean = re.sub(r"from __future__ import annotations\s*", "", core_code)
-    core_clean = re.sub(r"from mote\.template_loader import load_template\s*", "", core_clean)
-    core_clean = re.sub(r"from mote\..*?\n", "", core_clean)
-
-    gui_clean = re.sub(r"from __future__ import annotations\s*", "", gui_code)
-    gui_clean = re.sub(
-        r"SRC_DIR = Path\(__file__\)\.resolve\(\)\.parent\.parent\nif str\(SRC_DIR\) not in sys\.path:\n\s+sys\.path\.insert\(0, str\(SRC_DIR\)\)\n",
-        "",
-        gui_clean,
-    )
-    gui_clean = re.sub(r"from mote\.core import \([\s\S]*?\)\n", "", gui_clean)
-    gui_clean = re.sub(r"from mote\..*?\n", "", gui_clean)
+    embedded_runners = {
+        name: (SRC_DIR / "runners" / name).read_text(encoding="utf-8")
+        for name in RUNNER_NAMES
+    }
 
     bundle_parts = [
         POLYGLOT_HEADER,
         BOOTSTRAP_CODE,
         f"""
-# --- EMBEDDED TEMPLATES ---
+# --- EMBEDDED TEMPLATES & RUNNERS ---
 _EMBEDDED_TEMPLATES: dict[str, str] = {{
     "app.html": {tpl_app!r},
+    "app.css": {tpl_css!r},
+    "app.js": {tpl_js!r},
     "transcript.html": {tpl_transcript!r},
     "notes.html": {tpl_notes!r},
     "voiceover_no.b64": {tpl_vo_no!r},
     "voiceover_en.b64": {tpl_vo_en!r},
 }}
+
+_EMBEDDED_RUNNERS: dict[str, str] = {embedded_runners!r}
 
 
 def load_template(name: str, fallback: str = "") -> str:
@@ -181,12 +239,33 @@ def load_template(name: str, fallback: str = "") -> str:
         except Exception:
             pass
     return _EMBEDDED_TEMPLATES.get(name, fallback)
+
+
+def load_runner(name: str, fallback: str = "") -> str:
+    runner_file = Path(__file__).resolve().parent / "runners" / name
+    if runner_file.is_file():
+        try:
+            return runner_file.read_text(encoding="utf-8")
+        except Exception:
+            pass
+    return _EMBEDDED_RUNNERS.get(name, fallback)
+
+
+def assemble_app_html(fallback: str = "") -> str:
+    raw = load_template("app.html", fallback)
+    if "/* __STENO_APP_CSS__ */" in raw:
+        raw = raw.replace("/* __STENO_APP_CSS__ */", load_template("app.css", ""), 1)
+    if "/* __STENO_APP_JS__ */" in raw:
+        raw = raw.replace("/* __STENO_APP_JS__ */", load_template("app.js", ""), 1)
+    return raw
 """,
-        "\n# --- CORE ENGINE ---\n",
-        core_clean,
-        "\n# --- DESKTOP GUI & ENGINE ---\n",
-        gui_clean,
     ]
+
+    for idx, mod_name in enumerate(MODULE_ORDER):
+        mod_code = (SRC_DIR / mod_name).read_text(encoding="utf-8")
+        cleaned = _strip_module_for_bundle(mod_code, is_last=(idx == len(MODULE_ORDER) - 1))
+        bundle_parts.append(f"\n# --- MODULE: {mod_name} ---\n")
+        bundle_parts.append(cleaned)
 
     out_content = "".join(bundle_parts)
     ast.parse(out_content, filename=str(DIST_FILE))
