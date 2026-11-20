@@ -38,7 +38,11 @@ from mote.constants import (
     sanitize_text,
     unique_filename,
 )
-from mote.context import extract_context_from_file, load_turns_from_transcript_file
+from mote.context import (
+    _resolve_url_validator,
+    extract_context_from_file,
+    load_turns_from_transcript_file,
+)
 from mote.hardware import (
     detect_hardware_resources,
     ensure_ffmpeg,
@@ -239,9 +243,17 @@ def build_media_url_ffmpeg_cmd(
     >>> "-vn" in cmd and "-ac" in cmd and "16000" in cmd and "-t" in cmd
     True
     """
+    clean_url = str(url).strip()
+    parsed = urllib.parse.urlparse(clean_url)
+    proto_args = (
+        ["-protocol_whitelist", "http,https,tcp,tls,crypto"]
+        if parsed.scheme.lower() in ("http", "https")
+        else []
+    )
     cmd = [
         ffmpeg_bin,
         "-y",
+        *proto_args,
         "-rw_timeout",
         "15000000",
         "-reconnect",
@@ -253,7 +265,7 @@ def build_media_url_ffmpeg_cmd(
         "-user_agent",
         "Mozilla/5.0 (compatible; Steno/1.0)",
         "-i",
-        str(url).strip(),
+        clean_url,
         "-vn",
         "-ac",
         "1",
@@ -279,10 +291,14 @@ def download_media_url_audio(
 ) -> Path:
     """Download or stream media from a URL and extract 16kHz mono 16-bit PCM WAV audio via ffmpeg."""
     clean_url = str(url).strip()
+    parsed = urllib.parse.urlparse(clean_url)
+    is_http = parsed.scheme.lower() in ("http", "https")
+    if is_http:
+        _resolve_url_validator()(clean_url)
+
     target_dir = Path(out_dir).resolve() if out_dir is not None else Path.cwd().resolve()
     target_dir.mkdir(parents=True, exist_ok=True)
 
-    parsed = urllib.parse.urlparse(clean_url)
     path_name = Path(parsed.path).name
     stem = clean_base_stem(Path(path_name)) if path_name else ""
     if not stem or stem.startswith("?") or len(stem) < 2:
@@ -327,9 +343,11 @@ def download_media_url_audio(
             f"Tidsavbrudd ved nedlasting av lydstrøm ({eff_timeout}s) fra {clean_url}"
         ) from exc
     if proc.returncode != 0 and not out_wav.is_file():
+        proto_args = ["-protocol_whitelist", "http,https,tcp,tls,crypto"] if is_http else []
         cmd_simple = [
             f_bin,
             "-y",
+            *proto_args,
             "-i",
             clean_url,
             "-vn",
@@ -862,7 +880,7 @@ def start_mic_record_process(
             env=env,
             stdin=subprocess.PIPE,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
             text=True,
         )
 
@@ -880,7 +898,7 @@ def start_mic_record_process(
         env=env,
         stdin=subprocess.PIPE,
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
         text=True,
     )
 
@@ -930,6 +948,9 @@ def build_ffmpeg_mic_record_cmd(
             "avfoundation",
             "-i",
             mac_input,
+            "-nostats",
+            "-loglevel",
+            "error",
             *af_args,
             "-ac",
             "1",
@@ -971,6 +992,9 @@ def build_ffmpeg_mic_record_cmd(
             "dshow",
             "-i",
             dshow_input,
+            "-nostats",
+            "-loglevel",
+            "error",
             *af_args,
             "-ac",
             "1",
@@ -994,6 +1018,9 @@ def build_ffmpeg_mic_record_cmd(
         linux_fmt,
         "-i",
         lin_input,
+        "-nostats",
+        "-loglevel",
+        "error",
         *af_args,
         "-ac",
         "1",
@@ -1066,7 +1093,8 @@ def detect_audio_language(
     """Detect spoken language from an audio/video file or existing transcript file."""
     log = log_fn or (lambda _msg: None)
     eff_seconds = float(sample_seconds) if sample_seconds is not None else float(max_seconds)
-    base_dir = Path(__file__).resolve().parent
+    here = Path(__file__).resolve().parent
+    base_dir = here.parent.parent if (here.name == "mote" and here.parent.name == "src") else here
     resolved = resolve_moved_audio_path(input_path, base_dir)
     if not resolved.is_file():
         return {"ok": False, "error": f"Fant ikke filen: {input_path}"}
@@ -1193,6 +1221,7 @@ class _LiveWhisperWorker:
         self._tmp_dir: tempfile.TemporaryDirectory[str] | None = None
         self._proc: subprocess.Popen[str] | None = None
         self._ready = False
+        self._lock = threading.Lock()
 
     def start(self, env: dict[str, str] | None = None, require_whisperx: bool = False) -> bool:
         if self._proc is not None:
@@ -1262,56 +1291,58 @@ class _LiveWhisperWorker:
         detect_language: bool = False,
         stop_event: threading.Event | None = None,
     ) -> dict[str, Any]:
-        proc = self._proc
-        if not proc or proc.poll() is not None or not proc.stdin or not proc.stdout:
+        with self._lock:
+            proc = self._proc
+            if not proc or proc.poll() is not None or not proc.stdin or not proc.stdout:
+                return {}
+            if not self._ready and not self.wait_ready(stop_event=stop_event):
+                return {}
+            req = json.dumps(
+                {
+                    "wav_path": str(wav_path),
+                    "start": start,
+                    "end": end,
+                    "detect_language": bool(detect_language),
+                },
+                ensure_ascii=False,
+            )
+            try:
+                proc.stdin.write(req + "\n")
+                proc.stdin.flush()
+                while stop_event is None or not stop_event.is_set():
+                    line = proc.stdout.readline()
+                    if not line:
+                        break
+                    clean = line.strip()
+                    if clean.startswith("LIVE_RESULT:"):
+                        payload = json.loads(clean[len("LIVE_RESULT:") :])
+                        return dict(payload) if isinstance(payload, dict) else {}
+            except Exception:
+                pass
             return {}
-        if not self._ready and not self.wait_ready(stop_event=stop_event):
-            return {}
-        req = json.dumps(
-            {
-                "wav_path": str(wav_path),
-                "start": start,
-                "end": end,
-                "detect_language": bool(detect_language),
-            },
-            ensure_ascii=False,
-        )
-        try:
-            proc.stdin.write(req + "\n")
-            proc.stdin.flush()
-            while stop_event is None or not stop_event.is_set():
-                line = proc.stdout.readline()
-                if not line:
-                    break
-                clean = line.strip()
-                if clean.startswith("LIVE_RESULT:"):
-                    payload = json.loads(clean[len("LIVE_RESULT:") :])
-                    return dict(payload) if isinstance(payload, dict) else {}
-        except Exception:
-            pass
-        return {}
 
     def close(self) -> None:
-        proc = self._proc
-        self._proc = None
-        self._ready = False
-        if proc and proc.poll() is None:
-            try:
-                if proc.stdin:
-                    proc.stdin.write("QUIT\n")
-                    proc.stdin.flush()
-            except Exception:
-                pass
-            try:
-                proc.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-        if self._tmp_dir is not None:
-            try:
-                self._tmp_dir.cleanup()
-            except Exception:
-                pass
-            self._tmp_dir = None
+        with self._lock:
+            proc = self._proc
+            self._proc = None
+            self._ready = False
+            if proc and proc.poll() is None:
+                try:
+                    if proc.stdin:
+                        proc.stdin.write("QUIT\n")
+                        proc.stdin.flush()
+                except Exception:
+                    pass
+                try:
+                    proc.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+            if self._tmp_dir is not None:
+                try:
+                    self._tmp_dir.cleanup()
+                except Exception:
+                    pass
+                self._tmp_dir = None
 
 
 class LiveAudioMonitor:
@@ -1382,8 +1413,12 @@ class LiveAudioMonitor:
                     log_fn=self.log_fn,
                 )
                 if worker.start():
-                    worker.wait_ready(stop_event=self._stop_event)
                     self._worker = worker
+                    if self._stop_event.is_set():
+                        worker.close()
+                        self._worker = None
+                    else:
+                        worker.wait_ready(stop_event=self._stop_event)
             except Exception as exc:
                 if self.log_fn:
                     self.log_fn(
@@ -1458,31 +1493,36 @@ class LiveAudioMonitor:
 
                                             lvl_chunk = analyze_pcm16_audio_level(pcm_slice, sample_rate)
                                             text = ""
-                                            if (
-                                                self.enable_asr
-                                                and worker is not None
-                                                and lvl_chunk["status"] != "stille"
-                                            ):
-                                                chunk_wav = tmp_path / f"chunk_{chunk_idx:04d}.wav"
-                                                chunk_wav.write_bytes(
-                                                    build_wav_bytes_from_pcm16(pcm_slice, sample_rate)
+                                            if self.enable_asr:
+                                                if (
+                                                    worker is not None
+                                                    and lvl_chunk["status"] != "stille"
+                                                ):
+                                                    chunk_wav = tmp_path / f"chunk_{chunk_idx:04d}.wav"
+                                                    chunk_wav.write_bytes(
+                                                        build_wav_bytes_from_pcm16(pcm_slice, sample_rate)
+                                                    )
+                                                    payload = worker.transcribe(
+                                                        chunk_wav,
+                                                        start=start_s,
+                                                        end=end_s,
+                                                        stop_event=self._stop_event,
+                                                    )
+                                                    text = sanitize_text(str(payload.get("text", "")))
+                                                    chunk_wav.unlink(missing_ok=True)
+                                                line_str = format_live_check_line(
+                                                    start_s,
+                                                    end_s,
+                                                    float(lvl_chunk["rms_dbfs"]),
+                                                    str(lvl_chunk["status"]),
+                                                    text,
                                                 )
-                                                payload = worker.transcribe(
-                                                    chunk_wav,
-                                                    start=start_s,
-                                                    end=end_s,
-                                                    stop_event=self._stop_event,
+                                            else:
+                                                t_range = f"{format_seconds(start_s)}–{format_seconds(end_s)}"
+                                                line_str = (
+                                                    f"[{t_range} | {float(lvl_chunk['rms_dbfs']):.0f} dBFS "
+                                                    f"({lvl_chunk['status']})]"
                                                 )
-                                                text = sanitize_text(str(payload.get("text", "")))
-                                                chunk_wav.unlink(missing_ok=True)
-
-                                            line_str = format_live_check_line(
-                                                start_s,
-                                                end_s,
-                                                float(lvl_chunk["rms_dbfs"]),
-                                                str(lvl_chunk["status"]),
-                                                text,
-                                            )
                                             if self.on_chunk:
                                                 self.on_chunk(line_str, lvl_chunk, text)
                         except Exception:
@@ -1509,7 +1549,8 @@ def run_live_check_on_file(
 ) -> dict[str, Any]:
     """Run coarse chunk-by-chunk real-time transcription and audio quality check on an audio file."""
     log = log_fn or (lambda msg: print(msg, flush=True))
-    base_dir = Path(__file__).resolve().parent
+    here = Path(__file__).resolve().parent
+    base_dir = here.parent.parent if (here.name == "mote" and here.parent.name == "src") else here
     resolved = resolve_moved_audio_path(input_path, base_dir)
     if not resolved.is_file():
         raise FileNotFoundError(f"Fant ikke lydfilen: {input_path}")

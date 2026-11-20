@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ctypes
 import json
+import queue
 import signal
 import subprocess
 import sys
@@ -26,6 +27,8 @@ cf.CFStringGetCString.argtypes = [
     ctypes.c_uint32,
 ]
 cf.CFStringGetCString.restype = ctypes.c_bool
+cf.CFRelease.argtypes = [ctypes.c_void_p]
+cf.CFRelease.restype = None
 
 
 class AudioObjectPropertyAddress(ctypes.Structure):
@@ -50,6 +53,7 @@ def get_cfstr(val_ptr: Any) -> str:
 
 
 selected_uid_ptr: int | None = None
+uid_refs_to_release: list[int] = []
 try:
     addr_devs = AudioObjectPropertyAddress(fourcc("dev#"), fourcc("glob"), 0)
     sz = ctypes.c_uint32(0)
@@ -70,25 +74,17 @@ try:
                 d, ctypes.byref(addr_nm), 0, None, ctypes.byref(sz_p), ctypes.byref(nm_ptr)
             )
             name = get_cfstr(nm_ptr.value)
+            if nm_ptr.value:
+                cf.CFRelease(nm_ptr)
             addr_uid = AudioObjectPropertyAddress(fourcc("uid "), fourcc("glob"), 0)
             uid_ptr = ctypes.c_void_p()
             sz_u = ctypes.c_uint32(ctypes.sizeof(ctypes.c_void_p))
             ca.AudioObjectGetPropertyData(
                 d, ctypes.byref(addr_uid), 0, None, ctypes.byref(sz_u), ctypes.byref(uid_ptr)
             )
+            if uid_ptr.value:
+                uid_refs_to_release.append(uid_ptr.value)
             input_devs.append((d, name, uid_ptr.value))
-            # Reset nominal sample rate to 48000 Hz if left at 96000 Hz by avfoundation
-            addr_sr = AudioObjectPropertyAddress(fourcc("nsrt"), fourcc("glob"), 0)
-            sr = ctypes.c_double(0.0)
-            sz_sr = ctypes.c_uint32(8)
-            ca.AudioObjectGetPropertyData(
-                d, ctypes.byref(addr_sr), 0, None, ctypes.byref(sz_sr), ctypes.byref(sr)
-            )
-            if sr.value > 48000.0:
-                new_sr = ctypes.c_double(48000.0)
-                ca.AudioObjectSetPropertyData(
-                    d, ctypes.byref(addr_sr), 0, None, 8, ctypes.byref(new_sr)
-                )
 
     clean_req = (mic_device or "").strip().lstrip(":")
     if clean_req and clean_req not in ("default", ""):
@@ -103,11 +99,16 @@ try:
                     break
 except Exception:
     pass
+finally:
+    for u_ptr in uid_refs_to_release:
+        if u_ptr and u_ptr != selected_uid_ptr:
+            cf.CFRelease(ctypes.c_void_p(u_ptr))
 
 af_args = ["-af", af_str] if af_str else []
 ff_cmd = [
     ffmpeg_bin,
     "-hide_banner",
+    "-nostats",
     "-loglevel",
     "error",
     "-y",
@@ -135,7 +136,7 @@ ff_cmd = [
     out_wav,
 ]
 ff_proc = subprocess.Popen(
-    ff_cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE
+    ff_cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
 )
 
 
@@ -176,6 +177,23 @@ AudioQueueInputCallback = ctypes.CFUNCTYPE(
 )
 
 stop_evt = threading.Event()
+audio_queue: queue.SimpleQueue[bytes | None] = queue.SimpleQueue()
+
+
+def _ffmpeg_writer() -> None:
+    while True:
+        chunk = audio_queue.get()
+        if chunk is None:
+            break
+        if not ff_proc.stdin:
+            stop_evt.set()
+            break
+        try:
+            ff_proc.stdin.write(chunk)
+            ff_proc.stdin.flush()
+        except Exception:
+            stop_evt.set()
+            break
 
 
 def input_callback(
@@ -189,14 +207,9 @@ def input_callback(
     if stop_evt.is_set():
         return
     buf = in_buffer.contents
-    if buf.mAudioDataByteSize > 0 and ff_proc.stdin:
+    if buf.mAudioDataByteSize > 0:
         raw = ctypes.string_at(buf.mAudioData, buf.mAudioDataByteSize)
-        try:
-            ff_proc.stdin.write(raw)
-            ff_proc.stdin.flush()
-        except Exception:
-            stop_evt.set()
-            return
+        audio_queue.put_nowait(raw)
     if not stop_evt.is_set():
         at.AudioQueueEnqueueBuffer(in_aq, in_buffer, 0, None)
 
@@ -217,6 +230,9 @@ fmt = AudioStreamBasicDescription(
 q = ctypes.c_void_p()
 res = at.AudioQueueNewInput(ctypes.byref(fmt), cb, None, None, None, 0, ctypes.byref(q))
 if res != 0:
+    if selected_uid_ptr:
+        cf.CFRelease(ctypes.c_void_p(selected_uid_ptr))
+        selected_uid_ptr = None
     sys.exit(res)
 
 if selected_uid_ptr:
@@ -224,6 +240,8 @@ if selected_uid_ptr:
     at.AudioQueueSetProperty(
         q, fourcc("aqcd"), ctypes.byref(uid_val), ctypes.sizeof(ctypes.c_void_p)
     )
+    cf.CFRelease(uid_val)
+    selected_uid_ptr = None
 
 bufs = (ctypes.POINTER(AudioQueueBuffer) * 16)()
 for i in range(16):
@@ -250,10 +268,14 @@ def _stdin_watcher() -> None:
     stop_evt.set()
 
 
+writer_thread = threading.Thread(target=_ffmpeg_writer, daemon=True)
+writer_thread.start()
 threading.Thread(target=_stdin_watcher, daemon=True).start()
 
 res = at.AudioQueueStart(q, None)
 if res != 0:
+    audio_queue.put_nowait(None)
+    writer_thread.join(timeout=1.0)
     sys.exit(res)
 
 while not stop_evt.wait(0.05):
@@ -262,6 +284,8 @@ while not stop_evt.wait(0.05):
 
 at.AudioQueueStop(q, True)
 at.AudioQueueDispose(q, True)
+audio_queue.put_nowait(None)
+writer_thread.join(timeout=3.0)
 if ff_proc.stdin:
     try:
         ff_proc.stdin.close()

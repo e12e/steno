@@ -601,7 +601,8 @@ def cli_main(argv: list[str] | None = None) -> int:
         resolved_input = dl_wav
         target_out_dir = out_base
     else:
-        base_dir = Path(__file__).resolve().parent
+        here = Path(__file__).resolve().parent
+        base_dir = here.parent.parent if (here.name == "mote" and here.parent.name == "src") else here
         resolved_input = resolve_moved_audio_path(Path(args.input_file), base_dir)
         target_out_dir = (Path(args.out_dir) if args.out_dir else resolved_input.parent).resolve()
 

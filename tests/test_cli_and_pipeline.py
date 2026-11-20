@@ -1352,6 +1352,73 @@ class TestModularArchitectureAndUtilitarianUX(unittest.TestCase):
             self.assertIn(f"{key}:", en_block, f"Missing English translation key: {key}")
 
 
+class TestAARv030SecurityAndReliabilityFixes(unittest.TestCase):
+    def test_transcript_speaker_filter_no_onclick_xss(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            html_path = Path(td) / "out.html"
+            payload_spk = "O'Brien');alert(1);//"
+            turns = [{"speaker": payload_spk, "start": 0.0, "end": 1.5, "text": "Hei"}]
+            mote_core.build_transcript_html_and_text(
+                turns=turns,
+                speaker_map={payload_spk: payload_spk},
+                html_path=html_path,
+                title="Test",
+            )
+            rendered = html_path.read_text(encoding="utf-8")
+            self.assertIn('onclick="filterBySpeaker(this.dataset.spk)"', rendered)
+            self.assertNotIn("filterBySpeaker('O", rendered)
+            self.assertNotIn("filterBySpeaker(&#x27;", rendered)
+
+    def test_ssrf_cgnat_and_media_url_blocked(self) -> None:
+        self.assertTrue(mote_core._is_disallowed_ip("100.64.0.1"))
+        self.assertTrue(mote_core._is_disallowed_ip("127.0.0.1"))
+        with tempfile.TemporaryDirectory() as td:
+            with self.assertRaises(ValueError):
+                mote_core.download_media_url_audio("http://127.0.0.1:11434/api/tags", Path(td))
+
+    def test_heavy_profile_recommendation_reachable(self) -> None:
+        rec_no = mote_core.recommend_models_for_language("no", ram_gb=16.0, profile="heavy")
+        self.assertEqual(rec_no["profile"], "heavy")
+        self.assertEqual(rec_no["whisper_model"], "NbAiLab/nb-whisper-large")
+        rec_en = mote_core.recommend_models_for_language("en", ram_gb=16.0, profile="heavy")
+        self.assertEqual(rec_en["profile"], "heavy")
+        self.assertEqual(rec_en["whisper_model"], "large-v3")
+
+    def test_list_resumable_sessions_checkpoint_fallback_preserves_stem(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            out_dir = Path(td)
+            ckpt_dir = out_dir / ".mote_checkpoints" / "styremote_2026"
+            ckpt_dir.mkdir(parents=True)
+            (ckpt_dir / "1_asr.json").write_text('{"segments": []}', encoding="utf-8")
+            sessions = mote_core.list_resumable_sessions(out_dir=out_dir, base_dir=out_dir)
+            self.assertEqual(len(sessions), 1)
+            self.assertEqual(sessions[0]["stem"], "styremote_2026")
+            self.assertTrue(sessions[0]["checkpoints"]["s1_asr"])
+            self.assertGreaterEqual(sessions[0]["completed_count"], 1)
+
+    def test_mote_api_concurrency_guards_and_context_url_error_handling(self) -> None:
+        api = mote_gui.MoteApi()
+        api._job_running = True
+        res_job = api.start_job({"audio_path": "/tmp/nonexistent.wav"})
+        self.assertFalse(res_job["ok"])
+        api._job_running = False
+
+        api._mic_test_running = True
+        res_mic = api.test_microphone("default")
+        self.assertFalse(res_mic["ok"])
+        api._mic_test_running = False
+
+        res_url = api.fetch_context_url("http://127.0.0.1/private")
+        self.assertFalse(res_url["ok"])
+        self.assertIn("error", res_url)
+
+    def test_bundled_loader_gates_cwd_sibling_override_and_has_static_ffmpeg(self) -> None:
+        root_dir = Path(__file__).resolve().parent.parent
+        dist_py = (root_dir / "dist" / "steno.py").read_text(encoding="utf-8")
+        self.assertIn("STENO_DEV_TEMPLATES", dist_py)
+        self.assertIn("import static_ffmpeg", dist_py)
+
+
 class TestSyntheticE2E(unittest.TestCase):
     @unittest.skipUnless(
         os.environ.get("RUN_E2E") == "1",

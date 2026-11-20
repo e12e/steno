@@ -85,6 +85,15 @@ def _self_bootstrap_if_needed() -> None:
     try:
         import markdown  # noqa: F401
         import webview  # noqa: F401
+
+        machine = platform.machine().lower()
+        needs_static_ffmpeg = (
+            sys.platform == "darwin"
+            or (sys.platform == "win32" and machine in ("amd64", "x86_64"))
+            or (sys.platform == "linux" and machine in ("x86_64", "amd64"))
+        )
+        if needs_static_ffmpeg:
+            import static_ffmpeg  # noqa: F401
         return
     except ModuleNotFoundError:
         pass
@@ -201,8 +210,6 @@ def generate_single_file_content() -> str:
     from mote.template_loader import assemble_app_html
 
     tpl_app = assemble_app_html()
-    tpl_css = (SRC_DIR / "templates" / "app.css").read_text(encoding="utf-8")
-    tpl_js = (SRC_DIR / "templates" / "app.js").read_text(encoding="utf-8")
     tpl_transcript = (SRC_DIR / "templates" / "transcript.html").read_text(encoding="utf-8")
     tpl_notes = (SRC_DIR / "templates" / "notes.html").read_text(encoding="utf-8")
     tpl_vo_no = (SRC_DIR / "templates" / "voiceover_no.b64").read_text(encoding="utf-8")
@@ -218,10 +225,10 @@ def generate_single_file_content() -> str:
         BOOTSTRAP_CODE,
         f"""
 # --- EMBEDDED TEMPLATES & RUNNERS ---
+import os as _steno_os
+
 _EMBEDDED_TEMPLATES: dict[str, str] = {{
     "app.html": {tpl_app!r},
-    "app.css": {tpl_css!r},
-    "app.js": {tpl_js!r},
     "transcript.html": {tpl_transcript!r},
     "notes.html": {tpl_notes!r},
     "voiceover_no.b64": {tpl_vo_no!r},
@@ -232,22 +239,24 @@ _EMBEDDED_RUNNERS: dict[str, str] = {embedded_runners!r}
 
 
 def load_template(name: str, fallback: str = "") -> str:
-    tpl_file = Path(__file__).resolve().parent / "templates" / name
-    if tpl_file.is_file():
-        try:
-            return tpl_file.read_text(encoding="utf-8")
-        except Exception:
-            pass
+    if _steno_os.environ.get("STENO_DEV_TEMPLATES") == "1":
+        tpl_file = Path(__file__).resolve().parent / "templates" / name
+        if tpl_file.is_file():
+            try:
+                return tpl_file.read_text(encoding="utf-8")
+            except Exception:
+                pass
     return _EMBEDDED_TEMPLATES.get(name, fallback)
 
 
 def load_runner(name: str, fallback: str = "") -> str:
-    runner_file = Path(__file__).resolve().parent / "runners" / name
-    if runner_file.is_file():
-        try:
-            return runner_file.read_text(encoding="utf-8")
-        except Exception:
-            pass
+    if _steno_os.environ.get("STENO_DEV_TEMPLATES") == "1":
+        runner_file = Path(__file__).resolve().parent / "runners" / name
+        if runner_file.is_file():
+            try:
+                return runner_file.read_text(encoding="utf-8")
+            except Exception:
+                pass
     return _EMBEDDED_RUNNERS.get(name, fallback)
 
 
@@ -293,7 +302,7 @@ def generate_cosmopolitan_ape_binary(py_content: str | None = None) -> bytes:
         b'STENO_APP_DIR="${STENO_INSTALL_DIR:-$HOME/.local/share/steno}"\n'
         b'mkdir -p "$STENO_APP_DIR"\n'
         b'STENO_CACHE_PY="$STENO_APP_DIR/steno.py"\n'
-        b'LC_ALL=C sed -n "/^# === STENO_PAYLOAD_BEGIN ===$/,\\$p" "$0" > "$STENO_CACHE_PY.tmp" && mv "$STENO_CACHE_PY.tmp" "$STENO_CACHE_PY"\n'
+        b'LC_ALL=C sed -n "/^# === STENO_PAYLOAD_BEGIN ===$/,\\$p" "$0" > "$STENO_CACHE_PY.$$.tmp" && mv "$STENO_CACHE_PY.$$.tmp" "$STENO_CACHE_PY"\n'
         b'chmod 0755 "$STENO_CACHE_PY"\n'
         b'SH_BIN="/bin/sh"\n'
         b'if [ -n "${PREFIX:-}" ] && [ -x "$PREFIX/bin/sh" ]; then SH_BIN="$PREFIX/bin/sh"\n'

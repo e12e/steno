@@ -229,11 +229,30 @@ def load_turns_from_transcript_file(path: Path) -> tuple[list[TurnDict], dict[st
     return parse_transcript_text(raw_text, path.suffix.lower())
 
 
+_MAX_UNCOMPRESSED_CONTEXT_BYTES = 50 * 1024 * 1024
+
+
+def _read_zip_member_bounded(zf: zipfile.ZipFile, name: str, remaining_bytes: int) -> bytes:
+    """Read a zip member while enforcing a strict upper bound on decompressed bytes."""
+    if remaining_bytes <= 0:
+        raise ValueError(
+            "Utpakket kontekstfil overstiger maks størrelse / Decompressed context exceeds size limit."
+        )
+    with zf.open(name, "r") as fp:
+        data = fp.read(remaining_bytes + 1)
+    if len(data) > remaining_bytes:
+        raise ValueError(
+            "Utpakket kontekstfil overstiger maks størrelse / Decompressed context exceeds size limit."
+        )
+    return data
+
+
 def extract_context_from_file(path: Path) -> str:
     """Extract readable text from .pptx, .docx, .odp, .odt, .pdf, .md, .txt, .html, .json, or .csv."""
     ext = path.suffix.lower()
     if ext == ".pptx":
         slides_out: list[str] = []
+        remaining = _MAX_UNCOMPRESSED_CONTEXT_BYTES
         with zipfile.ZipFile(path, "r") as zf:
             names = zf.namelist()
             slide_files = sorted(
@@ -241,7 +260,8 @@ def extract_context_from_file(path: Path) -> str:
                 key=lambda s: int(re.search(r"(\d+)", s).group(1)),  # type: ignore[union-attr]
             )
             for idx, s_name in enumerate(slide_files, start=1):
-                xml_bytes = zf.read(s_name)
+                xml_bytes = _read_zip_member_bounded(zf, s_name, remaining)
+                remaining -= len(xml_bytes)
                 root = ET.fromstring(xml_bytes)
                 paras: list[str] = []
                 for p_elem in root.iter():
@@ -255,7 +275,9 @@ def extract_context_from_file(path: Path) -> str:
                             paras.append(" ".join(runs))
                 note_name = f"ppt/notesSlides/notesSlide{idx}.xml"
                 if note_name in names:
-                    n_root = ET.fromstring(zf.read(note_name))
+                    note_bytes = _read_zip_member_bounded(zf, note_name, remaining)
+                    remaining -= len(note_bytes)
+                    n_root = ET.fromstring(note_bytes)
                     n_runs = [
                         t_elem.text.strip()
                         for t_elem in n_root.iter()
@@ -271,7 +293,10 @@ def extract_context_from_file(path: Path) -> str:
         paras_out: list[str] = []
         with zipfile.ZipFile(path, "r") as zf:
             if "word/document.xml" in zf.namelist():
-                root = ET.fromstring(zf.read("word/document.xml"))
+                doc_bytes = _read_zip_member_bounded(
+                    zf, "word/document.xml", _MAX_UNCOMPRESSED_CONTEXT_BYTES
+                )
+                root = ET.fromstring(doc_bytes)
                 for p_elem in root.iter():
                     if p_elem.tag.endswith("}p"):
                         runs = [
@@ -288,7 +313,10 @@ def extract_context_from_file(path: Path) -> str:
         paras_out = []
         with zipfile.ZipFile(path, "r") as zf:
             if "content.xml" in zf.namelist():
-                root = ET.fromstring(zf.read("content.xml"))
+                content_bytes = _read_zip_member_bounded(
+                    zf, "content.xml", _MAX_UNCOMPRESSED_CONTEXT_BYTES
+                )
+                root = ET.fromstring(content_bytes)
                 for elem in root.iter():
                     if elem.tag.endswith("}p") or elem.tag.endswith("}h"):
                         txt = "".join(elem.itertext()).strip()
@@ -322,10 +350,23 @@ def extract_context_from_file(path: Path) -> str:
                 pass
         raw_bytes = path.read_bytes()
         extracted_chunks: list[str] = []
+        remaining_pdf = _MAX_UNCOMPRESSED_CONTEXT_BYTES
         for m in re.finditer(rb"stream[\r\n]+(.*?)[\r\n]+endstream", raw_bytes, flags=re.DOTALL):
+            if remaining_pdf <= 0:
+                raise ValueError(
+                    "Utpakket PDF-strøm overstiger maks størrelse / Decompressed PDF stream exceeds size limit."
+                )
             stream_data = m.group(1)
             try:
-                decompressed = zlib.decompress(stream_data)
+                dobj = zlib.decompressobj()
+                decompressed = dobj.decompress(stream_data, remaining_pdf + 1)
+                if len(decompressed) > remaining_pdf or dobj.unconsumed_tail:
+                    raise ValueError(
+                        "Utpakket PDF-strøm overstiger maks størrelse / Decompressed PDF stream exceeds size limit."
+                    )
+                remaining_pdf -= len(decompressed)
+            except ValueError:
+                raise
             except Exception:
                 continue
             for tm in re.finditer(rb"\(([^()\\]*(?:\\.[^()\\]*)*)\)\s*Tj", decompressed):
@@ -372,7 +413,8 @@ def _is_disallowed_ip(addr_str: str) -> bool:
     try:
         ip = ipaddress.ip_address(addr_str.split("%", 1)[0])
         return bool(
-            ip.is_private
+            not ip.is_global
+            or ip.is_private
             or ip.is_loopback
             or ip.is_link_local
             or ip.is_multicast
@@ -403,8 +445,10 @@ def _validate_public_http_url(url: str) -> None:
                 raise ValueError(
                     f"Blokkert lokal/privat DNS-oppslag / Blocked non-public resolved IP for {host}"
                 )
-    except socket.gaierror:
-        pass
+    except socket.gaierror as exc:
+        raise ValueError(
+            f"Kunne ikke slå opp vertsnavn / Failed to resolve host: {host}"
+        ) from exc
 
 
 def _resolve_url_validator() -> Callable[[str], None]:

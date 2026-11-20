@@ -122,6 +122,9 @@ class MoteApi:
         self._cancel_requested: bool = False
         self._log_lines: list[str] = []
         self._last_waveform_emit: float = 0.0
+        self._state_lock: threading.Lock = threading.Lock()
+        self._job_running: bool = False
+        self._mic_test_running: bool = False
 
     def _emit(self, event_type: str, payload: Any) -> None:
         win = self.window
@@ -384,27 +387,46 @@ class MoteApi:
             eff_whisper = whisper_model
             eff_lang = language
 
-        def _worker_fn() -> None:
-            run_mic_test(
-                mic_device=eff_dev,
-                gain_db=eff_gain,
-                auto_gain=eff_auto,
-                duration_sec=eff_dur,
-                whisper_model=eff_whisper,
-                language=eff_lang,
-                on_state=self._emit_mic_test_state,
-                on_level=self._on_live_level,
-                on_waveform=self._on_live_waveform,
-                on_audio_ready=self._set_rec_path,
-                log_fn=self._log,
-            )
+        with self._state_lock:
+            if self._mic_test_running:
+                return {"ok": False, "error": "Mikrofontest pågår allerede."}
+            self._mic_test_running = True
 
-        threading.Thread(target=_worker_fn, daemon=True).start()
+        def _worker_fn() -> None:
+            try:
+                run_mic_test(
+                    mic_device=eff_dev,
+                    gain_db=eff_gain,
+                    auto_gain=eff_auto,
+                    duration_sec=eff_dur,
+                    whisper_model=eff_whisper,
+                    language=eff_lang,
+                    on_state=self._emit_mic_test_state,
+                    on_level=self._on_live_level,
+                    on_waveform=self._on_live_waveform,
+                    on_audio_ready=self._set_rec_path,
+                    log_fn=self._log,
+                )
+            finally:
+                with self._state_lock:
+                    self._mic_test_running = False
+
+        try:
+            threading.Thread(target=_worker_fn, daemon=True).start()
+        except Exception as exc:
+            with self._state_lock:
+                self._mic_test_running = False
+            return {"ok": False, "error": str(exc)}
         return {"ok": True}
 
     def fetch_context_url(self, url: str) -> dict[str, Any]:
         """Download and extract agenda, slides, or draft notes text from a remote URL or shared document link."""
-        res = fetch_context_from_url(url)
+        try:
+            res = fetch_context_from_url(url)
+        except Exception as exc:
+            err_msg = str(exc)
+            self._log(f"==> Kunne ikke hente kontekst fra lenke: {err_msg}")
+            return {"ok": False, "error": err_msg}
         if res.get("ok"):
             txt = str(res.get("text", ""))
             src = str(res.get("source_name", url))
@@ -1032,7 +1054,7 @@ class MoteApi:
         note_mode: str = "auto",
         task_mode: str = "auto_resume",
         manual_notes_text: str = "",
-    ) -> None:
+    ) -> dict[str, Any]:
         if isinstance(audio_path, dict):
             cfg = audio_path
             args_tuple = (
@@ -1074,11 +1096,21 @@ class MoteApi:
                 task_mode,
                 manual_notes_text,
             )
-        threading.Thread(
-            target=self._worker,
-            args=args_tuple,
-            daemon=True,
-        ).start()
+        with self._state_lock:
+            if self._job_running:
+                return {"ok": False, "error": "En jobb kjører allerede."}
+            self._job_running = True
+        try:
+            threading.Thread(
+                target=self._worker,
+                args=args_tuple,
+                daemon=True,
+            ).start()
+        except Exception as exc:
+            with self._state_lock:
+                self._job_running = False
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True}
 
     def _log(self, msg: str) -> None:
         self._log_lines.append(msg)
@@ -1186,6 +1218,8 @@ class MoteApi:
                 self._auto_save_error_log(out_dir, clean_base_stem(audio_path) or "mote")
         finally:
             self._active_proc = None
+            with self._state_lock:
+                self._job_running = False
             self._set_running(False)
             self._refresh_checkpoints_ui()
 

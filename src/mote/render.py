@@ -300,7 +300,7 @@ def build_transcript_html_and_text(
         )
 
     speaker_filters = "".join(
-        f'<button class="spk-filter-btn" data-spk="{html.escape(spk)}" onclick="filterBySpeaker(\'{html.escape(spk)}\')">'
+        f'<button class="spk-filter-btn" data-spk="{html.escape(spk)}" onclick="filterBySpeaker(this.dataset.spk)">'
         f'  <span class="dot" style="background:{col}"></span>'
         f'  <span data-spk-btn-label="{html.escape(spk)}">{html.escape(speaker_map.get(spk, spk))}</span>'
         f'</button>'

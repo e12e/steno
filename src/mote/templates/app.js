@@ -1006,10 +1006,35 @@ async function fetchMediaFromInput() {
     return;
   }
   const outDir = el("out_dir") ? el("out_dir").value : "";
-  const res = await window.pywebview.api.fetch_media_url(val, outDir);
-  if (res && res.audio_path) {
-    applySuggestedAudioState(res);
-    inp.value = "";
+  try {
+    const res = await window.pywebview.api.fetch_media_url(val, outDir);
+    if (res && res.audio_path) {
+      inp.setAttribute("aria-invalid", "false");
+      if (err) {
+        err.textContent = "";
+        err.classList.add("hidden");
+      }
+      applySuggestedAudioState(res);
+      inp.value = "";
+    } else if (res && res.error) {
+      const msg = String(res.error);
+      inp.setAttribute("aria-invalid", "true");
+      if (err) {
+        err.textContent = msg;
+        err.classList.remove("hidden");
+      }
+      appendLogLine("FEIL (media-URL): " + msg);
+      announceStatus(msg);
+    }
+  } catch (exc) {
+    const msg = String(exc && exc.message ? exc.message : exc);
+    inp.setAttribute("aria-invalid", "true");
+    if (err) {
+      err.textContent = msg;
+      err.classList.remove("hidden");
+    }
+    appendLogLine("FEIL (media-URL): " + msg);
+    announceStatus(msg);
   }
 }
 
@@ -1046,7 +1071,10 @@ async function refreshResumableSessions() {
 
 async function loadResumableSession(audioPath) {
   if (!hasApi() || !audioPath) return;
-  const outDir = el("out_dir") ? el("out_dir").value : "";
+  const s = Array.isArray(UX_STATE_MACHINE.resumableSessions)
+    ? UX_STATE_MACHINE.resumableSessions.find((item) => item && item.audio_path === audioPath)
+    : null;
+  const outDir = (s && s.out_dir) || (el("out_dir") ? el("out_dir").value : "");
   const res = await window.pywebview.api.suggest_output_names(audioPath, outDir);
   if (res && res.audio_path) applySuggestedAudioState(res);
 }
@@ -1209,11 +1237,36 @@ async function fetchContextFromLink() {
     }
     return;
   }
-  const res = await window.pywebview.api.fetch_context_url(url);
-  if (res && res.ok && res.text && el("agenda_text")) {
-    el("agenda_text").value = (el("agenda_text").value ? el("agenda_text").value + "\n\n" : "") + res.text;
-    setContextAvailability(true);
-    inp.value = "";
+  try {
+    const res = await window.pywebview.api.fetch_context_url(url);
+    if (res && res.ok && res.text && el("agenda_text")) {
+      inp.setAttribute("aria-invalid", "false");
+      if (err) {
+        err.textContent = "";
+        err.classList.add("hidden");
+      }
+      el("agenda_text").value = (el("agenda_text").value ? el("agenda_text").value + "\n\n" : "") + res.text;
+      setContextAvailability(true);
+      inp.value = "";
+    } else if (res && res.error) {
+      const msg = String(res.error);
+      inp.setAttribute("aria-invalid", "true");
+      if (err) {
+        err.textContent = msg;
+        err.classList.remove("hidden");
+      }
+      appendLogLine("FEIL (kontekst-URL): " + msg);
+      announceStatus(msg);
+    }
+  } catch (exc) {
+    const msg = String(exc && exc.message ? exc.message : exc);
+    inp.setAttribute("aria-invalid", "true");
+    if (err) {
+      err.textContent = msg;
+      err.classList.remove("hidden");
+    }
+    appendLogLine("FEIL (kontekst-URL): " + msg);
+    announceStatus(msg);
   }
 }
 
@@ -1666,8 +1719,16 @@ async function initStenoApp() {
       }
       UX_STATE_MACHINE.audioInputs = Array.isArray(defaults.audio_inputs) ? defaults.audio_inputs : [];
       UX_STATE_MACHINE.resumableSessions = Array.isArray(defaults.resumable_sessions) ? defaults.resumable_sessions : [];
-      if (defaults.system_input_volume !== null && defaults.system_input_volume !== undefined && el("sys_mic_vol")) {
-        el("sys_mic_vol").value = String(defaults.system_input_volume);
+      const sysVolEl = el("sys_mic_vol");
+      if (defaults.system_input_volume !== null && defaults.system_input_volume !== undefined && sysVolEl) {
+        if (typeof defaults.system_input_volume === "object") {
+          if (defaults.system_input_volume.volume !== null && defaults.system_input_volume.volume !== undefined) {
+            sysVolEl.value = String(defaults.system_input_volume.volume);
+          }
+          sysVolEl.disabled = defaults.system_input_volume.supported === false;
+        } else {
+          sysVolEl.value = String(defaults.system_input_volume);
+        }
       }
 
       UX_STATE_MACHINE.audioLang = defaults.audio_language || "no";

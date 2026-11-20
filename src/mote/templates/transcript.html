@@ -507,11 +507,15 @@
 
     function renameSpeaker(orig, newName, skipSave) {{
       const label = newName.trim() || orig;
-      document.querySelectorAll(`[data-spk-label="${{orig}}"]`).forEach(el => {{
-        el.textContent = label;
+      document.querySelectorAll('[data-spk-label]').forEach(el => {{
+        if (el.dataset.spkLabel === orig) {{
+          el.textContent = label;
+        }}
       }});
-      document.querySelectorAll(`[data-spk-btn-label="${{orig}}"]`).forEach(el => {{
-        el.textContent = label;
+      document.querySelectorAll('[data-spk-btn-label]').forEach(el => {{
+        if (el.dataset.spkBtnLabel === orig) {{
+          el.textContent = label;
+        }}
       }});
       if (!skipSave) {{
         try {{

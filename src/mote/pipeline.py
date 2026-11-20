@@ -266,6 +266,7 @@ def generate_notes_via_api(
     note_mode: str = "mote",
     manual_notes_text: str = "",
     language: str = "no",
+    cancel_check_fn: Callable[[], bool] | None = None,
 ) -> str:
     """Use Ollama HTTP /api/chat with streaming to generate meeting minutes or lecture notes."""
     detected_list = ", ".join(sorted(set(speaker_map.values())))
@@ -422,6 +423,8 @@ def generate_notes_via_api(
 
     with urllib.request.urlopen(req, timeout=900) as resp:
         for raw_line in resp:
+            if cancel_check_fn is not None and cancel_check_fn():
+                break
             if not raw_line.strip():
                 continue
             body = json.loads(raw_line.decode("utf-8", errors="replace"))
@@ -539,21 +542,36 @@ def list_resumable_sessions(
                     if f.is_file() and f.suffix.lower() in audio_exts and clean_base_stem(f) == stem:
                         input_file = f
                         break
+            is_ckpt_fallback = False
             if input_file is None:
                 trans_cand = folder / f"{stem}_transkripsjon.html"
                 if trans_cand.is_file():
                     input_file = trans_cand
                 elif (ckpt_dir / "4_speakers.json").is_file():
                     input_file = ckpt_dir / "4_speakers.json"
+                    is_ckpt_fallback = True
                 elif (ckpt_dir / "3_diarize.json").is_file():
                     input_file = ckpt_dir / "3_diarize.json"
+                    is_ckpt_fallback = True
                 elif (ckpt_dir / "1_asr.json").is_file():
                     input_file = ckpt_dir / "1_asr.json"
+                    is_ckpt_fallback = True
 
             if input_file is None or not input_file.is_file():
                 continue
 
-            status = get_checkpoint_status_dict(folder, input_file)
+            if is_ckpt_fallback:
+                status = get_checkpoint_status_dict(
+                    folder,
+                    folder / f"{stem}.wav",
+                    html_name=f"{stem}_transkripsjon.html",
+                    notes_name=f"{stem}_referat.md",
+                    notes_html_name=f"{stem}_referat.html",
+                )
+                status["has_input"] = input_file.is_file()
+                status["is_transcript_input"] = is_transcript_file(input_file)
+            else:
+                status = get_checkpoint_status_dict(folder, input_file)
             completed = sum(
                 1 for k in ("s1_asr", "s2_align", "s3_diarize", "s4_names", "s5_notes") if status.get(k)
             )
@@ -650,7 +668,8 @@ def run_pipeline(
     log = log_fn or _default_log
     prog = progress_fn or _default_progress
 
-    base_dir = Path(__file__).resolve().parent
+    here = Path(__file__).resolve().parent
+    base_dir = here.parent.parent if (here.name == "mote" and here.parent.name == "src") else here
     resolved_input = resolve_moved_audio_path(input_path, base_dir)
     if not resolved_input.is_file():
         raise FileNotFoundError(f"Fant ikke inndatafilen: {input_path}")
@@ -964,14 +983,35 @@ def run_pipeline(
         turns = extract_turns_from_whisperx(source_json)
 
     doc_title = meeting_title.strip() or stem
-    effective_mode = resolve_effective_note_mode(note_mode, min_spk_str, max_spk_str, speaker_map)
+
+    def _cancelled_result(eff_mode: str) -> PipelineResult:
+        if on_checkpoint_fn is not None:
+            on_checkpoint_fn()
+        return {
+            "ok": False,
+            "input_path": resolved_input,
+            "out_dir": target_out_dir,
+            "ckpt_dir": ckpt_dir,
+            "html_path": html_path,
+            "notes_path": notes_path,
+            "notes_html_path": notes_html_path,
+            "executed_stages": executed_stages,
+            "effective_mode": eff_mode,
+            "speaker_map": speaker_map,
+            "turn_count": len(turns),
+        }
 
     with managed_ollama_server(log, prog, env=env) as ollama_bin:
         installed = fetch_ollama_models() or []
         if ollama_model not in installed and f"{ollama_model}:latest" not in installed:
+            if cancel_check_fn is not None and cancel_check_fn():
+                return _cancelled_result(note_mode)
             prog(75, f"Laster ned {ollama_model}...")
             log(f"==> Laster ned '{ollama_model}'...")
             subprocess.run([ollama_bin, "pull", ollama_model], env=env, check=True)
+
+        if cancel_check_fn is not None and cancel_check_fn():
+            return _cancelled_result(note_mode)
 
         if run_s4:
             prog(78, "[Steg 4/5] Gjenkjenner deltakernavn og titler...")
@@ -987,7 +1027,10 @@ def run_pipeline(
                 language=effective_language,
             )
             merged_map = dict(speaker_map)
-            merged_map.update(inferred_map)
+            for spk_id, resolved_name in inferred_map.items():
+                if resolved_name == spk_id and spk_id in merged_map and merged_map[spk_id] != spk_id:
+                    continue
+                merged_map[spk_id] = resolved_name
             speaker_map = merged_map
             for spk_id, resolved_name in speaker_map.items():
                 if resolved_name != spk_id:
@@ -1033,6 +1076,9 @@ def run_pipeline(
                 "turn_count": len(turns),
             }
 
+        if cancel_check_fn is not None and cancel_check_fn():
+            return _cancelled_result(effective_mode)
+
         mode_desc = (
             "foredragsnotater (1-talers modus / faglige hovedpoenger)"
             if effective_mode == "foredrag"
@@ -1067,7 +1113,10 @@ def run_pipeline(
             note_mode=effective_mode,
             manual_notes_text=combined_manual_notes,
             language=effective_language,
+            cancel_check_fn=cancel_check_fn,
         )
+        if cancel_check_fn is not None and cancel_check_fn():
+            return _cancelled_result(effective_mode)
         notes_path.write_text(notes_md + "\n", encoding="utf-8")
         prog(99, "Bygger HTML-utgave av referat/notater...")
         build_notes_html(notes_md, notes_html_path, doc_title)

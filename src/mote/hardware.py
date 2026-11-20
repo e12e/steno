@@ -265,6 +265,8 @@ def uninstall_steno_app(
             "models--NbAiLab--nb-wav2vec2-",
             "models--pyannote--",
             "models--Systran--faster-whisper-",
+            "models--mobiuslabsgmbh--",
+            "models--UlrikKoren--",
         )
         for child in sorted(hf_hub_dir.iterdir()):
             if child.name.startswith(steno_hf_prefixes) and child.is_dir():
@@ -339,7 +341,11 @@ def recommend_models_for_language(
     ('small', 'llama3.2:latest')
     """
     norm_lang = normalize_audio_language(language)
-    eff_prof = profile if profile in ("recommended", "light", "standard", "fast", "quality", "custom") else "recommended"
+    eff_prof = (
+        profile
+        if profile in ("recommended", "light", "standard", "fast", "quality", "heavy", "custom")
+        else "recommended"
+    )
     if ram_gb < 11.5 and eff_prof == "recommended":
         eff_prof = "light"
 
@@ -453,7 +459,7 @@ def detect_hardware_resources(target_dir: Path | None = None, language: str = "n
                     ("ullAvailPageFile", ctypes.c_ulonglong),
                     ("ullTotalVirtual", ctypes.c_ulonglong),
                     ("ullAvailVirtual", ctypes.c_ulonglong),
-                    ("sullAvailExtendedVirtual", ctypes.c_ulonglong),
+                    ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
                 ]
 
             stat_ex = MEMORYSTATUSEX()
@@ -688,6 +694,49 @@ def evaluate_model_resource_fit(
     }
 
 
+def _download_file(url: str, dest: Path, timeout: int = 120, chunk_size: int = 65536) -> None:
+    """Download a remote URL to disk in streaming chunks with an explicit socket timeout."""
+    with urllib.request.urlopen(url, timeout=timeout) as resp, dest.open("wb") as out_fp:
+        while True:
+            chunk = resp.read(chunk_size)
+            if not chunk:
+                break
+            out_fp.write(chunk)
+
+
+def _safe_extract_tar(tf: tarfile.TarFile, dest: Path) -> None:
+    """Extract a tar archive safely using filter='data' with path-validation fallback."""
+    dest_resolved = dest.resolve()
+    try:
+        tf.extractall(dest, filter="data")
+        return
+    except TypeError:
+        pass
+    for member in tf.getmembers():
+        if member.issym() or member.islnk() or member.isdev():
+            raise ValueError(f"Unsafe tar member type: {member.name}")
+        member_path = (dest / member.name).resolve()
+        if member_path != dest_resolved and dest_resolved not in member_path.parents:
+            raise ValueError(f"Unsafe tar member path: {member.name}")
+    tf.extractall(dest)
+
+
+def _safe_extract_zip(zf: zipfile.ZipFile, dest: Path) -> None:
+    """Validate zip member paths against absolute paths and '..' traversal before extracting."""
+    dest_resolved = dest.resolve()
+    for info in zf.infolist():
+        name = info.filename
+        if name.startswith(("/", "\\")) or Path(name).is_absolute():
+            raise ValueError(f"Unsafe zip member path (absolute): {name}")
+        parts = Path(name.replace("\\", "/")).parts
+        if ".." in parts:
+            raise ValueError(f"Unsafe zip member path (traversal): {name}")
+        target_path = (dest / name).resolve()
+        if target_path != dest_resolved and dest_resolved not in target_path.parents:
+            raise ValueError(f"Unsafe zip member path (escapes destination): {name}")
+    zf.extractall(dest)
+
+
 def ensure_ffmpeg(env: dict[str, str], log_fn: Callable[[str], None]) -> str:
     found = shutil.which("ffmpeg", path=env["PATH"])
     if found:
@@ -722,9 +771,9 @@ def ensure_ffmpeg(env: dict[str, str], log_fn: Callable[[str], None]) -> str:
             with tempfile.TemporaryDirectory(prefix="ffmpeg_dl_") as tmp:
                 tmp_path = Path(tmp)
                 archive = tmp_path / "ffmpeg.tar.xz"
-                urllib.request.urlretrieve(url, archive)
+                _download_file(url, archive)
                 with tarfile.open(archive, "r:xz") as tf:
-                    tf.extractall(tmp_path)
+                    _safe_extract_tar(tf, tmp_path)
                 for cand in tmp_path.rglob("ffmpeg"):
                     if cand.is_file():
                         target = LOCAL_BIN_DIR / "ffmpeg"
@@ -912,9 +961,9 @@ def ensure_ollama_binary(
         if sys.platform == "darwin":
             url = "https://ollama.com/download/Ollama-darwin.zip"
             archive = tmp_path / "Ollama-darwin.zip"
-            urllib.request.urlretrieve(url, archive)
+            _download_file(url, archive)
             with zipfile.ZipFile(archive, "r") as zf:
-                zf.extractall(tmp_path)
+                _safe_extract_zip(zf, tmp_path)
             src = tmp_path / "Ollama.app" / "Contents" / "Resources" / "ollama"
             target = LOCAL_BIN_DIR / "ollama"
             shutil.copy2(src, target)
@@ -923,9 +972,9 @@ def ensure_ollama_binary(
         if sys.platform.startswith("linux"):
             url = f"https://ollama.com/download/ollama-linux-{arch}.tgz"
             archive = tmp_path / "ollama.tgz"
-            urllib.request.urlretrieve(url, archive)
+            _download_file(url, archive)
             with tarfile.open(archive, "r:gz") as tf:
-                tf.extractall(tmp_path)
+                _safe_extract_tar(tf, tmp_path)
             src = tmp_path / "bin" / "ollama"
             if not src.is_file():
                 src = next((c for c in tmp_path.rglob("ollama") if c.is_file()), src)
@@ -936,9 +985,9 @@ def ensure_ollama_binary(
         if os.name == "nt":
             url = f"https://ollama.com/download/ollama-windows-{arch}.zip"
             archive = tmp_path / "ollama.zip"
-            urllib.request.urlretrieve(url, archive)
+            _download_file(url, archive)
             with zipfile.ZipFile(archive, "r") as zf:
-                zf.extractall(LOCAL_BIN_DIR)
+                _safe_extract_zip(zf, LOCAL_BIN_DIR)
             for candidate in LOCAL_BIN_DIR.rglob("ollama.exe"):
                 return str(candidate)
     raise RuntimeError("Klarte ikke å installere Ollama automatisk.")
