@@ -196,7 +196,7 @@ def install_steno_app(
                 "  <key>CFBundleName</key><string>Steno</string>\n"
                 "  <key>CFBundleDisplayName</key><string>Steno</string>\n"
                 "  <key>CFBundleIdentifier</key><string>net.hypertekst.steno</string>\n"
-                "  <key>CFBundleVersion</key><string>0.3.0</string>\n"
+                "  <key>CFBundleVersion</key><string>0.3.1</string>\n"
                 "  <key>CFBundlePackageType</key><string>APPL</string>\n"
                 "  <key>CFBundleExecutable</key><string>Steno</string>\n"
                 "</dict></plist>\n",

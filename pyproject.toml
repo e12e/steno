@@ -1,6 +1,6 @@
 [project]
 name = "steno"
-version = "0.3.0"
+version = "0.3.1"
 description = "Steno - a modern annalist for your meetings - an automaton stenographer."
 readme = "README.md"
 license = { file = "LICENSE" }
